@@ -17,9 +17,6 @@ RUN rm -rf /usr/share/nginx/html/*
 # Create UI directory
 RUN mkdir -p /usr/share/nginx/html/ui
 
-# Copy nginx configuration
-COPY generated-nginx.conf /etc/nginx/conf.d/default.conf
-
 # Copy proxy parameters file
 COPY proxy_params.conf /etc/nginx/proxy_params.conf
 

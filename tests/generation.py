@@ -289,7 +289,7 @@ class PolyLlamaGenerationTest:
 tester = PolyLlamaGenerationTest()
 
 
-def test_two_gpu_groups():
+def two_gpu_groups():
     """Test two GPU groups configuration"""
     assert tester.run_test(
         gpu_config={
@@ -303,7 +303,7 @@ def test_two_gpu_groups():
     )
 
 
-def test_three_gpu_groups():
+def three_gpu_groups():
     """Test three GPU groups configuration"""
     assert tester.run_test(
         gpu_config={
@@ -318,7 +318,7 @@ def test_three_gpu_groups():
     )
 
 
-def test_single_gpu_group():
+def single_gpu_group():
     """Test single GPU group configuration"""
     assert tester.run_test(
         gpu_config={"gpu_groups": [{"name": "RTX 4090", "indices": [0, 1, 2, 3]}]},
@@ -327,7 +327,7 @@ def test_single_gpu_group():
     )
 
 
-def test_cpu_only():
+def cpu_only():
     """Test CPU-only configuration"""
     assert tester.run_test(
         gpu_config={"gpu_groups": []},
@@ -336,7 +336,7 @@ def test_cpu_only():
     )
 
 
-def test_mixed_gpu_types():
+def mixed_gpu_types():
     """Test mixed GPU types configuration"""
     assert tester.run_test(
         gpu_config={
@@ -352,7 +352,7 @@ def test_mixed_gpu_types():
     )
 
 
-def test_large_configuration():
+def large_configuration():
     """Test large configuration with 6 groups"""
     assert tester.run_test(
         gpu_config={
@@ -368,52 +368,3 @@ def test_large_configuration():
         test_name="Large configuration (6 groups)",
         expected_instances=6,
     )
-
-
-def main():
-    """Run all tests - for standalone execution"""
-    print("🚀 Starting PolyLlama Generation Tests")
-    print("=" * 50)
-
-    # Run pytest test functions
-    test_two_gpu_groups()
-    test_three_gpu_groups()
-    test_single_gpu_group()
-    test_cpu_only()
-    test_mixed_gpu_types()
-    test_large_configuration()
-
-    # Summary
-    print("\n" + "=" * 50)
-    print("📊 Test Results Summary")
-    print("=" * 50)
-
-    total_tests = len(tester.test_results)
-    passed_tests = sum(1 for result in tester.test_results if result["success"])
-    failed_tests = total_tests - passed_tests
-
-    print(f"Total Tests: {total_tests}")
-    print(f"Passed: {passed_tests} ✅")
-    print(f"Failed: {failed_tests} ❌")
-
-    if failed_tests > 0:
-        print("\n🚨 Failed Tests:")
-        for result in tester.test_results:
-            if not result["success"]:
-                print(f"  - {result['test_name']}")
-                for msg in result["messages"]:
-                    print(f"    • {msg}")
-
-    success_rate = (passed_tests / total_tests) * 100
-    print(f"\nSuccess Rate: {success_rate:.1f}%")
-
-    if success_rate == 100:
-        print("🎉 All tests passed!")
-        return 0
-    else:
-        print("❌ Some tests failed!")
-        return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())

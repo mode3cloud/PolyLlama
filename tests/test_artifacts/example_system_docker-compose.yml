@@ -22,10 +22,9 @@ services:
       - olah_data_repos:/app/repos
       - olah_data_mirrors:/app/mirrors
   
-{% for instance in ollama_instances %}
-  polyllama{{ instance.number }}:
-    container_name: polyllama{{ instance.number }}
-    hostname: polyllama{{ instance.number }}
+  polyllama1:
+    container_name: polyllama1
+    hostname: polyllama1
     build:
       dockerfile: Dockerfile
       context: ../stack/ollama
@@ -35,23 +34,42 @@ services:
     env_file:
       - ../.env
     environment:
-{% if instance.gpu_indices %}
-      - CUDA_VISIBLE_DEVICES={{ instance.gpu_indices }}
-{% endif %}
+      - CUDA_VISIBLE_DEVICES=3
       - OLLAMA_SCHED_SPREAD=1
       - CUDA_DEVICE_ORDER=PCI_BUS_ID
     deploy:
       resources:
         limits:
-          memory: {{ instance.memory_limit }}g
-{% if instance.gpu_indices %}
+          memory: 32g
         reservations:
           devices:
             - driver: nvidia
               capabilities: [ gpu ]
-{% endif %}
 
-{% endfor %}
+  polyllama2:
+    container_name: polyllama2
+    hostname: polyllama2
+    build:
+      dockerfile: Dockerfile
+      context: ../stack/ollama
+    volumes:
+      - ~/.cache/huggingface/hub:/root/.cache/huggingface/hub
+      - ~/ollama:/root/.ollama
+    env_file:
+      - ../.env
+    environment:
+      - CUDA_VISIBLE_DEVICES=0,1,2
+      - OLLAMA_SCHED_SPREAD=1
+      - CUDA_DEVICE_ORDER=PCI_BUS_ID
+    deploy:
+      resources:
+        limits:
+          memory: 96g
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [ gpu ]
+
 
   router:
     container_name: router
@@ -68,11 +86,10 @@ services:
     env_file:
       - ../.env
     environment:
-      - OLLAMA_INSTANCE_COUNT={{ instance_count }}
+      - OLLAMA_INSTANCE_COUNT=2
     depends_on:
-{% for instance in ollama_instances %}
-      - polyllama{{ instance.number }}
-{% endfor %}
+      - polyllama1
+      - polyllama2
 
 volumes:
   openwebui_data:

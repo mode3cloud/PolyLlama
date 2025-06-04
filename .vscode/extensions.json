@@ -1,0 +1,27 @@
+{
+  "recommendations": [
+    "ms-python.python",
+    "ms-python.flake8",
+    "ms-python.pylint",
+    "ms-python.black-formatter",
+    "sumneko.lua",
+    "redhat.vscode-yaml",
+    "ms-vscode.vscode-json",
+    "ms-vscode-remote.remote-containers",
+    "bierner.markdown-mermaid",
+    "yzhang.markdown-all-in-one",
+    "DavidAnson.vscode-markdownlint",
+    "eamodio.gitlens",
+    "GitHub.vscode-pull-request-github",
+    "ms-python.pytest",
+    "esbenp.prettier-vscode",
+    "ms-vscode.vscode-typescript-next",
+    "bradlc.vscode-tailwindcss",
+    "formulahendry.auto-rename-tag",
+    "ms-vscode.live-server"
+  ],
+  "unwantedRecommendations": [
+    // Extensions that might conflict or aren't needed
+    "ms-python.autopep8"
+  ]
+}

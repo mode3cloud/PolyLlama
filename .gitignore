@@ -1,0 +1,11 @@
+.env*
+!.env.example
+.venv
+.pytest_cache
+__pycache__
+polyllama-compose-*.log
+stack/open-webui/data
+generated-compose.yml
+stack/router/generated-nginx.conf
+.python-version
+_local.todo.txt

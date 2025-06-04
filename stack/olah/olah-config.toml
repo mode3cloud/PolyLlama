@@ -1,0 +1,25 @@
+[basic]
+host = "0.0.0.0"
+port = 8090
+repos-path = "/app/repos"
+cache-size-limit = "2TB"
+cache-clean-strategy = "LRU"
+hf-scheme = "https"
+hf-netloc = "huggingface.co"
+hf-lfs-netloc = "cdn-lfs.huggingface.co"
+mirror-scheme = "http"
+mirror-netloc = "olah:8090"
+mirror-lfs-netloc = "olah:8090"
+mirrors-path = ["/app/mirrors"]
+
+[accessibility]
+offline = true
+
+# Default allow all repositories to be proxied and cached
+[[accessibility.proxy]]
+repo = "*"
+allow = true
+
+[[accessibility.cache]]
+repo = "*"
+allow = true

@@ -1,0 +1,740 @@
+# Define shared memory zones for Lua modules to cache mappings
+lua_shared_dict model_mappings 10m;
+
+# Add Lua module path for model_router
+lua_package_path "/usr/local/openresty/lualib/?.lua;;";
+
+# Create a shared dictionary to store environment variables
+lua_shared_dict env_vars 1m;
+
+# Initialize environment variables in the main Nginx process
+init_by_lua_block {
+    local env_vars = ngx.shared.env_vars
+    
+    -- Store environment variables in shared memory
+    
+    -- Store instance count
+    local instance_count = os.getenv("OLLAMA_INSTANCE_COUNT") or "2"
+    env_vars:set("OLLAMA_INSTANCE_COUNT", instance_count)
+    ngx.log(ngx.WARN, "DEBUG: Stored OLLAMA_INSTANCE_COUNT in shared memory: '" .. instance_count .. "'")
+}
+
+# Start background timer in each worker to refresh model mappings
+init_worker_by_lua_block {
+    local model_router = require "model_router"
+    local env_vars = ngx.shared.env_vars
+    
+    -- Initialize model router
+    
+    local ok, err = ngx.timer.every(3, model_router.update_model_mappings)
+    if not ok then
+        ngx.log(ngx.ERR, "Failed to create timer: ", err)
+    end
+}
+
+# Normalize upgrade connection header for WebSocket
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
+# Docker internal DNS resolver
+resolver 127.0.0.11 valid=30s;
+
+
+# Upstream pool with least_conn load balancing
+upstream polyllama_backend {
+    least_conn;
+{% for instance in ollama_instances %}
+    server polyllama{{ instance.number }}:11434 max_fails=3 fail_timeout=900;
+{% endfor %}
+}
+
+error_log /dev/stdout info;
+
+# Main server for Ollama API
+server {
+    listen 11434;
+
+    sendfile off;
+    
+    # Turn off access logging
+    access_log off;
+
+    # Large model uploads
+    client_max_body_size 500M;
+
+    # Timeouts for long-running LLM generation
+    proxy_read_timeout 900;
+    proxy_connect_timeout 900;
+    proxy_send_timeout 900;
+    send_timeout 900;
+
+    # Root path redirect
+    location = / {
+        return 301 /ui/;
+    }
+
+    # Static UI
+    location /ui/ {
+        alias /usr/share/nginx/html/ui/;
+        index index.html;
+        try_files $uri $uri/ /ui/index.html;
+
+        expires -1;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+    }
+
+    # Custom UI endpoints
+    
+    # Custom endpoint for instance status
+    location /api/ui/instance-status {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local http = require "resty.http"
+            local httpc = http.new()
+            httpc:set_timeout(5000)  -- 5 second timeout
+            
+            -- Get instance count from environment
+            local env_vars = ngx.shared.env_vars
+            local instance_count = tonumber(env_vars:get("OLLAMA_INSTANCE_COUNT") or "2")
+            
+            local instances = {}
+            for i = 1, instance_count do
+                table.insert(instances, { 
+                    name = "polyllama" .. i, 
+                    url = "http://polyllama" .. i .. ":11434/api/version" 
+                })
+            end
+            
+            local results = {}
+            
+            for _, instance in ipairs(instances) do
+                local status = { name = instance.name, status = "offline" }
+                
+                local res, err = httpc:request_uri(instance.url, {
+                    method = "GET",
+                    headers = {
+                        ["Content-Type"] = "application/json"
+                    }
+                })
+                
+                if res and res.status == 200 then
+                    local success, data = pcall(cjson.decode, res.body)
+                    if success and data then
+                        status.status = "online"
+                        status.version = data.version
+                        status.cuda_version = data.cuda_version
+                        status.gpu_count = data.gpu_count
+                    end
+                end
+                
+                table.insert(results, status)
+            end
+            
+            ngx.say(cjson.encode({ instances = results }))
+        }
+    }
+    
+    # Per-instance APIs for status (kept for backward compatibility)
+    location ~ ^/api/status/(\d+)$ {
+        set $upstream_url http://polyllama$1:11434/api/version;
+        proxy_pass $upstream_url;
+        include /etc/nginx/proxy_params.conf;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 5s;
+        
+        # Add header to indicate which instance served this request
+        header_filter_by_lua_block {
+            ngx.header["X-Served-By"] = "polyllama" .. ngx.var[1]
+        }
+    }
+    
+    location /api/show {
+        # Log the request context for this endpoint too
+        access_by_lua_block {
+            local model_router = require "model_router"
+            model_router.log_request_context()
+        }
+        
+        proxy_pass http://polyllama_backend/api/show;
+        include /etc/nginx/proxy_params.conf;
+        
+        # Add header to indicate which instance served this request
+        header_filter_by_lua_block {
+            ngx.header["X-Served-By"] = "load_balancer"
+        }
+    }
+
+    location ~ ^/api/(generate|chat|embeddings)$ {
+        set $endpoint $1;
+        set $target_instance "";
+        
+        # First access and buffer the request body
+        rewrite_by_lua_block {
+            -- Force reading the request body
+            ngx.req.read_body()
+            
+            -- Log the request context (num_ctx) for all requests
+            local model_router = require "model_router"
+            model_router.log_request_context()
+            
+            -- Check if there's a specific target instance header (for UI load buttons)
+            local target_instance_header = ngx.req.get_headers()["X-Target-Instance"]
+            if target_instance_header then
+                ngx.log(ngx.INFO, "X-Target-Instance header found: " .. target_instance_header)
+                ngx.var.target_instance = target_instance_header
+                ngx.ctx.target_instance = target_instance_header
+                -- For UI load requests, preserve num_ctx for initial model loading
+                ngx.ctx.preserve_num_ctx = true
+                return -- Skip the normal routing logic
+            end
+            
+            -- For regular API requests (not from UI), handle num_ctx intelligently
+            local body_data = ngx.req.get_body_data()
+            if body_data then
+                local cjson = require "cjson"
+                local success, body = pcall(cjson.decode, body_data)
+                if success and body then
+                    local model_name = body.model
+                    if model_name then
+                        local model_router = require "model_router"
+                        local http = require "resty.http"
+                        
+                        -- Always strip incoming num_ctx from regular requests
+                        local incoming_num_ctx = nil
+                        if body.options and body.options.num_ctx then
+                            incoming_num_ctx = body.options.num_ctx
+                            body.options.num_ctx = nil
+                            ngx.log(ngx.INFO, "Stripped incoming num_ctx: " .. incoming_num_ctx .. " for model: " .. model_name)
+                        end
+                        
+                        -- Check if model is currently running on any instance
+                        local running_models = model_router.get_running_models()
+                        local model_is_loaded = running_models[model_name] and #running_models[model_name] > 0
+                        
+                        local replacement_num_ctx = nil
+                        
+                        if model_is_loaded then
+                            -- Model is loaded - try to get the current loaded context size
+                            -- We'll store this in shared memory when models are loaded
+                            local loaded_ctx = ngx.shared.model_mappings:get("ctx:" .. model_name)
+                            if loaded_ctx then
+                                replacement_num_ctx = tonumber(loaded_ctx)
+                                ngx.log(ngx.INFO, "Using loaded context size: " .. replacement_num_ctx .. " for model: " .. model_name)
+                            else
+                                ngx.log(ngx.INFO, "Model " .. model_name .. " is loaded but no stored context size found")
+                            end
+                        else
+                            -- Model is not loaded - get default from model config
+                            ngx.log(ngx.INFO, "Model " .. model_name .. " is not loaded, fetching default context from model info")
+                            -- Try to get model details to extract default context length
+                            local httpc = http.new()
+                            httpc:set_timeout(5000)
+                            
+                            local res, err = httpc:request_uri("http://polyllama1:11434/api/show", {
+                                method = "POST",
+                                body = cjson.encode({ model = model_name }),
+                                headers = {
+                                    ["Content-Type"] = "application/json"
+                                }
+                            })
+                            
+                            if res and res.status == 200 then
+                                local model_success, model_data = pcall(cjson.decode, res.body)
+                                if model_success and model_data and model_data.model_info and model_data.details and model_data.details.family then
+                                    local context_key = model_data.details.family .. ".context_length"
+                                    local default_ctx = model_data.model_info[context_key]
+                                    if default_ctx then
+                                        replacement_num_ctx = tonumber(default_ctx)
+                                        ngx.log(ngx.INFO, "Using model default context size: " .. replacement_num_ctx .. " for model: " .. model_name)
+                                    end
+                                end
+                            end
+                        end
+                        
+                        -- Apply the replacement num_ctx if we found one
+                        if replacement_num_ctx and replacement_num_ctx > 0 then
+                            if not body.options then
+                                body.options = {}
+                            end
+                            body.options.num_ctx = replacement_num_ctx
+                            ngx.log(ngx.INFO, "Set num_ctx to: " .. replacement_num_ctx .. " for model: " .. model_name)
+                        else
+                            -- Clean up empty options if no replacement was made
+                            if body.options and next(body.options) == nil then
+                                body.options = nil
+                            end
+                        end
+                        
+                        -- Update the request body
+                        local new_body = cjson.encode(body)
+                        ngx.req.set_body_data(new_body)
+                    end
+                end
+            end
+            
+            local model_router = require "model_router"
+            local model_name = model_router.extract_model_name()
+            
+            if model_name then
+                -- Check if model is running on any instance
+                local running_instance = model_router.is_model_running_on_any_instance(model_name)
+                if running_instance then
+                    ngx.log(ngx.INFO, "Model " .. model_name .. " is already running on " .. running_instance)
+                    model_router.set_model_mapping(model_name, running_instance, true)
+                    -- Set directly in Nginx variable AND in ngx.ctx for persistence
+                    ngx.var.target_instance = running_instance
+                    ngx.ctx.target_instance = running_instance
+                else
+                    -- Model is not running, need to assign it to the least loaded instance
+                    ngx.log(ngx.INFO, "Model " .. model_name .. " is not running on any instance")
+                    local instance = model_router.get_instance_for_model(model_name)
+                    
+                    -- If no mapping exists, create one
+                    if not instance then
+                        ngx.log(ngx.INFO, "No mapping found for model: " .. model_name .. ". Will route to least loaded instance.")
+                        instance = model_router.assign_model_to_least_loaded_instance(model_name)
+                        
+                        -- Acquire a loading lock if necessary
+                        local lock_acquired, existing_loader = model_router.lock_model_loading(model_name, instance)
+                        
+                        if not lock_acquired and existing_loader then
+                            -- Model is being loaded by another instance, use that one
+                            ngx.log(ngx.INFO, "Model " .. model_name .. " is being loaded by " .. existing_loader)
+                            instance = existing_loader
+                        else
+                            -- Set a response header to indicate this is the first request
+                            ngx.req.set_header("X-Ollama-First-Load", "true")
+                        end
+                    end
+                    
+                    if instance then
+                        ngx.var.target_instance = instance
+                        ngx.ctx.target_instance = instance
+                        ngx.log(ngx.INFO, "Assigned model " .. model_name .. " to instance " .. instance)
+                    else
+                        ngx.log(ngx.ERR, "Failed to assign instance for model: " .. model_name)
+                    end
+                end
+            else
+                ngx.log(ngx.WARN, "Could not extract model name from request")
+            end
+        }
+        
+        access_by_lua_block {
+            -- Make sure target_instance persists between phases
+            if ngx.ctx.target_instance and ngx.ctx.target_instance ~= "" then
+                ngx.var.target_instance = ngx.ctx.target_instance
+            end
+        }
+        
+        # Use a direct set instead of set_by_lua_block
+        set $proxy_pass_url "";
+        
+        # Determine the proxy_pass URL in the content phase
+        content_by_lua_block {
+            -- Use the specific target instance
+            local target = ngx.var.target_instance
+            ngx.log(ngx.INFO, "Final check - target_instance: " .. (target or "nil"))
+            
+            if target and target ~= "" then
+                local final_url = "http://" .. target .. ":11434/api/" .. ngx.var.endpoint
+                ngx.log(ngx.INFO, "Proxying to: " .. final_url)
+                
+                -- Use Nginxs proxy mechanism directly from Lua
+                return ngx.exec("@proxy_to_target")
+            else
+                ngx.log(ngx.ERR, "No target instance available, returning error")
+                ngx.status = 500
+                ngx.say("Error: Unable to determine target instance for model")
+                return ngx.exit(500)
+            end
+        }
+        
+        # Never reached directly - only via exec
+        error_page 500 502 503 504 /50x.html;
+    }
+
+    # Internal location for the proxy to a specific target instance
+    location @proxy_to_target {
+        internal;
+        proxy_pass http://$target_instance:11434/api/$endpoint;
+        include /etc/nginx/proxy_params.conf;
+        
+        # Add header to indicate which instance served this request
+        header_filter_by_lua_block {
+            if ngx.var.target_instance and ngx.var.target_instance ~= "" then
+                ngx.header["X-Served-By"] = ngx.var.target_instance
+            end
+        }
+    }
+    
+    
+    # Custom endpoint for UI to store context length for loaded models
+    location /api/ui/store-context {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            
+            -- Read the request body
+            ngx.req.read_body()
+            local body_data = ngx.req.get_body_data()
+            
+            if not body_data then
+                ngx.status = 400
+                ngx.say(cjson.encode({ error = "Missing request body" }))
+                return
+            end
+            
+            local success, body = pcall(cjson.decode, body_data)
+            if not success or not body or not body.model or not body.num_ctx then
+                ngx.status = 400
+                ngx.say(cjson.encode({ error = "Invalid request body or missing model/num_ctx" }))
+                return
+            end
+            
+            local model_name = body.model
+            local num_ctx = tonumber(body.num_ctx)
+            
+            if not num_ctx or num_ctx <= 0 then
+                ngx.status = 400
+                ngx.say(cjson.encode({ error = "Invalid num_ctx value" }))
+                return
+            end
+            
+            -- Store the context length in shared memory
+            local success, err = ngx.shared.model_mappings:set("ctx:" .. model_name, num_ctx)
+            
+            if success then
+                ngx.log(ngx.INFO, "Stored context length " .. num_ctx .. " for model " .. model_name)
+                ngx.say(cjson.encode({ 
+                    success = true, 
+                    model = model_name, 
+                    num_ctx = num_ctx,
+                    timestamp = ngx.time()
+                }))
+            else
+                ngx.log(ngx.ERR, "Failed to store context length for model " .. model_name .. ": " .. (err or "unknown error"))
+                ngx.status = 500
+                ngx.say(cjson.encode({ error = "Failed to store context length" }))
+            end
+        }
+    }
+
+    # Custom endpoint for UI to get instance count
+    location /api/ui/instance-count {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local env_vars = ngx.shared.env_vars
+            local instance_count = tonumber(env_vars:get("OLLAMA_INSTANCE_COUNT") or "2")
+            
+            ngx.say(cjson.encode({ 
+                instance_count = instance_count,
+                timestamp = ngx.time()
+            }))
+        }
+    }
+
+    # Custom endpoint for UI to get running models
+    location /api/ui/running-models {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            
+            -- Get running models from all instances
+            local running_models = model_router.get_running_models()
+            
+            -- Format the response for the UI
+            local formatted_models = {}
+            for model_name, instances in pairs(running_models) do
+                if not formatted_models[model_name] then
+                    formatted_models[model_name] = instances
+                end
+            end
+            
+            ngx.say(cjson.encode({ 
+                running_models = formatted_models,
+                timestamp = ngx.time()
+            }))
+        }
+    }
+    
+    # Custom endpoint for UI to get model details
+    location /api/ui/model-details {
+        default_type application/json;
+        
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            local http = require "resty.http"
+            
+            -- Get the model name from the request
+            ngx.req.read_body()
+            local body_data = ngx.req.get_body_data()
+            
+            if not body_data then
+                ngx.status = 400
+                ngx.say(cjson.encode({ error = "Missing request body" }))
+                return
+            end
+            
+            local success, body = pcall(cjson.decode, body_data)
+            if not success or not body or not body.model then
+                ngx.status = 400
+                ngx.say(cjson.encode({ error = "Invalid request body or missing model name" }))
+                return
+            end
+            
+            local model_name = body.model
+            
+            -- Get the instance for this model
+            local instance = model_router.get_instance_for_model(model_name)
+            
+            -- If no mapping exists, use a load-balanced approach without creating a mapping
+            -- This is because for the UI's Show endpoint, we don't need to insert a mapping
+            if not instance then
+                -- Find an instance that has this model
+                local models_data = model_router.get_all_models()
+                if models_data and models_data.models then
+                    for _, model in ipairs(models_data.models) do
+                        if model.name == model_name and model.instances and #model.instances > 0 then
+                            instance = model.instances[1]
+                            ngx.log(ngx.INFO, "Using instance " .. instance .. " for model " .. model_name .. " without creating a mapping")
+                            break
+                        end
+                    end
+                end
+                
+                -- If still no instance found, use the first available instance
+                if not instance then
+                    instance = "polyllama1"
+                    ngx.log(ngx.INFO, "No instance found for model " .. model_name .. ", using default instance " .. instance)
+                end
+            end
+            
+            -- Create HTTP client
+            local httpc = http.new()
+            httpc:set_timeout(10000)  -- 10 second timeout
+            
+            -- Make the request to the instance
+            local res, err = httpc:request_uri("http://" .. instance .. ":11434/api/show", {
+                method = "POST",
+                body = body_data,
+                headers = {
+                    ["Content-Type"] = "application/json"
+                }
+            })
+            
+            if not res or res.status ~= 200 then
+                ngx.status = res and res.status or 500
+                ngx.say(cjson.encode({
+                    error = "Failed to fetch model details: " .. (err or "unknown error")
+                }))
+                return
+            end
+            
+            -- Parse the response
+            local success, data = pcall(cjson.decode, res.body)
+            if not success or not data then
+                ngx.status = 500
+                ngx.say(cjson.encode({
+                    error = "Failed to parse model details response"
+                }))
+                return
+            end
+            
+            -- Add the instance information
+            data.instance = instance
+            
+            -- Return the response
+            ngx.say(cjson.encode(data))
+        }
+    }
+    
+    # API endpoints that don't trigger model loading
+    location /api/version    { 
+        proxy_pass http://polyllama_backend/api/version;    
+        include /etc/nginx/proxy_params.conf; 
+        
+        # Add header to indicate which instance served this request
+        header_filter_by_lua_block {
+            ngx.header["X-Served-By"] = "load_balancer"
+        }
+    }
+    
+    location /api/tags       { 
+        proxy_pass http://polyllama_backend/api/tags;       
+        include /etc/nginx/proxy_params.conf; 
+        
+        # Add header to indicate which instance served this request
+        header_filter_by_lua_block {
+            ngx.header["X-Served-By"] = "load_balancer"
+        }
+    }
+    
+    location /api/ps {
+        set $target_instance "";
+        
+        # Check for X-Target-Instance header
+        access_by_lua_block {
+            local target = ngx.req.get_headers()["X-Target-Instance"]
+            if target then
+                ngx.var.target_instance = target
+            end
+        }
+        
+        # Handle the request based on whether a specific instance is targeted
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            local target_instance = ngx.var.target_instance
+            
+            -- If a specific instance is targeted, proxy to that instance
+            if target_instance and target_instance ~= "" then
+                -- Proxy to the specific instance
+                local http = require "resty.http"
+                local httpc = http.new()
+                httpc:set_timeout(5000)  -- 5 second timeout
+                
+                local res, err = httpc:request_uri("http://" .. target_instance .. ":11434/api/ps", {
+                    method = "GET"
+                })
+                
+                if not res or res.status ~= 200 then
+                    ngx.status = res and res.status or 500
+                    ngx.say(cjson.encode({
+                        error = "Failed to fetch data from instance: " .. (err or "unknown error")
+                    }))
+                    return
+                end
+                
+                -- Add header to indicate which instance served this request
+                ngx.header["X-Served-By"] = target_instance
+                
+                -- Return the response from the specific instance
+                ngx.say(res.body)
+            else
+                -- Return merged results from all instances using the helper function
+                local merged_response = model_router.get_merged_ps_response()
+                
+                -- Add header to indicate this is a merged response
+                ngx.header["X-Served-By"] = "all-instances"
+                
+                -- Return the merged response
+                ngx.say(cjson.encode(merged_response))
+            end
+        }
+    }
+
+    # Custom endpoint for UI to get model mappings
+    location /api/ui/model-mappings {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            local result = {}
+            
+            -- Get model mappings with safe error handling
+            local keys = ngx.shared.model_mappings:get_keys() or {}
+            for _, key in ipairs(keys) do
+                -- Skip lock keys
+                if not string.match(key, "^loading:") then
+                    local mapping_info = model_router.get_model_mapping_info(key)
+                    if mapping_info then
+                        result[key] = mapping_info
+                    end
+                end
+            end
+            
+            -- Get running models using the standardized function
+            local running_models = model_router.get_running_models()
+            
+            -- Output mappings
+            ngx.say(cjson.encode({ 
+                mappings = result, 
+                running_models = running_models,
+                timestamp = ngx.time(),
+                mapping_count = #keys,
+            }))
+        }
+    }
+    
+    # Endpoint to clean up mappings for non-running models
+    location /api/ui/clean-mappings {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            
+            -- Clean up mappings for non-running models
+            local removed_count = model_router.clean_non_running_mappings()
+            
+            -- Output result
+            ngx.say(cjson.encode({ 
+                success = true,
+                removed_count = removed_count,
+                timestamp = ngx.time()
+            }))
+        }
+    }
+    
+    # Endpoint to detect duplicate model instances
+    location /api/ui/duplicate-models {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            
+            -- Force refresh the running models cache
+            model_router.force_refresh_running_models_cache()
+            
+            -- Detect duplicate model instances
+            local duplicates = model_router.detect_duplicate_model_instances()
+            
+            -- Output result
+            ngx.say(cjson.encode({ 
+                duplicates = duplicates,
+                count = #duplicates,
+                timestamp = ngx.time()
+            }))
+        }
+    }
+    
+    # Debug endpoint (kept for backward compatibility)
+    location /api/model-mappings {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            local result = {}
+            
+            -- Get model mappings with safe error handling
+            local keys = ngx.shared.model_mappings:get_keys() or {}
+            for _, key in ipairs(keys) do
+                -- Skip lock keys
+                if not string.match(key, "^loading:") then
+                    local mapping_info = model_router.get_model_mapping_info(key)
+                    if mapping_info then
+                        result[key] = mapping_info
+                    end
+                end
+            end
+            
+            
+            -- Get running models using the standardized function
+            local running_models = model_router.get_running_models()
+            
+            -- Output mappings
+            ngx.say(cjson.encode({ 
+                mappings = result, 
+                running_models = running_models,
+                timestamp = ngx.time(),
+                mapping_count = #keys,
+            }))
+        }
+    }
+}

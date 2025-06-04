@@ -1,0 +1,77 @@
+services:
+  openwebui:
+      build:
+        context: ./stack/open-webui
+        dockerfile: Dockerfile
+      container_name: openwebui
+      ports:
+        - "8080:8080"
+      volumes:
+        - openwebui_data:/app/backend/data
+
+  olah:
+    build:
+      context: ./stack/olah
+      dockerfile: Dockerfile
+    container_name: olah
+    ports:
+      - "8090:8090"
+    volumes:
+      - olah_data_repos:/app/repos
+      - olah_data_mirrors:/app/mirrors
+  
+{% for instance in ollama_instances %}
+  polyllama{{ instance.number }}:
+    container_name: polyllama{{ instance.number }}
+    hostname: polyllama{{ instance.number }}
+    build:
+      dockerfile: Dockerfile
+      context: ./stack/ollama
+    volumes:
+      - ~/.cache/huggingface/hub:/root/.cache/huggingface/hub
+      - ~/ollama:/root/.ollama
+    env_file:
+      - ./.env
+    environment:
+{% if instance.gpu_indices %}
+      - CUDA_VISIBLE_DEVICES={{ instance.gpu_indices }}
+{% endif %}
+      - OLLAMA_SCHED_SPREAD=1
+      - CUDA_DEVICE_ORDER=PCI_BUS_ID
+    deploy:
+      resources:
+        limits:
+          memory: {{ instance.memory_limit }}g
+{% if instance.gpu_indices %}
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [ gpu ]
+{% endif %}
+
+{% endfor %}
+
+  router:
+    container_name: router
+    hostname: router
+    build:
+      context: ./stack/router
+      dockerfile: Dockerfile
+    volumes:
+      - ./stack/router/model_router.lua:/usr/local/openresty/lualib/model_router.lua
+      - ./stack/router:/usr/share/nginx/html/ui/
+    ports:
+      - "11434:11434"
+    env_file:
+      - ./.env
+    environment:
+      - OLLAMA_INSTANCE_COUNT={{ instance_count }}
+    depends_on:
+{% for instance in ollama_instances %}
+      - polyllama{{ instance.number }}
+{% endfor %}
+
+volumes:
+  openwebui_data:
+  olah_data_repos:
+  olah_data_mirrors:

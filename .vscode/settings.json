@@ -1,0 +1,72 @@
+{
+    "python.defaultInterpreterPath": "./.venv/bin/python",
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestArgs": [
+        "tests"
+    ],
+    "files.associations": {
+        "*.lua": "lua",
+        "*.template.yml": "yaml",
+        "*.template.yaml": "yaml",
+        "docker-compose*.yml": "yaml",
+        "nginx.conf*": "nginx",
+        ".env*": "properties"
+    },
+    "editor.tabSize": 4,
+    "editor.insertSpaces": true,
+    "editor.rulers": [
+        88,
+        120
+    ],
+    "editor.formatOnSave": true,
+    "[python]": {
+        "editor.tabSize": 4,
+        "editor.formatOnSave": true,
+        "editor.codeActionsOnSave": {
+            "source.organizeImports": "explicit"
+        }
+    },
+    "[lua]": {
+        "editor.tabSize": 4,
+        "editor.insertSpaces": true
+    },
+    "[yaml]": {
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+    },
+    "[json]": {
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+    },
+    "[javascript]": {
+        "editor.tabSize": 2,
+        "editor.insertSpaces": true
+    },
+    "[markdown]": {
+        "editor.wordWrap": "on",
+        "editor.rulers": [
+            80
+        ]
+    },
+    "files.exclude": {
+        "**/__pycache__": true,
+        "**/*.pyc": true,
+        "**/node_modules": true,
+        "generated-*.yml": false,
+        "generated-*.conf": false
+    },
+    "search.exclude": {
+        "**/__pycache__": true,
+        "**/*.pyc": true,
+        "**/node_modules": true,
+        "stack/open-webui/data/cache": true,
+        "stack/open-webui/data/vector_db": true,
+        "*.log": true
+    },
+    "git.ignoreLimitWarning": true,
+    "markdown.preview.breaks": true,
+    "markdown.extension.toc.levels": "2..6",
+    "terminal.integrated.defaultProfile.linux": "bash",
+    "terminal.integrated.cwd": "${workspaceFolder}",
+}

@@ -1,6 +1,7 @@
 # 🦙 PolyLlama
 
 [![CI](https://github.com/mode3cloud/polyllama/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mode3cloud/polyllama/actions/workflows/ci.yml)
+[![Coverage Report](https://img.shields.io/badge/coverage-report-brightgreen)](https://mode3cloud.github.io/PolyLlama/)
 
 ## Dynamic, Multi-Instance Ollama Orchestration for Local AI Power
 

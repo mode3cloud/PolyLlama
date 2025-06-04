@@ -46,6 +46,9 @@ jobs:
       contents: read
       pages: write
       id-token: write
+    concurrency:
+      group: "pages"
+      cancel-in-progress: false
 
     steps:
       - name: Download coverage artifacts
@@ -56,6 +59,8 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v4
+        with:
+          enablement: true
 
       - name: Upload coverage to Pages
         uses: actions/upload-pages-artifact@v3

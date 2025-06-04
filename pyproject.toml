@@ -4,10 +4,27 @@ version = "0.1.0"
 description = "Dynamic multi-instance Ollama orchestration system with automatic GPU detection and intelligent load balancing"
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["pytest>=8.4.0", "pyyaml>=6.0", "jinja2>=3.0.0"]
+dependencies = ["pytest>=8.4.0", "pyyaml>=6.0", "jinja2>=3.0.0", "pytest-cov>=4.1.0", "coverage>=7.0.0"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_functions = ["*"]
 python_files = ["*.py"]
 python_classes = ["*"]
+addopts = "--cov=builder --cov=. --cov-report=xml --cov-report=html --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["builder", "main.py"]
+omit = ["tests/*", "*/venv/*", "*/.venv/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:"
+]

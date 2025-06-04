@@ -1,5 +1,7 @@
 # 🦙 PolyLlama
 
+[![CI](https://github.com/mode3cloud/polyllama/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mode3cloud/polyllama/actions/workflows/ci.yml)
+
 ## Dynamic, Multi-Instance Ollama Orchestration for Local AI Power
 
 PolyLlama is an open source stack for running [Ollama](https://ollama.com) in advanced local and homelab environments. It **automatically detects your hardware**, intelligently groups GPUs, dynamically generates Docker Compose configs, and provides powerful routing, load balancing, and monitoring for LLM workloads.

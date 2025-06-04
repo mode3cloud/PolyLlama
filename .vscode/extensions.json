@@ -18,7 +18,8 @@
     "ms-vscode.vscode-typescript-next",
     "bradlc.vscode-tailwindcss",
     "formulahendry.auto-rename-tag",
-    "ms-vscode.live-server"
+    "ms-vscode.live-server",
+    "wholroyd.jinja"
   ],
   "unwantedRecommendations": [
     // Extensions that might conflict or aren't needed

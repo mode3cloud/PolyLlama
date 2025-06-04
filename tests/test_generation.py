@@ -49,7 +49,7 @@ class PolyLlamaGenerationTest:
 
     def validate_compose_file(self, expected_instances, expected_instance_count):
         """Validate the generated docker-compose.yml file"""
-        compose_file = self.root_dir / "generated-compose.yml"
+        compose_file = self.root_dir / "runtime/docker-compose.yml"
 
         if not compose_file.exists():
             return False, "Compose file not generated"
@@ -105,7 +105,7 @@ class PolyLlamaGenerationTest:
 
     def validate_nginx_file(self, expected_instances):
         """Validate the generated nginx.conf file"""
-        nginx_file = self.root_dir / "stack/router/generated-nginx.conf"
+        nginx_file = self.root_dir / "runtime/nginx.conf"
 
         if not nginx_file.exists():
             return False, "Nginx file not generated"
@@ -144,7 +144,7 @@ class PolyLlamaGenerationTest:
 
     def validate_gpu_assignments(self, gpu_config):
         """Validate GPU assignments in compose file match the config"""
-        compose_file = self.root_dir / "generated-compose.yml"
+        compose_file = self.root_dir / "runtime/docker-compose.yml"
 
         try:
             with open(compose_file, "r") as f:

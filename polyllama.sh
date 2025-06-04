@@ -117,7 +117,6 @@ detect_gpu_groups() {
 
 # Function to generate docker-compose file from template
 generate_compose_file() {
-    local compose_file="generated-compose.yml"
     
     echo "🔨 Generating automatic compose definition from template..."
     
@@ -161,7 +160,7 @@ generate_compose_file() {
         instance_count=1
     fi
     
-    DETECTED_COMPOSE_FILE="$compose_file"
+    DETECTED_COMPOSE_FILE="runtime/docker-compose.yml"
     DETECTED_INSTANCE_COUNT=$instance_count
 }
 
@@ -252,8 +251,8 @@ launch_stack() {
     echo "🛑 Stopping any existing services..."
     docker-compose -f "$compose_file" down --remove-orphans 2>/dev/null || true
     
-    # Create log file with timestamp
-    local log_file="polyllama-compose-build.log"
+    # Create log file with timestamp in runtime directory
+    local log_file="runtime/polyllama-compose-build.log"
     
     # Pull latest images
     echo "📦 Pulling latest images..."
@@ -330,6 +329,7 @@ launch_stack() {
 stop_services() {
     echo "🛑 Stopping Polyllama stack..."
     
+    local compose_file="runtime/docker-compose.yml"
     if [ -f "$compose_file" ]; then
         echo "  Stopping services from $compose_file..."
         docker-compose -f "$compose_file" down --remove-orphans 2>/dev/null || true
@@ -342,6 +342,7 @@ stop_services() {
 show_logs() {
     echo "📜 Showing logs from all services..."
     
+    local compose_file="runtime/docker-compose.yml"
     if [ -f "$compose_file" ]; then
         if docker-compose -f "$compose_file" ps --services 2>/dev/null | grep -q .; then
             echo "  Logs from $compose_file:"
@@ -357,6 +358,7 @@ show_logs() {
 show_status() {
     echo "📊 Service Status:"
     
+    local compose_file="runtime/docker-compose.yml"
     if [ -f "$compose_file" ]; then
         echo ""
         echo "  From $compose_file:"

@@ -7,7 +7,7 @@ Generates compose file from template based on detected GPU configuration
 import json
 import sys
 from pathlib import Path
-from jinja2 import Environment, FileSystemLoader, Template
+from jinja2 import Environment, FileSystemLoader
 
 def render_template_with_jinja2(template_path, context):
     """
@@ -43,8 +43,8 @@ def main():
         sys.exit(1)
     
     # Define template paths
-    compose_template_path = Path(__file__).parent / "docker-compose.template.yml"
-    nginx_template_path = Path(__file__).parent.parent / "stack/router/nginx.conf.template"
+    compose_template_path = Path(__file__).parent / "docker-compose.yml.j2"
+    nginx_template_path = Path(__file__).parent.parent / "stack/router/nginx.conf.j2"
     
     # Check templates exist
     if not compose_template_path.exists():
@@ -91,9 +91,13 @@ def main():
     compose_result = render_template_with_jinja2(compose_template_path, context)
     nginx_result = render_template_with_jinja2(nginx_template_path, context)
     
-    # Write results
-    compose_output_path = Path(__file__).parent.parent / "generated-compose.yml"
-    nginx_output_path = Path(__file__).parent.parent / "stack/router/generated-nginx.conf"
+    # Create runtime directory if it doesn't exist
+    runtime_dir = Path(__file__).parent.parent / "runtime"
+    runtime_dir.mkdir(exist_ok=True)
+    
+    # Write results to runtime directory with normal names
+    compose_output_path = runtime_dir / "docker-compose.yml"
+    nginx_output_path = runtime_dir / "nginx.conf"
     
     try:
         with open(compose_output_path, 'w') as f:

@@ -14,7 +14,7 @@ init_by_lua_block {
     -- Store environment variables in shared memory
     
     -- Store instance count
-    local instance_count = os.getenv("OLLAMA_INSTANCE_COUNT") or "2"
+    local instance_count = os.getenv("OLLAMA_INSTANCE_COUNT") or "{{ instance_count }}"
     env_vars:set("OLLAMA_INSTANCE_COUNT", instance_count)
     ngx.log(ngx.WARN, "DEBUG: Stored OLLAMA_INSTANCE_COUNT in shared memory: '" .. instance_count .. "'")
 }
@@ -98,7 +98,7 @@ server {
             
             -- Get instance count from environment
             local env_vars = ngx.shared.env_vars
-            local instance_count = tonumber(env_vars:get("OLLAMA_INSTANCE_COUNT") or "2")
+            local instance_count = tonumber(env_vars:get("OLLAMA_INSTANCE_COUNT") or "{{ instance_count }}")
             
             local instances = {}
             for i = 1, instance_count do
@@ -429,7 +429,7 @@ server {
         content_by_lua_block {
             local cjson = require "cjson"
             local env_vars = ngx.shared.env_vars
-            local instance_count = tonumber(env_vars:get("OLLAMA_INSTANCE_COUNT") or "2")
+            local instance_count = tonumber(env_vars:get("OLLAMA_INSTANCE_COUNT") or "{{ instance_count }}")
             
             ngx.say(cjson.encode({ 
                 instance_count = instance_count,

@@ -32,13 +32,13 @@ services:
     env_file:
       - ../../.env
     environment:
-      - CUDA_VISIBLE_DEVICES=3
+      - CUDA_VISIBLE_DEVICES=0,1,2
       - OLLAMA_SCHED_SPREAD=1
       - CUDA_DEVICE_ORDER=PCI_BUS_ID
     deploy:
       resources:
         limits:
-          memory: 32g
+          memory: 96g
         reservations:
           devices:
             - driver: nvidia
@@ -56,13 +56,13 @@ services:
     env_file:
       - ../../.env
     environment:
-      - CUDA_VISIBLE_DEVICES=0,1,2
+      - CUDA_VISIBLE_DEVICES=3
       - OLLAMA_SCHED_SPREAD=1
       - CUDA_DEVICE_ORDER=PCI_BUS_ID
     deploy:
       resources:
         limits:
-          memory: 96g
+          memory: 32g
         reservations:
           devices:
             - driver: nvidia
@@ -75,10 +75,9 @@ services:
     build:
       context: ../../stack/router
       dockerfile: Dockerfile
+      target: production
     volumes:
       - ../../stack/router/model_router.lua:/usr/local/openresty/lualib/model_router.lua
-      - ../../stack/router/index.html:/usr/share/nginx/html/ui/index.html
-      - ../../stack/router/script.js:/usr/share/nginx/html/ui/script.js
       - ./nginx.conf:/etc/nginx/conf.d/default.conf
     ports:
       - "11434:11434"

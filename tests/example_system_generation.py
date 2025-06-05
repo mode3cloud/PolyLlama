@@ -166,15 +166,16 @@ def generated_compose_structure():
         assert service in compose_content, f"Missing service: {service}"
 
     # Check for expected GPU configurations based on local system
-    # Instance 1: RTX 6000 Ada (GPU 3)
-    assert (
-        "CUDA_VISIBLE_DEVICES=3" in compose_content
-    ), "Missing GPU 3 assignment for polyllama1"
 
-    # Instance 2: RTX 4090s (GPUs 0,1,2)
+    # Instance 1: RTX 4090s (GPUs 0,1,2)
     assert (
         "CUDA_VISIBLE_DEVICES=0,1,2" in compose_content
     ), "Missing GPU 0,1,2 assignment for polyllama2"
+
+    # Instance 2: RTX 6000 Ada (GPU 3)
+    assert (
+        "CUDA_VISIBLE_DEVICES=3" in compose_content
+    ), "Missing GPU 3 assignment for polyllama1"
 
     # Check for correct instance count in router environment
     assert (

@@ -1,12 +1,18 @@
 {
   "gpu_groups": [
     {
-      "name": "NVIDIA RTX 6000 Ada Generation",
-      "indices": [3]
+      "name": "NVIDIA GeForce RTX 4090",
+      "indices": [
+        0,
+        1,
+        2
+      ]
     },
     {
-      "name": "NVIDIA GeForce RTX 4090",
-      "indices": [0, 1, 2]
+      "name": "NVIDIA RTX 6000 Ada Generation",
+      "indices": [
+        3
+      ]
     }
   ]
 }

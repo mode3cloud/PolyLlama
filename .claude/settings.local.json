@@ -9,7 +9,8 @@
       "Bash(docker exec:*)",
       "Bash(./polyllama.sh:*)",
       "Bash(uv run pytest:*)",
-      "Bash(docker logs:*)"
+      "Bash(docker logs:*)",
+      "Bash(mkdir:*)"
     ],
     "deny": []
   }

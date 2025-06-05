@@ -30,6 +30,7 @@ let instanceStatuses = {};
 let availableModels = [];
 let runningModels = {};
 let modelMappings = {};
+let modelContexts = {};
 let currentFilter = 'all';
 let searchQuery = '';
 let isLoadingModel = false;
@@ -119,11 +120,12 @@ async function refreshData() {
         console.log('Refreshing data...');
 
         // Fetch all data in parallel
-        const [instanceStatusResult, modelsResult, runningModelsResult, mappingsResult] = await Promise.all([
+        const [instanceStatusResult, modelsResult, runningModelsResult, mappingsResult, contextsResult] = await Promise.all([
             fetchInstanceStatuses(),
             fetchAvailableModels(),
             fetchRunningModels(),
-            fetchModelMappings()
+            fetchModelMappings(),
+            fetchModelContexts()
         ]);
 
         // Update system overview
@@ -199,6 +201,21 @@ async function fetchModelMappings() {
         }
     } catch (error) {
         console.error('Error fetching model mappings:', error);
+    }
+    return {};
+}
+
+// Fetch model contexts
+async function fetchModelContexts() {
+    try {
+        const response = await fetch('/api/ui/get-contexts');
+        if (response.ok) {
+            const data = await response.json();
+            modelContexts = data.contexts || {};
+            return modelContexts;
+        }
+    } catch (error) {
+        console.error('Error fetching model contexts:', error);
     }
     return {};
 }
@@ -294,7 +311,7 @@ function createInstanceCard(instanceName, status, models) {
 function getGPUInfo(instanceName) {
     // Default fallback for instances
     const instanceNumber = instanceName.replace('polyllama', '');
-    
+
     // TODO: Could be enhanced to fetch actual GPU configuration from API
     // For now, provide generic descriptions
     return {
@@ -340,7 +357,14 @@ function displayModels(models) {
         if (isLoaded) {
             // Show which instance(s) the model is loaded on in the status
             const instanceList = loadedOn.join(', ');
-            statusContent = `<span class="model-tag loaded">Loaded on ${instanceList}</span>`;
+            let contextInfo = '';
+
+            // Show context size if available
+            if (modelContexts[model.name]) {
+                contextInfo = ` <small style="color: #666;">(ctx: ${modelContexts[model.name]})</small>`;
+            }
+
+            statusContent = `<span class="model-tag loaded">Loaded on ${instanceList}${contextInfo}</span>`;
             actionContent = `<button class="action-btn danger" onclick="unloadModel('${model.name}')">Unload</button>`;
         } else {
             statusContent = '<span class="model-tag">Available</span>';
@@ -370,7 +394,7 @@ function formatSize(bytes) {
 }
 
 // Modal functions
-function openLoadModal(modelName) {
+async function openLoadModal(modelName) {
     loadModelNameInput.value = modelName;
 
     // Populate instance dropdown
@@ -382,6 +406,46 @@ function openLoadModal(modelName) {
         loadInstanceSelect.appendChild(option);
     });
 
+    // Try to fetch model details to get default context size
+    try {
+        const response = await fetch('/api/ui/model-details', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: modelName })
+        });
+
+        if (response.ok) {
+            const data = await response.json();
+
+            // Extract default context size from model info
+            let defaultContext = null;
+            if (data.model_info && data.details && data.details.family) {
+                const contextKey = data.details.family + '.context_length';
+                defaultContext = data.model_info[contextKey];
+            }
+
+            // Update the context input placeholder with model default
+            if (defaultContext) {
+                loadContextInput.placeholder = `Default: ${defaultContext}`;
+
+                // Add a hint about the default context
+                const existingHint = document.getElementById('context-hint');
+                if (existingHint) {
+                    existingHint.textContent = `Model default context: ${defaultContext}`;
+                } else {
+                    const hint = document.createElement('small');
+                    hint.id = 'context-hint';
+                    hint.style.color = '#666';
+                    hint.textContent = `Model default context: ${defaultContext}`;
+                    loadContextInput.parentNode.appendChild(hint);
+                }
+            }
+        }
+    } catch (error) {
+        console.error('Error fetching model details:', error);
+        // Continue without model details
+    }
+
     loadModal.style.display = 'block';
 }
 
@@ -391,6 +455,13 @@ function closeLoadModal() {
     }
     loadModal.style.display = 'none';
     loadContextInput.value = '';
+    loadContextInput.placeholder = '';
+
+    // Remove context hint
+    const contextHint = document.getElementById('context-hint');
+    if (contextHint) {
+        contextHint.remove();
+    }
 }
 
 // Load model
@@ -435,7 +506,7 @@ async function confirmLoadModel() {
             'X-Target-Instance': instanceName
         };
 
-        const response = await fetch('/api/generate', {
+        const response = await fetch('/api/load', {
             method: 'POST',
             headers: headers,
             body: JSON.stringify(payload)
@@ -444,7 +515,8 @@ async function confirmLoadModel() {
         if (response.ok) {
             closeLoadModal();
             setTimeout(refreshData, 2000); // Refresh after 2 seconds
-            showSuccess(`Loading ${modelName} on ${instanceName}...`);
+            const contextMsg = contextLength ? ` with context ${contextLength}` : '';
+            showSuccess(`Loading ${modelName} on ${instanceName}${contextMsg}...`);
         } else {
             throw new Error(`Failed to load model: ${response.statusText}`);
         }
@@ -506,7 +578,7 @@ async function unloadModelFromInstance(modelName, instanceName) {
     if (!confirm(`Are you sure you want to unload ${modelName} from ${instanceName}?`)) {
         return;
     }
-    
+
     try {
         const response = await fetch('/api/generate', {
             method: 'POST',
@@ -519,11 +591,11 @@ async function unloadModelFromInstance(modelName, instanceName) {
                 keep_alive: 0
             })
         });
-        
+
         if (!response.ok) {
             throw new Error(`Failed to unload from ${instanceName}: ${response.statusText}`);
         }
-        
+
         setTimeout(refreshData, 2000); // Refresh after 2 seconds
         showSuccess(`Unloading ${modelName} from ${instanceName}...`);
     } catch (error) {

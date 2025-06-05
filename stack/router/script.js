@@ -506,10 +506,17 @@ async function confirmLoadModel() {
             'X-Target-Instance': instanceName
         };
 
-        const response = await fetch('/api/load', {
+        // Use /api/generate with empty prompt to load the model
+        const loadPayload = {
+            ...payload,
+            prompt: "",
+            stream: false
+        };
+        
+        const response = await fetch('/api/generate', {
             method: 'POST',
             headers: headers,
-            body: JSON.stringify(payload)
+            body: JSON.stringify(loadPayload)
         });
 
         if (response.ok) {

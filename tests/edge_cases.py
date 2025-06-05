@@ -9,8 +9,8 @@ import sys
 import subprocess
 from pathlib import Path
 
-# Add the builder directory to the path
-sys.path.insert(0, str(Path(__file__).parent.parent / "builder"))
+# Add the parent directory to the path to import builder module
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 
 def empty_gpu_group():
@@ -20,7 +20,7 @@ def empty_gpu_group():
     root_dir = Path(__file__).parent.parent
     cmd = [
         "python3",
-        str(root_dir / "builder/generate_compose.py"),
+        str(root_dir / "builder/generator.py"),
         json.dumps({"gpu_groups": [{"name": "Empty", "indices": []}]}),
     ]
 
@@ -40,7 +40,7 @@ def single_gpu():
     root_dir = Path(__file__).parent.parent
     cmd = [
         "python3",
-        str(root_dir / "builder/generate_compose.py"),
+        str(root_dir / "builder/generator.py"),
         json.dumps({"gpu_groups": [{"name": "RTX 4090", "indices": [0]}]}),
     ]
 
@@ -50,7 +50,7 @@ def single_gpu():
     print("   ✅ Single GPU configuration generated successfully")
     # Check that only 1 instance was created
     assert (
-        "with 1 instance(s)" in result.stdout
+        "Generated 1 instance(s)" in result.stdout
     ), f"Incorrect instance count for single GPU. Output: {result.stdout}"
     print("   ✅ Correct instance count for single GPU")
 
@@ -62,7 +62,7 @@ def large_gpu_indices():
     root_dir = Path(__file__).parent.parent
     cmd = [
         "python3",
-        str(root_dir / "builder/generate_compose.py"),
+        str(root_dir / "builder/generator.py"),
         json.dumps(
             {
                 "gpu_groups": [
@@ -89,7 +89,7 @@ def many_instances():
     root_dir = Path(__file__).parent.parent
     cmd = [
         "python3",
-        str(root_dir / "builder/generate_compose.py"),
+        str(root_dir / "builder/generator.py"),
         json.dumps({"gpu_groups": gpu_groups}),
     ]
 
@@ -98,6 +98,16 @@ def many_instances():
 
     print("   ✅ Many instances configuration generated successfully")
     assert (
-        "with 10 instance(s)" in result.stdout
+        "Generated 10 instance(s)" in result.stdout
     ), f"Incorrect instance count for many instances. Output: {result.stdout}"
     print("   ✅ Correct instance count for many instances")
+
+
+if __name__ == "__main__":
+    # Run all edge case tests when script is executed directly
+    empty_gpu_group()
+    single_gpu()
+    large_gpu_indices()
+    many_instances()
+    
+    print("\n🎉 All edge case tests completed!")

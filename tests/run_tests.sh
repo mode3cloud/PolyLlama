@@ -35,12 +35,12 @@ echo ""
 echo "🚀 Running main test suite..."
 echo ""
 
-if python3 tests/test_generation.py; then
+if python3 tests/generation.py; then
     echo ""
     echo "🚀 Running edge case tests..."
     echo ""
     
-    if python3 tests/test_edge_cases.py; then
+    if python3 tests/edge_cases.py; then
         echo ""
         echo "🎉 All tests completed successfully!"
         exit 0

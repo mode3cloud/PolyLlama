@@ -40,7 +40,7 @@ def example_system_template_generation():
             # Run the generation script with the local system GPU config
             gpu_config_json = json.dumps(gpu_config)
             result = subprocess.run(
-                ["python3", "generate_compose.py", gpu_config_json],
+                ["python3", "generator.py", gpu_config_json],
                 capture_output=True,
                 text=True,
                 cwd=builder_dir,
@@ -52,7 +52,7 @@ def example_system_template_generation():
             # The script outputs to runtime/ directory, so read from there
             runtime_dir = builder_dir.parent / "runtime"
             generated_compose_path = runtime_dir / "docker-compose.yml"
-            generated_nginx_path = runtime_dir / "nginx.conf"
+            generated_nginx_path = runtime_dir / "router" / "nginx.conf"
 
             # Read generated files
             with open(generated_compose_path, "r") as f:

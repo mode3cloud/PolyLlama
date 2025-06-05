@@ -4,8 +4,13 @@
 .pytest_cache
 __pycache__
 .python-version
+htmlcov
 
 stack/open-webui/data
 runtime/
 
 _local.todo.txt
+!.claude
+!CLAUDE.md
+.coverage
+coverage.xml

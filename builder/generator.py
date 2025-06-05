@@ -42,19 +42,19 @@ class ComposeGenerator:
             "instance_count": instance_count,
         }
 
-        # Generate docker-compose.yml
-        self._generate_compose_file(context, output_dir)
-
-        # Generate nginx.conf
-        self._generate_nginx_conf(context, output_dir)
-
-        # Copy stack directory contents to runtime (excluding router directory which needs special handling)
+        # Copy stack directory contents to runtime first
         for item in self.stack_dir.iterdir():
             if item.is_dir():
                 dest_dir = output_dir / item.name
                 if dest_dir.exists():
                     shutil.rmtree(dest_dir)
                 shutil.copytree(item, dest_dir)
+
+        # Generate docker-compose.yml
+        self._generate_compose_file(context, output_dir)
+
+        # Generate nginx.conf (this will overwrite the template file)
+        self._generate_nginx_conf(context, output_dir)
 
         print(f"  Generated {len(ollama_instances)} instance(s) in {output_dir}")
 
@@ -104,17 +104,8 @@ class ComposeGenerator:
 
     def _generate_nginx_conf(self, context: Dict, output_dir: Path):
         """Generate nginx.conf from template"""
-        # Load nginx template from stack/router
-        nginx_template_path = self.stack_dir / "router" / "nginx.conf.j2"
-        
-        # Set up a new environment for the nginx template directory
-        nginx_env = Environment(
-            loader=FileSystemLoader(nginx_template_path.parent),
-            trim_blocks=True,
-            lstrip_blocks=True,
-        )
-        
-        template = nginx_env.get_template("nginx.conf.j2")
+        # Load nginx template from builder directory (same as docker-compose template)
+        template = self.env.get_template("nginx.conf.j2")
         content = template.render(**context)
 
         # Write to router directory in output

@@ -30,7 +30,7 @@ class PolyLlamaGenerationTest:
         # Run the generation script
         cmd = [
             "python3",
-            str(self.builder_dir / "generate_compose.py"),
+            str(self.builder_dir / "generator.py"),
             json.dumps(gpu_config),
         ]
 
@@ -105,7 +105,7 @@ class PolyLlamaGenerationTest:
 
     def validate_nginx_file(self, expected_instances):
         """Validate the generated nginx.conf file"""
-        nginx_file = self.root_dir / "runtime/nginx.conf"
+        nginx_file = self.root_dir / "runtime/router/nginx.conf"
 
         if not nginx_file.exists():
             return False, "Nginx file not generated"
@@ -368,3 +368,30 @@ def large_configuration():
         test_name="Large configuration (6 groups)",
         expected_instances=6,
     )
+
+
+if __name__ == "__main__":
+    # Run all tests when script is executed directly
+    two_gpu_groups()
+    three_gpu_groups()
+    single_gpu_group()
+    cpu_only()
+    mixed_gpu_types()
+    large_configuration()
+    
+    # Print summary
+    print("\n📊 Test Summary:")
+    print("="*50)
+    passed = sum(1 for r in tester.test_results if r['success'])
+    failed = sum(1 for r in tester.test_results if not r['success'])
+    total = len(tester.test_results)
+    
+    print(f"Total tests: {total}")
+    print(f"Passed: {passed} ✅")
+    print(f"Failed: {failed} ❌")
+    
+    if failed == 0:
+        print("\n🎉 All tests passed!")
+    else:
+        print("\n💔 Some tests failed. Please check the output above.")
+        sys.exit(1)

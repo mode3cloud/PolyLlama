@@ -49,10 +49,10 @@ def example_system_template_generation():
             # Check that the generation script ran successfully
             assert result.returncode == 0, f"Generation script failed: {result.stderr}"
 
-            # The script outputs to runtime/ directory, so read from there
-            runtime_dir = builder_dir.parent / "runtime"
-            generated_compose_path = runtime_dir / "docker-compose.yml"
-            generated_nginx_path = runtime_dir / "router" / "nginx.conf"
+            # The script outputs to builder/built/ directory, so read from there
+            built_dir = builder_dir / "built"
+            generated_compose_path = built_dir / "docker-compose.yml"
+            generated_nginx_path = built_dir / "nginx.conf"
 
             # Read generated files
             with open(generated_compose_path, "r") as f:

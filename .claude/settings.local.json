@@ -5,7 +5,10 @@
       "Bash(chmod:*)",
       "Bash(./tests/run_tests.sh:*)",
       "Bash(find:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(docker exec:*)",
+      "Bash(./polyllama.sh:*)",
+      "Bash(uv run pytest:*)"
     ],
     "deny": []
   }

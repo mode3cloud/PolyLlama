@@ -3,7 +3,7 @@ name: mode3ai_polyllama
 services:
   openwebui:
       build:
-        context: ../stack/open-webui
+        context: ../../stack/open-webui
         dockerfile: Dockerfile
       container_name: openwebui
       ports:
@@ -13,7 +13,7 @@ services:
 
   olah:
     build:
-      context: ../stack/olah
+      context: ../../stack/olah
       dockerfile: Dockerfile
     container_name: olah
     volumes:
@@ -26,12 +26,12 @@ services:
     hostname: polyllama{{ instance.number }}
     build:
       dockerfile: Dockerfile
-      context: ../stack/ollama
+      context: ../../stack/ollama
     volumes:
       - ~/.cache/huggingface/hub:/root/.cache/huggingface/hub
       - ~/ollama:/root/.ollama
     env_file:
-      - ../.env
+      - ../../.env
     environment:
 {% if instance.gpu_indices %}
       - CUDA_VISIBLE_DEVICES={{ instance.gpu_indices }}
@@ -55,16 +55,17 @@ services:
     container_name: router
     hostname: router
     build:
-      context: ../stack/router
+      context: ../../stack/router
       dockerfile: Dockerfile
     volumes:
-      - ../stack/router/model_router.lua:/usr/local/openresty/lualib/model_router.lua
-      - ../stack/router:/usr/share/nginx/html/ui/
-      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ../../stack/router/model_router.lua:/usr/local/openresty/lualib/model_router.lua
+      - ../../stack/router/index.html:/usr/share/nginx/html/ui/index.html
+      - ../../stack/router/script.js:/usr/share/nginx/html/ui/script.js
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf
     ports:
       - "11434:11434"
     env_file:
-      - ../.env
+      - ../../.env
     environment:
       - OLLAMA_INSTANCE_COUNT={{ instance_count }}
     depends_on:

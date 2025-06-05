@@ -376,7 +376,7 @@ function _M.assign_model_to_least_loaded_instance(model_name)
     local instance_count = get_instance_count()
     local instance_counts = {}
     for i=1,instance_count do
-        instance_counts[i] = {instance = "ollama" .. i, count = 0}
+        instance_counts[i] = {instance = "polyllama" .. i, count = 0}
     end
     
     -- Count models on each instance
@@ -424,7 +424,7 @@ function _M.update_model_mappings()
     
     local instance_count = get_instance_count()
     for i=1,instance_count do
-        local instance = "ollama" .. i
+        local instance = "polyllama" .. i
         local httpc = http.new()
         httpc:set_timeout(5000)
         
@@ -717,7 +717,7 @@ function _M.get_running_models()
     -- Check each Ollama instance
     local instance_count = get_instance_count()
     for i=1,instance_count do
-        local instance = "ollama" .. i
+        local instance = "polyllama" .. i
         local running_models_list = {}
        
         local ok, res = pcall(function()
@@ -876,7 +876,7 @@ function _M.get_all_models()
     -- Check each Ollama instance
     local instance_count = get_instance_count()
     for i=1,instance_count do
-        local instance = "ollama" .. i
+        local instance = "polyllama" .. i
         
         local instance_data
         

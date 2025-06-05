@@ -8,8 +8,9 @@ PolyLlama is a dynamic multi-instance Ollama orchestration system that automatic
 
 ### Dynamic Generation System
 - **Hardware Detection**: `polyllama.sh` uses `nvidia-smi` to detect GPUs and group them by type
-- **Template Rendering**: `builder/generate_compose.py` renders `docker-compose.template.yml` and `nginx.conf.template` based on detected hardware
-- **Output**: Generates `generated-compose.yml` and `stack/router/generated-nginx.conf`
+- **Template Rendering**: `builder/generator.py` renders templates based on detected hardware
+- **Output**: Generates `builder/built/docker-compose.yml` and `builder/built/nginx.conf`
+- **Structure**: Only generated files are placed in `builder/built/`, Dockerfiles remain in `stack/`
 
 ### Request Routing Architecture
 - **Entry Point**: Nginx router (`stack/router/`) serves as the single API endpoint at `:11434`
@@ -26,8 +27,8 @@ The system uses a custom template renderer (not Jinja2) that handles:
 - `{% if instance.gpu_indices %}` conditionals
 
 Templates are in:
-- `builder/docker-compose.template.yml` → `generated-compose.yml`
-- `stack/router/nginx.conf.template` → `stack/router/generated-nginx.conf`
+- `builder/docker-compose.yml.j2` → `builder/built/docker-compose.yml`
+- `builder/nginx.conf.j2` → `builder/built/nginx.conf`
 
 ## Common Commands
 
@@ -41,6 +42,9 @@ Templates are in:
 
 # Debug mode - show build output on console instead of log file
 ./polyllama.sh --debug
+
+# Force rebuild of Docker images (no cache)
+./polyllama.sh --build
 
 # Stop all services
 ./polyllama.sh --stop
@@ -75,15 +79,15 @@ uv sync
 ### Direct Service Management
 ```bash
 # Use generated compose file for manual control
-docker-compose -f generated-compose.yml up -d
-docker-compose -f generated-compose.yml logs polyllama1
-docker-compose -f generated-compose.yml ps
+docker-compose -f builder/built/docker-compose.yml up -d
+docker-compose -f builder/built/docker-compose.yml logs polyllama1
+docker-compose -f builder/built/docker-compose.yml ps
 ```
 
 ## Instance Count Propagation
 
 The `OLLAMA_INSTANCE_COUNT` environment variable flows through the system:
-1. Set in router service environment in `generated-compose.yml`
+1. Set in router service environment in `builder/built/docker-compose.yml`
 2. Read by nginx `init_by_lua_block` into shared memory (`env_vars`)
 3. Used by `model_router.lua` via `get_instance_count()` function
 4. JavaScript UI reads via `/api/ui/instance-count` endpoint
@@ -103,9 +107,9 @@ Models are routed using this hierarchy:
 - Modify `detect_gpu_groups()` function for new hardware types
 
 ### Template Rendering
-- `builder/generate_compose.py`: Core generation logic
-- `builder/docker-compose.template.yml`: Service definitions
-- `stack/router/nginx.conf.template`: Nginx configuration
+- `builder/generator.py`: Core generation logic
+- `builder/docker-compose.yml.j2`: Service definitions template
+- `builder/nginx.conf.j2`: Nginx configuration template
 
 ### Routing Logic
 - `stack/router/model_router.lua`: Request routing and load balancing

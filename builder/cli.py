@@ -20,12 +20,12 @@ class PolyLlamaCLI:
 
     def __init__(self):
         self.root_dir = Path(__file__).parent.parent
-        self.runtime_dir = self.root_dir / "runtime"
-        self.compose_file = self.runtime_dir / "docker-compose.yml"
-        self.log_file = self.runtime_dir / "polyllama-compose-build.log"
-        
-        # Ensure runtime directory exists
-        self.runtime_dir.mkdir(exist_ok=True)
+        self.built_dir = Path(__file__).parent / "built"
+        self.compose_file = self.built_dir / "docker-compose.yml"
+        self.log_file = self.built_dir / "polyllama-compose-build.log"
+
+        # Ensure built directory exists
+        self.built_dir.mkdir(exist_ok=True)
 
     def check_docker(self) -> bool:
         """Check if Docker is running"""
@@ -34,7 +34,7 @@ class PolyLlamaCLI:
                 ["docker", "info"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                check=True
+                check=True,
             )
             return True
         except subprocess.CalledProcessError:
@@ -46,7 +46,7 @@ class PolyLlamaCLI:
         """Check and create .env file if needed"""
         env_file = self.root_dir / ".env"
         env_example = self.root_dir / ".env.example"
-        
+
         if not env_file.exists():
             if env_example.exists():
                 print("📄 .env file not found, copying from .env.example...")
@@ -62,46 +62,86 @@ class PolyLlamaCLI:
         """Detect hardware and generate configuration"""
         detector = GPUDetector()
         gpu_groups = detector.detect_gpu_groups()
-        
+
         # Generate compose file
         generator = ComposeGenerator(self.root_dir)
         config = {"gpu_groups": gpu_groups}
-        generator.generate(config, self.runtime_dir)
-        
+        generator.generate(config, self.built_dir)
+
         # Calculate instance count
         instance_count = len(gpu_groups) if gpu_groups else 1
-        
+
         return {
             "gpu_groups": gpu_groups,
             "instance_count": instance_count,
-            "gpu_count": sum(len(g["indices"]) for g in gpu_groups) if gpu_groups else 0,
-            "config_type": f"dynamic-{len(gpu_groups)}-groups" if gpu_groups else "cpu-only"
+            "gpu_count": (
+                sum(len(g["indices"]) for g in gpu_groups) if gpu_groups else 0
+            ),
+            "config_type": (
+                f"dynamic-{len(gpu_groups)}-groups" if gpu_groups else "cpu-only"
+            ),
         }
 
     def print_banner(self):
         """Print the awesome PolyLlama ASCII banner"""
         print("")
-        print("\033[96m╔══════════════════════════════════════════════════════════════════════════════╗\033[0m")
-        print("\033[96m║\033[0m                                                                              \033[96m║\033[0m")
-        print("\033[96m║\033[0m   \033[94m██████╗  ██████╗ ██╗  ██╗   ██╗██╗     ██╗      █████╗ ███╗   ███╗ █████╗\033[0m    \033[96m║\033[0m")
-        print("\033[96m║\033[0m   \033[94m██╔══██╗██╔═══██╗██║  ╚██╗ ██╔╝██║     ██║     ██╔══██╗████╗ ████║██╔══██╗\033[0m   \033[96m║\033[0m")
-        print("\033[96m║\033[0m   \033[94m██████╔╝██║   ██║██║   ╚████╔╝ ██║     ██║     ███████║██╔████╔██║███████║\033[0m   \033[96m║\033[0m")
-        print("\033[96m║\033[0m   \033[94m██╔═══╝ ██║   ██║██║    ╚██╔╝  ██║     ██║     ██╔══██║██║╚██╔╝██║██╔══██║\033[0m   \033[96m║\033[0m")
-        print("\033[96m║\033[0m   \033[94m██║     ╚██████╔╝███████╗██║   ███████╗███████╗██║  ██║██║ ╚═╝ ██║██║  ██║\033[0m   \033[96m║\033[0m")
-        print("\033[96m║\033[0m   \033[94m╚═╝      ╚═════╝ ╚══════╝╚═╝   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝\033[0m   \033[96m║\033[0m")
-        print("\033[96m║\033[0m                                                                              \033[96m║\033[0m")
-        print("\033[96m║\033[0m   \033[92m🦙 Dynamic Multi-Instance Ollama Orchestration for Local AI Power\033[0m           \033[96m║\033[0m")
-        print("\033[96m║\033[0m                                                                              \033[96m║\033[0m")
-        print("\033[96m║\033[0m   \033[93m✨ Features:\033[0m                                                                \033[96m║\033[0m")
-        print("\033[96m║\033[0m     \033[97m• Auto GPU Detection & Grouping  • Intelligent Load Balancing\033[0m           \033[96m║\033[0m")
-        print("\033[96m║\033[0m     \033[97m• Dynamic Docker Compose Generation  • Modern Web Interface\033[0m             \033[96m║\033[0m")
-        print("\033[96m║\033[0m                                                                              \033[96m║\033[0m")
-        print("\033[96m║\033[0m   \033[95m📖 Documentation & Source: https://github.com/mode3cloud/PolyLlama\033[0m      \033[96m║\033[0m")
-        print("\033[96m║\033[0m                                                                              \033[96m║\033[0m")
-        print("\033[96m╚══════════════════════════════════════════════════════════════════════════════╝\033[0m")
+        print(
+            "\033[96m╔══════════════════════════════════════════════════════════════════════════════╗\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m                                                                              \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m   \033[94m██████╗  ██████╗ ██╗  ██╗   ██╗██╗     ██╗      █████╗ ███╗   ███╗ █████╗\033[0m    \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m   \033[94m██╔══██╗██╔═══██╗██║  ╚██╗ ██╔╝██║     ██║     ██╔══██╗████╗ ████║██╔══██╗\033[0m   \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m   \033[94m██████╔╝██║   ██║██║   ╚████╔╝ ██║     ██║     ███████║██╔████╔██║███████║\033[0m   \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m   \033[94m██╔═══╝ ██║   ██║██║    ╚██╔╝  ██║     ██║     ██╔══██║██║╚██╔╝██║██╔══██║\033[0m   \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m   \033[94m██║     ╚██████╔╝███████╗██║   ███████╗███████╗██║  ██║██║ ╚═╝ ██║██║  ██║\033[0m   \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m   \033[94m╚═╝      ╚═════╝ ╚══════╝╚═╝   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝\033[0m   \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m                                                                              \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m   \033[92m🦙 Dynamic Multi-Instance Ollama Orchestration for Local AI Power\033[0m           \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m                                                                              \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m   \033[93m✨ Features:\033[0m                                                                \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m     \033[97m• Auto GPU Detection & Grouping  • Intelligent Load Balancing\033[0m           \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m     \033[97m• Dynamic Docker Compose Generation  • Modern Web Interface\033[0m             \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m                                                                              \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m   \033[95m📖 Documentation & Source: https://github.com/mode3cloud/PolyLlama\033[0m      \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m║\033[0m                                                                              \033[96m║\033[0m"
+        )
+        print(
+            "\033[96m╚══════════════════════════════════════════════════════════════════════════════╝\033[0m"
+        )
         print("")
 
-    def launch(self, debug: bool = False):
+    def launch(self, debug: bool = False, build: bool = False):
         """Launch the PolyLlama stack"""
         if not self.check_docker():
             return 1
@@ -114,7 +154,7 @@ class PolyLlamaCLI:
 
         # Detect and generate configuration
         config = self.detect_and_generate()
-        
+
         print("")
         print("🎯 Deployment Summary:")
         print(f"  GPUs detected: {config['gpu_count']}")
@@ -125,8 +165,14 @@ class PolyLlamaCLI:
         # Stop any existing services
         print("🛑 Stopping any existing services...")
         subprocess.run(
-            ["docker-compose", "-f", str(self.compose_file), "down", "--remove-orphans"],
-            stderr=subprocess.DEVNULL
+            [
+                "docker-compose",
+                "-f",
+                str(self.compose_file),
+                "down",
+                "--remove-orphans",
+            ],
+            stderr=subprocess.DEVNULL,
         )
 
         # Pull latest images
@@ -140,22 +186,25 @@ class PolyLlamaCLI:
                 subprocess.run(
                     ["docker-compose", "-f", str(self.compose_file), "pull"],
                     stdout=log,
-                    stderr=subprocess.STDOUT
+                    stderr=subprocess.STDOUT,
                 )
 
         # Build services
         print("🔨 Building services...")
+        build_cmd = ["docker-compose", "-f", str(self.compose_file), "build"]
+        if build:
+            print("   Force rebuild: --no-cache enabled")
+            build_cmd.append("--no-cache")
+
         if debug:
             print("   Debug mode: showing output on console")
-            result = subprocess.run(["docker-compose", "-f", str(self.compose_file), "build"])
+            result = subprocess.run(build_cmd)
         else:
-            print(f"   This may take a few minutes... output logged to: {self.log_file}")
+            print(
+                f"   This may take a few minutes... output logged to: {self.log_file}"
+            )
             with open(self.log_file, "a") as log:
-                result = subprocess.run(
-                    ["docker-compose", "-f", str(self.compose_file), "build"],
-                    stdout=log,
-                    stderr=subprocess.STDOUT
-                )
+                result = subprocess.run(build_cmd, stdout=log, stderr=subprocess.STDOUT)
 
         # Check if build was successful
         if result.returncode != 0:
@@ -172,25 +221,30 @@ class PolyLlamaCLI:
 
         # Start services
         print("▶️  Starting services...")
-        subprocess.run(["docker-compose", "-f", str(self.compose_file), "up", "-d"])
+        up_cmd = ["docker-compose", "-f", str(self.compose_file), "up", "-d"]
+        if build:
+            up_cmd.append("--build")
+        subprocess.run(up_cmd)
 
         # Show status
         print("")
         print("✅ Dynamic Ollama stack launched successfully!")
-        print(f"🎯 Configuration: {config['instance_count']} instance(s) across {len(config['gpu_groups'])} GPU group(s)")
+        print(
+            f"🎯 Configuration: {config['instance_count']} instance(s) across {len(config['gpu_groups'])} GPU group(s)"
+        )
         print(f"🔍 Total GPUs: {config['gpu_count']}")
         print("")
 
-        if config['gpu_groups']:
+        if config["gpu_groups"]:
             print("📊 Instance → GPU Mapping:")
-            for i, group in enumerate(config['gpu_groups'], 1):
-                indices_str = ','.join(map(str, group['indices']))
+            for i, group in enumerate(config["gpu_groups"], 1):
+                indices_str = ",".join(map(str, group["indices"]))
                 print(f"  polyllama{i} → {group['name']} (GPUs: {indices_str})")
             print("")
 
-        print("🌐 Web UI: http://localhost:11434/ui/")
-        print("🔧 API: http://localhost:11434/api/")
-        print("📊 Olah Mirror: http://localhost:8090/")
+        print(
+            "🌐+🤖 Polyllama Endpoint (UI and Ollama Router): http://localhost:11434/"
+        )
         print("")
         print("📋 Service Status:")
         subprocess.run(["docker-compose", "-f", str(self.compose_file), "ps"])
@@ -205,7 +259,7 @@ class PolyLlamaCLI:
         print(f"📋 Compose Build log: {self.log_file}")
         print("")
         print("Thank you for using PolyLlama! 🦙")
-        
+
         return 0
 
     def stop(self):
@@ -214,14 +268,20 @@ class PolyLlamaCLI:
             return 1
 
         print("🛑 Stopping Polyllama stack...")
-        
+
         if self.compose_file.exists():
             print(f"  Stopping services from {self.compose_file}...")
             subprocess.run(
-                ["docker-compose", "-f", str(self.compose_file), "down", "--remove-orphans"],
-                stderr=subprocess.DEVNULL
+                [
+                    "docker-compose",
+                    "-f",
+                    str(self.compose_file),
+                    "down",
+                    "--remove-orphans",
+                ],
+                stderr=subprocess.DEVNULL,
             )
-        
+
         print("✅ All services stopped")
         return 0
 
@@ -231,19 +291,28 @@ class PolyLlamaCLI:
             return 1
 
         print("📜 Showing logs from all services...")
-        
+
         if self.compose_file.exists():
             # Check if services are running
             result = subprocess.run(
                 ["docker-compose", "-f", str(self.compose_file), "ps", "--services"],
                 capture_output=True,
-                text=True
+                text=True,
             )
             if result.stdout.strip():
                 print(f"  Logs from {self.compose_file}:")
-                subprocess.run(["docker-compose", "-f", str(self.compose_file), "logs", "--tail=50", "-f"])
+                subprocess.run(
+                    [
+                        "docker-compose",
+                        "-f",
+                        str(self.compose_file),
+                        "logs",
+                        "--tail=50",
+                        "-f",
+                    ]
+                )
                 return 0
-        
+
         print("❌ No running services found")
         return 1
 
@@ -253,14 +322,14 @@ class PolyLlamaCLI:
             return 1
 
         print("📊 Service Status:")
-        
+
         if self.compose_file.exists():
             print("")
             print(f"  From {self.compose_file}:")
             result = subprocess.run(
                 ["docker-compose", "-f", str(self.compose_file), "ps"],
                 capture_output=True,
-                text=True
+                text=True,
             )
             if "Up" in result.stdout:
                 print(result.stdout)
@@ -272,9 +341,9 @@ class PolyLlamaCLI:
         """Show detected hardware configuration"""
         print("🔍 Starting hardware detection...")
         print("")
-        
+
         config = self.detect_and_generate()
-        
+
         print("")
         print("📋 Final Configuration Summary:")
         print(f"  Total GPUs: {config['gpu_count']}")
@@ -283,23 +352,25 @@ class PolyLlamaCLI:
         print(f"  Configuration: {config['config_type']}")
         print(f"  Generated file: {self.compose_file}")
         print("")
-        
-        if not config['gpu_groups']:
+
+        if not config["gpu_groups"]:
             print("  🖥️  CPU-Only Configuration:")
             print("    - No GPUs detected or NVIDIA runtime unavailable")
             print("    - Will create 1 Ollama instance using CPU only")
             print("    - Suitable for smaller models and inference")
         else:
             print("  🎯 Dynamic GPU Configuration:")
-            for i, group in enumerate(config['gpu_groups'], 1):
-                indices = group['indices']
+            for i, group in enumerate(config["gpu_groups"], 1):
+                indices = group["indices"]
                 gpu_count = len(indices)
-                indices_str = ','.join(map(str, indices))
-                print(f"    - Instance {i}: {group['name']} (GPUs: {indices_str}) - {gpu_count} GPU(s)")
+                indices_str = ",".join(map(str, indices))
+                print(
+                    f"    - Instance {i}: {group['name']} (GPUs: {indices_str}) - {gpu_count} GPU(s)"
+                )
             print("    - Each group gets dedicated Ollama instance")
             print("    - OLLAMA_SCHED_SPREAD=1 for optimal GPU utilization")
             print("    - CUDA_DEVICE_ORDER=PCI_BUS_ID for consistent ordering")
-        
+
         print("")
         print("📄 Generated Docker Compose Preview:")
         print("─────────────────────────────────────")
@@ -309,7 +380,7 @@ class PolyLlamaCLI:
                 print(f"  {line.rstrip()}")
         print("  ...")
         print("─────────────────────────────────────")
-        
+
         return 0
 
 
@@ -328,45 +399,39 @@ Examples:
   polyllama              # Auto-detect and launch
   polyllama --detect     # Show what would be detected
   polyllama --debug      # Launch with debug output on console
+  polyllama --build      # Launch and force rebuild images
   polyllama --stop       # Stop all services
-"""
+""",
     )
-    
+
+    parser.add_argument("--stop", action="store_true", help="Stop all services")
+
     parser.add_argument(
-        "--stop",
-        action="store_true",
-        help="Stop all services"
+        "--logs", action="store_true", help="Show logs from all services"
     )
-    
+
     parser.add_argument(
-        "--logs",
-        action="store_true",
-        help="Show logs from all services"
+        "--status", action="store_true", help="Show status of all services"
     )
-    
+
     parser.add_argument(
-        "--status",
-        action="store_true",
-        help="Show status of all services"
+        "--detect", action="store_true", help="Show detected hardware configuration"
     )
-    
-    parser.add_argument(
-        "--detect",
-        action="store_true",
-        help="Show detected hardware configuration"
-    )
-    
+
     parser.add_argument(
         "--debug",
         action="store_true",
-        help="Enable debug mode (show build output on console)"
+        help="Enable debug mode (show build output on console)",
     )
-    
-    
+
+    parser.add_argument(
+        "--build", action="store_true", help="Force rebuild of Docker images"
+    )
+
     args = parser.parse_args()
-    
+
     cli = PolyLlamaCLI()
-    
+
     # Handle different commands
     if args.stop:
         return cli.stop()
@@ -378,7 +443,7 @@ Examples:
         return cli.detect()
     else:
         # Default action is to launch
-        return cli.launch(debug=args.debug)
+        return cli.launch(debug=args.debug, build=args.build)
 
 
 if __name__ == "__main__":

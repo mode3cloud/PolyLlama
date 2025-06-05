@@ -42,18 +42,10 @@ class ComposeGenerator:
             "instance_count": instance_count,
         }
 
-        # Copy stack directory contents to runtime first
-        for item in self.stack_dir.iterdir():
-            if item.is_dir():
-                dest_dir = output_dir / item.name
-                if dest_dir.exists():
-                    shutil.rmtree(dest_dir)
-                shutil.copytree(item, dest_dir)
-
         # Generate docker-compose.yml
         self._generate_compose_file(context, output_dir)
 
-        # Generate nginx.conf (this will overwrite the template file)
+        # Generate nginx.conf
         self._generate_nginx_conf(context, output_dir)
 
         print(f"  Generated {len(ollama_instances)} instance(s) in {output_dir}")
@@ -108,10 +100,8 @@ class ComposeGenerator:
         template = self.env.get_template("nginx.conf.j2")
         content = template.render(**context)
 
-        # Write to router directory in output
-        router_dir = output_dir / "router"
-        router_dir.mkdir(exist_ok=True)
-        output_file = router_dir / "nginx.conf"
+        # Write to output directory directly (not in router subdirectory)
+        output_file = output_dir / "nginx.conf"
         output_file.write_text(content)
 
 
@@ -132,9 +122,9 @@ def main():
     # Use the generator
     root_dir = Path(__file__).parent.parent
     generator = ComposeGenerator(root_dir)
-    runtime_dir = root_dir / "runtime"
+    built_dir = Path(__file__).parent / "built"
     
-    generator.generate(gpu_config, runtime_dir)
+    generator.generate(gpu_config, built_dir)
 
 
 if __name__ == "__main__":

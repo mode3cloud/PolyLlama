@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 
-def example_system_template_generation():
+def template_generation():
     """Test that template generation matches expected artifacts for local system."""
 
     # Get the project root directory
@@ -24,7 +24,7 @@ def example_system_template_generation():
     test_artifacts_dir = project_root / "tests" / "test_artifacts"
 
     # Load the local system GPU configuration
-    gpu_config_path = test_artifacts_dir / "example_system_gpu_config.json"
+    gpu_config_path = test_artifacts_dir / "gpu_config.json"
     with open(gpu_config_path, "r") as f:
         gpu_config = json.load(f)
 
@@ -65,8 +65,8 @@ def example_system_template_generation():
             os.chdir(original_cwd)
 
     # Load expected artifacts
-    expected_compose_path = test_artifacts_dir / "example_system_docker-compose.yml"
-    expected_nginx_path = test_artifacts_dir / "example_system_nginx.conf"
+    expected_compose_path = test_artifacts_dir / "docker-compose.yml"
+    expected_nginx_path = test_artifacts_dir / "nginx.conf"
 
     with open(expected_compose_path, "r") as f:
         expected_compose = f.read()
@@ -88,11 +88,11 @@ def example_system_template_generation():
     print("✅ Local system template generation matches expected artifacts")
 
 
-def example_system_gpu_config_validity():
+def gpu_config_validity():
     """Validate that the local system GPU config is valid."""
 
     test_artifacts_dir = Path(__file__).parent.parent / "tests" / "test_artifacts"
-    gpu_config_path = test_artifacts_dir / "example_system_gpu_config.json"
+    gpu_config_path = test_artifacts_dir / "gpu_config.json"
 
     with open(gpu_config_path, "r") as f:
         gpu_config = json.load(f)
@@ -133,9 +133,9 @@ def artifacts_exist():
     test_artifacts_dir = Path(__file__).parent.parent / "tests" / "test_artifacts"
 
     required_files = [
-        "example_system_gpu_config.json",
-        "example_system_docker-compose.yml",
-        "example_system_nginx.conf",
+        "gpu_config.json",
+        "docker-compose.yml",
+        "nginx.conf",
     ]
 
     for filename in required_files:
@@ -151,7 +151,7 @@ def generated_compose_structure():
     """Validate that generated docker-compose.yml has correct structure for local system."""
 
     test_artifacts_dir = Path(__file__).parent.parent / "tests" / "test_artifacts"
-    compose_path = test_artifacts_dir / "example_system_docker-compose.yml"
+    compose_path = test_artifacts_dir / "docker-compose.yml"
 
     with open(compose_path, "r") as f:
         compose_content = f.read()
@@ -197,7 +197,7 @@ def generated_nginx_structure():
     """Validate that generated nginx.conf has correct structure for local system."""
 
     test_artifacts_dir = Path(__file__).parent.parent / "tests" / "test_artifacts"
-    nginx_path = test_artifacts_dir / "example_system_nginx.conf"
+    nginx_path = test_artifacts_dir / "nginx.conf"
 
     with open(nginx_path, "r") as f:
         nginx_content = f.read()
@@ -234,8 +234,8 @@ def generated_nginx_structure():
 if __name__ == "__main__":
     # Run validation when script is executed directly
     artifacts_exist()
-    example_system_gpu_config_validity()
+    gpu_config_validity()
     generated_compose_structure()
     generated_nginx_structure()
-    example_system_template_generation()
+    template_generation()
     print("🎉 All local system generation validations passed!")

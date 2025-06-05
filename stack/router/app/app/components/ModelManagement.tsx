@@ -62,7 +62,7 @@ export default function ModelManagement({
           <input
             type="text"
             className={styles.searchInput}
-            placeholder="Search models..."
+            placeholder="Search local models..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -98,11 +98,10 @@ export default function ModelManagement({
                 <td className={styles.noResults}>No models found</td>
               </tr>
             ) : (
-              filteredModels.map((model, index) => (
+              filteredModels.map((model) => (
                 <ModelRow
                   key={model.name}
                   model={model}
-                  modelId={`model-${index}`}
                   isLoaded={runningModels.hasOwnProperty(model.name)}
                   loadedOn={runningModels[model.name] || []}
                   contextSize={modelContexts[model.name]}

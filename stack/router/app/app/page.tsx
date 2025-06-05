@@ -67,9 +67,11 @@ export default function Home() {
         setAvailableModels(models)
       }
 
+      let runningModelsData: RunningModels = {}
       if (runningRes.ok) {
         const data = await runningRes.json()
-        setRunningModels(data.running_models || {})
+        runningModelsData = data.running_models || {}
+        setRunningModels(runningModelsData)
       }
 
       if (mappingsRes.ok) {
@@ -77,15 +79,17 @@ export default function Home() {
         setModelMappings(data.mappings || {})
       }
 
+      let currentContexts: Record<string, number> = {}
       if (contextsRes.ok) {
         const data = await contextsRes.json()
-        setModelContexts(data.contexts || {})
+        currentContexts = data.contexts || {}
+        setModelContexts(currentContexts)
       }
 
       // Sync contexts if needed
-      const runningModelNames = Object.keys(runningRes.ok ? (await runningRes.json()).running_models || {} : {})
+      const runningModelNames = Object.keys(runningModelsData)
       const hasRunningModels = runningModelNames.length > 0
-      const hasMissingContexts = runningModelNames.some(model => !modelContexts[model])
+      const hasMissingContexts = runningModelNames.some(model => !currentContexts[model])
       
       if (hasRunningModels && hasMissingContexts) {
         try {
@@ -110,7 +114,7 @@ export default function Home() {
       console.error('Error refreshing data:', error)
       setLoading(false)
     }
-  }, [modelContexts])
+  }, [])
 
   // Load model handler
   const handleLoadModel = useCallback((modelName: string) => {

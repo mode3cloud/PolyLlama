@@ -6,7 +6,6 @@ import styles from './ModelRow.module.css'
 
 interface ModelRowProps {
   model: Model;
-  modelId: string;
   isLoaded: boolean;
   loadedOn: string[];
   contextSize?: number;
@@ -18,7 +17,6 @@ interface ModelRowProps {
 
 export default function ModelRow({
   model,
-  modelId,
   isLoaded,
   loadedOn,
   contextSize,
@@ -143,10 +141,21 @@ export default function ModelRow({
                     </div>
                   )}
                   
+                  {details.system && (
+                    <div className={styles.detailSection}>
+                      <h4>System Prompt</h4>
+                      <pre className={styles.codePreview}>{details.system}</pre>
+                    </div>
+                  )}
+                  
                   {details.parameters && (
                     <div className={styles.detailSection}>
                       <h4>Parameters</h4>
-                      <pre className={styles.codePreview}>{details.parameters}</pre>
+                      <pre className={styles.codePreview}>{
+                        typeof details.parameters === 'string' 
+                          ? details.parameters 
+                          : JSON.stringify(details.parameters, null, 2)
+                      }</pre>
                     </div>
                   )}
                 </div>

@@ -58,7 +58,7 @@ class PolyLlamaCLI:
                 print("⚠️  .env file not found and .env.example doesn't exist")
                 print("   The stack will use default environment settings")
 
-    def detect_and_generate(self) -> Dict:
+    def detect_and_generate(self, dev_mode: bool = False) -> Dict:
         """Detect hardware and generate configuration"""
         detector = GPUDetector()
         gpu_groups = detector.detect_gpu_groups()
@@ -66,7 +66,7 @@ class PolyLlamaCLI:
         # Generate compose file
         generator = ComposeGenerator(self.root_dir)
         config = {"gpu_groups": gpu_groups}
-        generator.generate(config, self.built_dir)
+        generator.generate(config, self.built_dir, dev_mode=dev_mode)
 
         # Calculate instance count
         instance_count = len(gpu_groups) if gpu_groups else 1
@@ -80,68 +80,52 @@ class PolyLlamaCLI:
             "config_type": (
                 f"dynamic-{len(gpu_groups)}-groups" if gpu_groups else "cpu-only"
             ),
+            "dev_mode": dev_mode,
         }
 
     def print_banner(self):
         """Print the awesome PolyLlama ASCII banner"""
         print("")
+        print("")
         print(
-            "\033[96m╔══════════════════════════════════════════════════════════════════════════════╗\033[0m"
+            "   \033[94m██████╗  ██████╗ ██╗  ██╗   ██╗██╗     ██╗      █████╗ ███╗   ███╗ █████╗\033[0m"
         )
         print(
-            "\033[96m║\033[0m                                                                              \033[96m║\033[0m"
+            "   \033[94m██╔══██╗██╔═══██╗██║  ╚██╗ ██╔╝██║     ██║     ██╔══██╗████╗ ████║██╔══██╗\033[0m"
         )
         print(
-            "\033[96m║\033[0m   \033[94m██████╗  ██████╗ ██╗  ██╗   ██╗██╗     ██╗      █████╗ ███╗   ███╗ █████╗\033[0m    \033[96m║\033[0m"
+            "   \033[94m██████╔╝██║   ██║██║   ╚████╔╝ ██║     ██║     ███████║██╔████╔██║███████║\033[0m"
         )
         print(
-            "\033[96m║\033[0m   \033[94m██╔══██╗██╔═══██╗██║  ╚██╗ ██╔╝██║     ██║     ██╔══██╗████╗ ████║██╔══██╗\033[0m   \033[96m║\033[0m"
+            "   \033[94m██╔═══╝ ██║   ██║██║    ╚██╔╝  ██║     ██║     ██╔══██║██║╚██╔╝██║██╔══██║\033[0m"
         )
         print(
-            "\033[96m║\033[0m   \033[94m██████╔╝██║   ██║██║   ╚████╔╝ ██║     ██║     ███████║██╔████╔██║███████║\033[0m   \033[96m║\033[0m"
+            "   \033[94m██║     ╚██████╔╝███████╗██║   ███████╗███████╗██║  ██║██║ ╚═╝ ██║██║  ██║\033[0m"
         )
         print(
-            "\033[96m║\033[0m   \033[94m██╔═══╝ ██║   ██║██║    ╚██╔╝  ██║     ██║     ██╔══██║██║╚██╔╝██║██╔══██║\033[0m   \033[96m║\033[0m"
+            "   \033[94m╚═╝      ╚═════╝ ╚══════╝╚═╝   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝\033[0m"
+        )
+        print("")
+        print(
+            "   \033[92m🦙 Dynamic Multi-Instance Ollama Orchestration for Local AI Power\033[0m"
+        )
+        print("")
+        print(
+            "   \033[93m✨ Features:\033[0m"
         )
         print(
-            "\033[96m║\033[0m   \033[94m██║     ╚██████╔╝███████╗██║   ███████╗███████╗██║  ██║██║ ╚═╝ ██║██║  ██║\033[0m   \033[96m║\033[0m"
+            "     \033[97m• Auto GPU Detection & Grouping  • Intelligent Load Balancing\033[0m"
         )
         print(
-            "\033[96m║\033[0m   \033[94m╚═╝      ╚═════╝ ╚══════╝╚═╝   ╚══════╝╚══════╝╚═╝  ╚═╝╚═╝     ╚═╝╚═╝  ╚═╝\033[0m   \033[96m║\033[0m"
+            "     \033[97m• Dynamic Docker Compose Generation  • Modern Web Interface\033[0m"
         )
+        print("")
         print(
-            "\033[96m║\033[0m                                                                              \033[96m║\033[0m"
-        )
-        print(
-            "\033[96m║\033[0m   \033[92m🦙 Dynamic Multi-Instance Ollama Orchestration for Local AI Power\033[0m           \033[96m║\033[0m"
-        )
-        print(
-            "\033[96m║\033[0m                                                                              \033[96m║\033[0m"
-        )
-        print(
-            "\033[96m║\033[0m   \033[93m✨ Features:\033[0m                                                                \033[96m║\033[0m"
-        )
-        print(
-            "\033[96m║\033[0m     \033[97m• Auto GPU Detection & Grouping  • Intelligent Load Balancing\033[0m           \033[96m║\033[0m"
-        )
-        print(
-            "\033[96m║\033[0m     \033[97m• Dynamic Docker Compose Generation  • Modern Web Interface\033[0m             \033[96m║\033[0m"
-        )
-        print(
-            "\033[96m║\033[0m                                                                              \033[96m║\033[0m"
-        )
-        print(
-            "\033[96m║\033[0m   \033[95m📖 Documentation & Source: https://github.com/mode3cloud/PolyLlama\033[0m      \033[96m║\033[0m"
-        )
-        print(
-            "\033[96m║\033[0m                                                                              \033[96m║\033[0m"
-        )
-        print(
-            "\033[96m╚══════════════════════════════════════════════════════════════════════════════╝\033[0m"
+            "   \033[95m📖 Documentation & Source: https://github.com/mode3cloud/PolyLlama\033[0m"
         )
         print("")
 
-    def launch(self, debug: bool = False, build: bool = False):
+    def launch(self, debug: bool = False, build: bool = False, dev_mode: bool = False):
         """Launch the PolyLlama stack"""
         if not self.check_docker():
             return 1
@@ -150,10 +134,12 @@ class PolyLlamaCLI:
         self.print_banner()
 
         print("🚀 Starting dynamic Ollama stack deployment...")
+        if dev_mode:
+            print("🔧 Development mode enabled - Next.js app will run with hot reloading")
         print("")
 
         # Detect and generate configuration
-        config = self.detect_and_generate()
+        config = self.detect_and_generate(dev_mode=dev_mode)
 
         print("")
         print("🎯 Deployment Summary:")
@@ -245,6 +231,8 @@ class PolyLlamaCLI:
         print(
             "🌐+🤖 Polyllama Endpoint (UI and Ollama Router): http://localhost:11434/"
         )
+        if dev_mode:
+            print("💡 Edit files in stack/router/app/ for hot reloading")
         print("")
         print("📋 Service Status:")
         subprocess.run(["docker-compose", "-f", str(self.compose_file), "ps"])
@@ -428,6 +416,12 @@ Examples:
         "--build", action="store_true", help="Force rebuild of Docker images"
     )
 
+    parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="Development mode - bind mount app source for hot reloading",
+    )
+
     args = parser.parse_args()
 
     cli = PolyLlamaCLI()
@@ -443,7 +437,7 @@ Examples:
         return cli.detect()
     else:
         # Default action is to launch
-        return cli.launch(debug=args.debug, build=args.build)
+        return cli.launch(debug=args.debug, build=args.build, dev_mode=args.dev)
 
 
 if __name__ == "__main__":

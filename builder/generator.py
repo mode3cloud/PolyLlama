@@ -22,13 +22,14 @@ class ComposeGenerator:
             lstrip_blocks=True,
         )
 
-    def generate(self, config: Dict, output_dir: Path):
+    def generate(self, config: Dict, output_dir: Path, dev_mode: bool = False):
         """
         Generate Docker Compose and Nginx configurations
 
         Args:
             config: Configuration dict with 'gpu_groups' key
             output_dir: Directory to write generated files
+            dev_mode: Whether to generate configs for development mode
         """
         # Create output directory
         output_dir.mkdir(exist_ok=True)
@@ -40,6 +41,7 @@ class ComposeGenerator:
         context = {
             "ollama_instances": ollama_instances,
             "instance_count": instance_count,
+            "dev_mode": dev_mode,
         }
 
         # Generate docker-compose.yml

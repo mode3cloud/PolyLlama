@@ -14,3 +14,7 @@ _local.todo.txt
 !CLAUDE.md
 .coverage
 coverage.xml
+
+node_modules
+.pnpm
+.next

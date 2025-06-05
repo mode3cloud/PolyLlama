@@ -57,11 +57,21 @@ services:
     build:
       context: ../../stack/router
       dockerfile: Dockerfile
+{% if dev_mode %}
+      target: development
+{% else %}
+      target: production
+{% endif %}
     volumes:
       - ../../stack/router/model_router.lua:/usr/local/openresty/lualib/model_router.lua
-      - ../../stack/router/index.html:/usr/share/nginx/html/ui/index.html
-      - ../../stack/router/script.js:/usr/share/nginx/html/ui/script.js
       - ./nginx.conf:/etc/nginx/conf.d/default.conf
+{% if dev_mode %}
+      # Development mode: bind mount the app source
+      - ../../stack/router/app:/app
+      # Preserve node_modules in the container
+      - /app/node_modules
+      - /app/.next
+{% endif %}
     ports:
       - "11434:11434"
     env_file:

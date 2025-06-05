@@ -42,6 +42,7 @@ class ComposeGenerator:
             "ollama_instances": ollama_instances,
             "instance_count": instance_count,
             "dev_mode": dev_mode,
+            "gpu_groups": config["gpu_groups"],
         }
 
         # Generate docker-compose.yml
@@ -84,6 +85,7 @@ class ComposeGenerator:
                 "memory_limit": memory_limit,
                 "gpu_name": group["name"],
                 "gpu_count": gpu_count,
+                "gpu_group_index": i - 1,  # 0-based index for matching with gpu_groups
             })
 
         return instances

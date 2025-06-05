@@ -589,6 +589,42 @@ server {
             }))
         }
     }
+    
+    # Custom endpoint for UI to get GPU configuration
+    location /api/ui/gpu-config {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            
+            -- GPU configuration from build time
+            local gpu_config = {
+                groups = {
+{% for group in gpu_groups %}
+                    {
+                        name = "{{ group.name }}",
+                        indices = { {{ group.indices | join(', ') }} },
+                        devices = {
+{% for device in group.devices %}
+                            {
+                                index = {{ device.index }},
+                                name = "{{ device.name }}",
+                                pci_bus = "{{ device.pci_bus }}"
+                            }{{ "," if not loop.last }}
+{% endfor %}
+                        }
+                    }{{ "," if not loop.last }}
+{% endfor %}
+                },
+                instance_mapping = {
+{% for instance in ollama_instances %}
+                    ["polyllama{{ instance.number }}"] = {{ instance.gpu_group_index if instance.gpu_indices else -1 }}{{ "," if not loop.last }}
+{% endfor %}
+                }
+            }
+            
+            ngx.say(cjson.encode(gpu_config))
+        }
+    }
 
     # Custom endpoint for UI to get running models
     location /api/ui/running-models {

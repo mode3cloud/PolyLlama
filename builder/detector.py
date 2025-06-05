@@ -28,6 +28,7 @@ class GPUDetector:
         
         # Group GPUs by type
         gpu_type_groups = defaultdict(list)
+        gpu_devices_by_type = defaultdict(list)
         
         print("🔍 Detected GPUs using nvidia-smi (PCI bus order):")
         for gpu in gpu_info:
@@ -37,13 +38,19 @@ class GPUDetector:
             
             print(f"  GPU {index}: {name} ({pci_bus})")
             gpu_type_groups[name].append(index)
+            gpu_devices_by_type[name].append({
+                "index": index,
+                "name": name,
+                "pci_bus": pci_bus
+            })
         
         # Convert to list format
         gpu_groups = []
         for gpu_type, indices in gpu_type_groups.items():
             gpu_groups.append({
                 "name": gpu_type,
-                "indices": sorted(indices)  # Ensure consistent ordering
+                "indices": sorted(indices),  # Ensure consistent ordering
+                "devices": sorted(gpu_devices_by_type[gpu_type], key=lambda x: x['index'])
             })
         
         print()

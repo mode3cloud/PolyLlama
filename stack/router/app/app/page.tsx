@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import Header from './components/Header'
 import SystemOverview from './components/SystemOverview'
-import InstanceGrid from './components/InstanceGrid'
 import ModelManagement from './components/ModelManagement'
 import LoadModelModal from './components/LoadModelModal'
 import { Instance, Model, RunningModels, ModelMappings } from './types'
@@ -187,12 +186,6 @@ export default function Home() {
       <Header onRefresh={refreshData} />
       <main className="flex-1 max-w-[1400px] mx-auto p-4 md:p-8 w-full">
         <SystemOverview 
-          instances={instances}
-          instanceStatuses={instanceStatuses}
-          runningModels={runningModels}
-        />
-        
-        <InstanceGrid
           instances={instances}
           instanceStatuses={instanceStatuses}
           runningModels={runningModels}

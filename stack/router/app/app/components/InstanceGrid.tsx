@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback } from 'react'
+import { useCallback, useState, useEffect } from 'react'
 import { Instance, RunningModels } from '../types'
 
 interface InstanceGridProps {
@@ -11,14 +11,36 @@ interface InstanceGridProps {
   onRefresh: () => void;
 }
 
-export default function InstanceGrid({ 
-  instances, 
-  instanceStatuses, 
-  runningModels, 
+interface GPUConfig {
+  groups: Array<{
+    name: string;
+    indices: number[];
+    devices: Array<{
+      index: number;
+      name: string;
+      pci_bus: string;
+    }>;
+  }>;
+  instance_mapping: Record<string, number>;
+}
+
+export default function InstanceGrid({
+  instances,
+  instanceStatuses,
+  runningModels,
   modelContexts,
-  onRefresh 
+  onRefresh
 }: InstanceGridProps) {
-  
+  const [gpuConfig, setGpuConfig] = useState<GPUConfig | null>(null)
+
+  useEffect(() => {
+    // Fetch GPU configuration
+    fetch('/api/ui/gpu-config')
+      .then(res => res.json())
+      .then(data => setGpuConfig(data))
+      .catch(err => console.error('Failed to fetch GPU config:', err))
+  }, [])
+
   const handleUnloadModel = useCallback(async (modelName: string, instanceName: string) => {
     if (!confirm(`Are you sure you want to unload ${modelName} from ${instanceName}?`)) {
       return
@@ -51,9 +73,6 @@ export default function InstanceGrid({
 
   return (
     <section className="mb-8">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-semibold text-gray-900">Instance Management</h2>
-      </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
         {instances.map(instance => {
           const status = instanceStatuses[instance.name] || { status: 'offline', name: instance.name }
@@ -70,12 +89,13 @@ export default function InstanceGrid({
                   <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-success animate-pulse-soft' : 'bg-danger'}`}></span>
                   <span>{instance.name}</span>
                 </div>
-                <span className="text-xs bg-white/20 px-3 py-1 rounded">GPU Group</span>
               </div>
               <div className="p-6">
                 <div className="flex items-center gap-4 mb-6 pb-4 border-b border-gray-200">
                   <div className="bg-gray-100 px-4 py-2 rounded-md text-sm text-gray-700 font-medium">
-                    GPU Group {instanceNumber}
+                    {gpuConfig && gpuConfig.instance_mapping[instance.name] !== undefined && gpuConfig.instance_mapping[instance.name] >= 0
+                      ? `${gpuConfig.groups[gpuConfig.instance_mapping[instance.name]]?.name} - ${gpuConfig.groups[gpuConfig.instance_mapping[instance.name]]?.devices.length || 0} GPU(s)`
+                      : 'CPU-only Instance'}
                   </div>
                 </div>
                 <div className="grid grid-cols-2 gap-4 mb-6">
@@ -99,7 +119,7 @@ export default function InstanceGrid({
                             {model}
                             <small className="text-white/80 ml-1">{contextInfo}</small>
                           </span>
-                          <button 
+                          <button
                             className="bg-danger text-white rounded-full w-[18px] h-[18px] text-xs leading-none cursor-pointer flex items-center justify-center transition-all opacity-80 hover:opacity-100 hover:scale-110"
                             onClick={() => handleUnloadModel(model, instance.name)}
                             title={`Unload ${model} from ${instance.name}`}

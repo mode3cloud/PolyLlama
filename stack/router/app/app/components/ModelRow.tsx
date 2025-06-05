@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { Model } from '../types'
-import styles from './ModelRow.module.css'
 
 interface ModelRowProps {
   model: Model;
@@ -42,7 +41,7 @@ export default function ModelRow({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: model.name })
       })
-      
+
       if (response.ok) {
         const data = await response.json()
         setDetails(data)
@@ -62,38 +61,47 @@ export default function ModelRow({
   }
 
   return (
-    <tr>
-      <td colSpan={3}>
-        <div className={styles.rowContent}>
-          <div className={styles.mainInfo}>
-            <div className={styles.header}>
-              <button className={styles.expandBtn} onClick={onToggleExpand}>
+    <tr className="hover:bg-gray-50">
+      <td colSpan={3} className="px-4 py-2 border-b border-gray-100">
+        <div className="w-full">
+          <div className="flex items-center justify-between py-1.5 gap-4">
+            <div className="flex items-center gap-2 flex-1">
+              <button
+                className="bg-transparent border-none cursor-pointer p-1 text-sm text-gray-600 transition-colors hover:text-primary"
+                onClick={onToggleExpand}
+              >
                 <span>{isExpanded ? '▼' : '▶'}</span>
               </button>
               <div>
-                <div className={styles.modelName}>{model.name}</div>
-                <div className={styles.modelSize}>{formatSize(model.size)}</div>
+                <div className="font-medium text-gray-900 text-sm">{model.name}</div>
+                <div className="text-gray-600 text-xs">{formatSize(model.size)}</div>
               </div>
             </div>
-            <div className={styles.status}>
+            <div className="flex-shrink-0">
               {isLoaded ? (
                 <>
-                  <span className={`${styles.tag} ${styles.loaded}`}>
+                  <span className="inline-block bg-success text-white px-3 py-1.5 rounded-md text-xs font-medium">
                     Loaded on {loadedOn.join(', ')}
-                    {contextSize && <small className={styles.contextInfo}> (ctx: {contextSize})</small>}
+                    {contextSize && <small className="text-white/80"> (ctx: {contextSize})</small>}
                   </span>
                 </>
               ) : (
-                <span className={styles.tag}>Available</span>
+                <span className="inline-block bg-gray-100 text-gray-700 px-3 py-1.5 rounded-md text-xs font-medium">Available</span>
               )}
             </div>
-            <div className={styles.action}>
+            <div className="flex-shrink-0">
               {isLoaded ? (
-                <button className={`${styles.actionBtn} ${styles.danger}`} onClick={onUnload}>
+                <button
+                  className="px-3 py-1.5 rounded-md border-none text-xs font-medium cursor-pointer transition-all bg-danger text-white hover:brightness-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={onUnload}
+                >
                   Unload
                 </button>
               ) : (
-                <button className={`${styles.actionBtn} ${styles.primary}`} onClick={onLoad}>
+                <button
+                  className="px-3 py-1.5 rounded-md border-none text-xs font-medium cursor-pointer transition-all bg-primary text-white hover:bg-primary-dark disabled:opacity-50 disabled:cursor-not-allowed"
+                  onClick={onLoad}
+                >
                   Load
                 </button>
               )}
@@ -101,66 +109,66 @@ export default function ModelRow({
           </div>
 
           {isExpanded && (
-            <div className={styles.details}>
+            <div className="border-t border-gray-200 mt-1 pt-3 pb-3">
               {loadingDetails ? (
-                <div className={styles.loading}>Loading model details...</div>
+                <div className="p-4 text-center text-gray-500">Loading model details...</div>
               ) : details ? (
-                <div className={styles.detailsContent}>
+                <div className="px-6">
                   {details.model_info && (
-                    <div className={styles.detailSection}>
-                      <h4>Model Information</h4>
-                      <div className={styles.detailGrid}>
+                    <div className="mb-6">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Model Information</h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                         {details.details?.format && (
-                          <div className={styles.detailItem}>
-                            <span className={styles.detailLabel}>Format:</span> {details.details.format}
+                          <div className="text-sm">
+                            <span className="font-medium text-gray-600 mr-2">Format:</span> {details.details.format}
                           </div>
                         )}
                         {details.details?.family && (
-                          <div className={styles.detailItem}>
-                            <span className={styles.detailLabel}>Family:</span> {details.details.family}
+                          <div className="text-sm">
+                            <span className="font-medium text-gray-600 mr-2">Family:</span> {details.details.family}
                           </div>
                         )}
                         {details.details?.parameter_size && (
-                          <div className={styles.detailItem}>
-                            <span className={styles.detailLabel}>Parameters:</span> {details.details.parameter_size}
+                          <div className="text-sm">
+                            <span className="font-medium text-gray-600 mr-2">Parameters:</span> {details.details.parameter_size}
                           </div>
                         )}
                         {details.details?.quantization_level && (
-                          <div className={styles.detailItem}>
-                            <span className={styles.detailLabel}>Quantization:</span> {details.details.quantization_level}
+                          <div className="text-sm">
+                            <span className="font-medium text-gray-600 mr-2">Quantization:</span> {details.details.quantization_level}
                           </div>
                         )}
                       </div>
                     </div>
                   )}
-                  
+
                   {details.template && (
-                    <div className={styles.detailSection}>
-                      <h4>Template</h4>
-                      <pre className={styles.codePreview}>{details.template}</pre>
+                    <div className="mb-6">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Template</h4>
+                      <pre className="bg-gray-50 p-4 rounded text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap break-words max-w-full max-h-[200px] overflow-y-auto">{details.template}</pre>
                     </div>
                   )}
-                  
+
                   {details.system && (
-                    <div className={styles.detailSection}>
-                      <h4>System Prompt</h4>
-                      <pre className={styles.codePreview}>{details.system}</pre>
+                    <div className="mb-6 max-w-full">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">System Prompt</h4>
+                      <pre className="bg-gray-50 p-4 rounded text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap break-words max-w-full max-h-[200px] overflow-y-auto">{details.system}</pre>
                     </div>
                   )}
-                  
+
                   {details.parameters && (
-                    <div className={styles.detailSection}>
-                      <h4>Parameters</h4>
-                      <pre className={styles.codePreview}>{
-                        typeof details.parameters === 'string' 
-                          ? details.parameters 
+                    <div className="mb-0">
+                      <h4 className="text-sm font-semibold text-gray-700 mb-2">Parameters</h4>
+                      <pre className="bg-gray-50 p-4 rounded text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap break-words max-w-full max-h-[200px] overflow-y-auto">{
+                        typeof details.parameters === 'string'
+                          ? details.parameters
                           : JSON.stringify(details.parameters, null, 2)
                       }</pre>
                     </div>
                   )}
                 </div>
               ) : (
-                <div className={styles.error}>Failed to load model details</div>
+                <div className="p-4 text-center text-danger">Failed to load model details</div>
               )}
             </div>
           )}

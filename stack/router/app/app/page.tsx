@@ -7,7 +7,6 @@ import InstanceGrid from './components/InstanceGrid'
 import ModelManagement from './components/ModelManagement'
 import LoadModelModal from './components/LoadModelModal'
 import { Instance, Model, RunningModels, ModelMappings } from './types'
-import styles from './page.module.css'
 
 export default function Home() {
   // State
@@ -174,19 +173,19 @@ export default function Home() {
 
   if (loading) {
     return (
-      <div className={styles.container}>
+      <div className="min-h-screen flex flex-col">
         <Header onRefresh={refreshData} />
-        <main className={styles.main}>
-          <div className={styles.loading}>Loading...</div>
+        <main className="flex-1 max-w-[1400px] mx-auto p-4 md:p-8 w-full">
+          <div className="text-center p-8 text-gray-500">Loading...</div>
         </main>
       </div>
     )
   }
 
   return (
-    <div className={styles.container}>
+    <div className="min-h-screen flex flex-col">
       <Header onRefresh={refreshData} />
-      <main className={styles.main}>
+      <main className="flex-1 max-w-[1400px] mx-auto p-4 md:p-8 w-full">
         <SystemOverview 
           instances={instances}
           instanceStatuses={instanceStatuses}

@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { Instance } from '../types'
-import styles from './LoadModelModal.module.css'
 
 interface LoadModelModalProps {
   isOpen: boolean;
@@ -82,12 +81,12 @@ export default function LoadModelModal({
   if (!isOpen) return null
 
   return (
-    <div className={styles.modal} onClick={handleClose}>
-      <div className={styles.content} onClick={(e) => e.stopPropagation()}>
-        <div className={styles.header}>
-          <h3 className={styles.title}>Load Model</h3>
+    <div className="flex fixed z-[1000] left-0 top-0 w-full h-full bg-black/50 items-center justify-center" onClick={handleClose}>
+      <div className="bg-white p-0 rounded-xl w-[90%] max-w-[500px] shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center px-8 py-6 border-b border-gray-200">
+          <h3 className="text-xl font-semibold text-gray-900 m-0">Load Model</h3>
           <button 
-            className={styles.closeBtn} 
+            className="text-gray-500 text-3xl font-bold cursor-pointer bg-transparent border-none p-0 w-8 h-8 flex items-center justify-center transition-colors hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
             onClick={handleClose}
             disabled={isLoading}
           >
@@ -95,22 +94,22 @@ export default function LoadModelModal({
           </button>
         </div>
 
-        <div className={styles.body}>
-          <div className={styles.formGroup}>
-            <label className={styles.label}>Model:</label>
+        <div className="p-8">
+          <div className="mb-6">
+            <label className="block mb-2 font-medium text-gray-700 text-sm">Model:</label>
             <input
               type="text"
-              className={styles.input}
+              className="w-full p-3 border border-gray-300 rounded-md text-sm disabled:bg-gray-50 disabled:cursor-not-allowed"
               value={modelName}
               readOnly
               disabled={isLoading}
             />
           </div>
 
-          <div className={styles.formGroup}>
-            <label className={styles.label}>Instance:</label>
+          <div className="mb-6">
+            <label className="block mb-2 font-medium text-gray-700 text-sm">Instance:</label>
             <select
-              className={styles.input}
+              className="w-full p-3 border border-gray-300 rounded-md text-sm disabled:bg-gray-50 disabled:cursor-not-allowed"
               value={selectedInstance}
               onChange={(e) => setSelectedInstance(e.target.value)}
               disabled={isLoading}
@@ -124,32 +123,32 @@ export default function LoadModelModal({
             </select>
           </div>
 
-          <div className={styles.formGroup}>
-            <label className={styles.label}>Context Length (optional):</label>
+          <div className="mb-0">
+            <label className="block mb-2 font-medium text-gray-700 text-sm">Context Length (optional):</label>
             <input
               type="number"
-              className={styles.input}
+              className="w-full p-3 border border-gray-300 rounded-md text-sm disabled:bg-gray-50 disabled:cursor-not-allowed"
               placeholder={defaultContext ? `Default: ${defaultContext}` : 'e.g., 32768'}
               value={contextLength}
               onChange={(e) => setContextLength(e.target.value)}
               disabled={isLoading}
             />
             {defaultContext && (
-              <small className={styles.hint}>Model default context: {defaultContext}</small>
+              <small className="block mt-1 text-gray-600 text-xs">Model default context: {defaultContext}</small>
             )}
           </div>
         </div>
 
-        <div className={styles.footer}>
+        <div className="flex gap-4 justify-end px-8 py-6 border-t border-gray-200 bg-gray-50 rounded-b-xl">
           <button
-            className={styles.btnSecondary}
+            className="px-6 py-3 rounded-md text-sm font-medium cursor-pointer transition-all bg-white border border-gray-300 text-gray-700 hover:bg-gray-100 hover:border-gray-400 disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleClose}
             disabled={isLoading}
           >
             Cancel
           </button>
           <button
-            className={styles.btnPrimary}
+            className="px-6 py-3 rounded-md text-sm font-medium cursor-pointer transition-all bg-primary text-white border-0 hover:bg-primary-dark disabled:opacity-50 disabled:cursor-not-allowed"
             onClick={handleConfirm}
             disabled={isLoading}
           >

@@ -10,7 +10,12 @@
       "Bash(./polyllama.sh:*)",
       "Bash(uv run pytest:*)",
       "Bash(docker logs:*)",
-      "Bash(mkdir:*)"
+      "Bash(mkdir:*)",
+      "Bash(pnpm add:*)",
+      "Bash(rm:*)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm view:*)",
+      "Bash(pnpm build:*)"
     ],
     "deny": []
   }

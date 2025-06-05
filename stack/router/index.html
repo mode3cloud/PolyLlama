@@ -460,6 +460,103 @@
             color: var(--gray-500);
         }
 
+        /* Model table updates */
+        .model-row-content {
+            width: 100%;
+        }
+
+        .model-main-info {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 0;
+            gap: 1rem;
+        }
+
+        .model-header {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            flex: 1;
+        }
+
+        .model-expand-btn {
+            background: none;
+            border: none;
+            cursor: pointer;
+            padding: 0.25rem;
+            font-size: 0.875rem;
+            color: var(--gray-600);
+            transition: color 0.2s;
+        }
+
+        .model-expand-btn:hover {
+            color: var(--primary);
+        }
+
+        .model-status {
+            flex-shrink: 0;
+        }
+
+        .model-action {
+            flex-shrink: 0;
+        }
+
+        .model-details {
+            border-top: 1px solid var(--gray-200);
+            margin-top: 0.5rem;
+            padding-top: 1rem;
+            padding-bottom: 1rem;
+        }
+
+        .model-details-content {
+            padding: 0 2rem;
+        }
+
+        .detail-section {
+            margin-bottom: 1.5rem;
+        }
+
+        .detail-section:last-child {
+            margin-bottom: 0;
+        }
+
+        .detail-section h4 {
+            font-size: 0.875rem;
+            font-weight: 600;
+            color: var(--gray-700);
+            margin-bottom: 0.5rem;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 0.75rem;
+        }
+
+        .detail-item {
+            font-size: 0.875rem;
+        }
+
+        .detail-label {
+            font-weight: 500;
+            color: var(--gray-600);
+            margin-right: 0.5rem;
+        }
+
+        .template-preview,
+        .parameters-preview,
+        .modelfile-preview {
+            background: var(--gray-50);
+            padding: 1rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
+            line-height: 1.5;
+            overflow-x: auto;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .header-content {
@@ -665,15 +762,12 @@
                 <table class="model-table">
                     <thead>
                         <tr>
-                            <th>Model</th>
-                            <th>Size</th>
-                            <th>Status</th>
-                            <th>Actions</th>
+                            <th>Models</th>
                         </tr>
                     </thead>
                     <tbody id="model-table-body">
                         <tr>
-                            <td colspan="4" class="loading">Loading models...</td>
+                            <td class="loading">Loading models...</td>
                         </tr>
                     </tbody>
                 </table>

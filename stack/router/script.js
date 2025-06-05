@@ -34,6 +34,7 @@ let modelContexts = {};
 let currentFilter = 'all';
 let searchQuery = '';
 let isLoadingModel = false;
+let expandedModels = new Set(); // Track which models are expanded
 
 // Initialize the application
 async function initializeApp() {
@@ -127,6 +128,25 @@ async function refreshData() {
             fetchModelMappings(),
             fetchModelContexts()
         ]);
+        
+        // Sync contexts from running models if we have running models but missing contexts
+        const runningModelNames = Object.keys(runningModelsResult || {});
+        const hasRunningModels = runningModelNames.length > 0;
+        const hasMissingContexts = runningModelNames.some(model => !modelContexts[model]);
+        
+        if (hasRunningModels && hasMissingContexts) {
+            try {
+                const syncResponse = await fetch('/api/ui/sync-contexts');
+                if (syncResponse.ok) {
+                    const syncData = await syncResponse.json();
+                    console.log(`Synced context sizes for ${syncData.synced_count} models`);
+                    // Re-fetch contexts after sync
+                    await fetchModelContexts();
+                }
+            } catch (error) {
+                console.error('Error syncing contexts:', error);
+            }
+        }
 
         // Update system overview
         updateSystemOverview();
@@ -292,12 +312,14 @@ function createInstanceCard(instanceName, status, models) {
             <div class="loaded-models">
                 <div class="loaded-models-header">Loaded Models</div>
                 ${models.length > 0 ?
-            models.map(model => `
+            models.map(model => {
+                const contextInfo = modelContexts[model] ? ` <small style="color: #666;">(ctx: ${modelContexts[model]})</small>` : '';
+                return `
                 <div class="model-item">
-                    <span class="model-tag loaded">${model}</span>
+                    <span class="model-tag loaded">${model}${contextInfo}</span>
                     <button class="unload-btn" onclick="unloadModelFromInstance('${model}', '${instanceName}')" title="Unload ${model} from ${instanceName}">×</button>
                 </div>
-            `).join('') :
+            `}).join('') :
             '<span class="model-tag">No models loaded</span>'
         }
             </div>
@@ -342,13 +364,15 @@ function filterAndDisplayModels() {
 // Display models in table
 function displayModels(models) {
     if (models.length === 0) {
-        modelTableBody.innerHTML = '<tr><td colspan="4" class="loading">No models found</td></tr>';
+        modelTableBody.innerHTML = '<tr><td class="loading">No models found</td></tr>';
         return;
     }
 
-    modelTableBody.innerHTML = models.map(model => {
+    modelTableBody.innerHTML = models.map((model, index) => {
         const isLoaded = runningModels.hasOwnProperty(model.name);
         const loadedOn = isLoaded ? runningModels[model.name] : [];
+        const modelId = `model-${index}`;
+        const isExpanded = expandedModels.has(model.name);
 
         // Create status and action content
         let statusContent = '';
@@ -373,16 +397,141 @@ function displayModels(models) {
 
         return `
             <tr>
-                <td>
-                    <div class="model-name">${model.name}</div>
-                    <div class="model-size">${formatSize(model.size)}</div>
+                <td colspan="3">
+                    <div class="model-row-content">
+                        <div class="model-main-info">
+                            <div class="model-header">
+                                <button class="model-expand-btn" onclick="toggleModelDetails('${modelId}', '${model.name}')" title="Show model details">
+                                    <span id="${modelId}-arrow">${isExpanded ? '▼' : '▶'}</span>
+                                </button>
+                                <div>
+                                    <div class="model-name">${model.name}</div>
+                                    <div class="model-size">${formatSize(model.size)}</div>
+                                </div>
+                            </div>
+                            <div class="model-status">${statusContent}</div>
+                            <div class="model-action">${actionContent}</div>
+                        </div>
+                        <div id="${modelId}-details" class="model-details" style="display: ${isExpanded ? 'block' : 'none'};">
+                            <div class="loading">Loading model details...</div>
+                        </div>
+                    </div>
                 </td>
-                <td>${formatSize(model.size)}</td>
-                <td>${statusContent}</td>
-                <td>${actionContent}</td>
             </tr>
         `;
     }).join('');
+    
+    // After rendering, re-fetch details for expanded models
+    models.forEach((model, index) => {
+        if (expandedModels.has(model.name)) {
+            const modelId = `model-${index}`;
+            fetchAndDisplayModelDetails(modelId, model.name);
+        }
+    });
+}
+
+// Fetch and display model details without toggling
+async function fetchAndDisplayModelDetails(modelId, modelName) {
+    const detailsDiv = document.getElementById(`${modelId}-details`);
+    if (!detailsDiv) return;
+    
+    try {
+        const response = await fetch('/api/ui/model-details', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ model: modelName })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            detailsDiv.innerHTML = formatModelDetails(data);
+        } else {
+            detailsDiv.innerHTML = '<div class="error">Failed to load model details</div>';
+        }
+    } catch (error) {
+        console.error('Error fetching model details:', error);
+        detailsDiv.innerHTML = '<div class="error">Error loading model details</div>';
+    }
+}
+
+// Toggle model details expansion
+async function toggleModelDetails(modelId, modelName) {
+    const detailsDiv = document.getElementById(`${modelId}-details`);
+    const arrow = document.getElementById(`${modelId}-arrow`);
+    
+    if (detailsDiv.style.display === 'none') {
+        // Expand
+        detailsDiv.style.display = 'block';
+        arrow.textContent = '▼';
+        expandedModels.add(modelName); // Track that this model is expanded
+        
+        // Fetch and display model details
+        fetchAndDisplayModelDetails(modelId, modelName);
+    } else {
+        // Collapse
+        detailsDiv.style.display = 'none';
+        arrow.textContent = '▶';
+        expandedModels.delete(modelName); // Remove from expanded set
+    }
+}
+
+// Format model details for display
+function formatModelDetails(data) {
+    let html = '<div class="model-details-content">';
+    
+    // Model info section
+    if (data.model_info) {
+        html += '<div class="detail-section"><h4>Model Information</h4><div class="detail-grid">';
+        
+        // Extract key information
+        const info = data.model_info;
+        const details = data.details || {};
+        
+        // Basic info
+        if (details.format) html += `<div class="detail-item"><span class="detail-label">Format:</span> ${details.format}</div>`;
+        if (details.family) html += `<div class="detail-item"><span class="detail-label">Family:</span> ${details.family}</div>`;
+        if (details.parameter_size) html += `<div class="detail-item"><span class="detail-label">Parameters:</span> ${details.parameter_size}</div>`;
+        if (details.quantization_level) html += `<div class="detail-item"><span class="detail-label">Quantization:</span> ${details.quantization_level}</div>`;
+        
+        // Context info
+        const contextKey = details.family ? `${details.family}.context_length` : null;
+        if (contextKey && info[contextKey]) {
+            html += `<div class="detail-item"><span class="detail-label">Default Context:</span> ${info[contextKey]}</div>`;
+        }
+        
+        html += '</div></div>';
+    }
+    
+    // Template section
+    if (data.template) {
+        html += '<div class="detail-section"><h4>Template</h4>';
+        html += `<pre class="template-preview">${escapeHtml(data.template)}</pre>`;
+        html += '</div>';
+    }
+    
+    // Parameters section
+    if (data.parameters) {
+        html += '<div class="detail-section"><h4>Parameters</h4>';
+        html += `<pre class="parameters-preview">${escapeHtml(data.parameters)}</pre>`;
+        html += '</div>';
+    }
+    
+    // Modelfile section (if available)
+    if (data.modelfile) {
+        html += '<div class="detail-section"><h4>Modelfile</h4>';
+        html += `<pre class="modelfile-preview">${escapeHtml(data.modelfile)}</pre>`;
+        html += '</div>';
+    }
+    
+    html += '</div>';
+    return html;
+}
+
+// Escape HTML for safe display
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 // Format file size
@@ -520,6 +669,22 @@ async function confirmLoadModel() {
         });
 
         if (response.ok) {
+            // Store the context length if specified
+            if (contextLength) {
+                try {
+                    await fetch('/api/ui/store-context', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            model: modelName,
+                            num_ctx: parseInt(contextLength)
+                        })
+                    });
+                } catch (error) {
+                    console.error('Failed to store context length:', error);
+                }
+            }
+            
             closeLoadModal();
             setTimeout(refreshData, 2000); // Refresh after 2 seconds
             const contextMsg = contextLength ? ` with context ${contextLength}` : '';

@@ -308,12 +308,20 @@ server {
                         local model_router = require "model_router"
                         local http = require "resty.http"
                         
-                        -- Always strip incoming num_ctx from regular requests
+                        -- Handle incoming num_ctx from regular requests
                         local incoming_num_ctx = nil
                         if body.options and body.options.num_ctx then
-                            incoming_num_ctx = body.options.num_ctx
-                            body.options.num_ctx = nil
-                            ngx.log(ngx.INFO, "Stripped incoming num_ctx: " .. incoming_num_ctx .. " for model: " .. model_name)
+                            incoming_num_ctx = tonumber(body.options.num_ctx)
+                            -- For UI requests with X-Target-Instance, preserve the num_ctx
+                            if ngx.req.get_headers()["X-Target-Instance"] then
+                                ngx.log(ngx.INFO, "Preserving num_ctx: " .. incoming_num_ctx .. " for UI request")
+                                -- Store it immediately
+                                ngx.shared.model_mappings:set("ctx:" .. model_name, incoming_num_ctx)
+                            else
+                                -- Strip it for non-UI requests
+                                body.options.num_ctx = nil
+                                ngx.log(ngx.INFO, "Stripped incoming num_ctx: " .. incoming_num_ctx .. " for model: " .. model_name)
+                            end
                         end
                         
                         -- Check if model is currently running on any instance
@@ -367,6 +375,12 @@ server {
                             end
                             body.options.num_ctx = replacement_num_ctx
                             ngx.log(ngx.INFO, "Set num_ctx to: " .. replacement_num_ctx .. " for model: " .. model_name)
+                            
+                            -- Store the context if model is not loaded (will be loaded now)
+                            if not model_is_loaded then
+                                ngx.shared.model_mappings:set("ctx:" .. model_name, replacement_num_ctx)
+                                ngx.log(ngx.INFO, "Stored context length " .. replacement_num_ctx .. " for model " .. model_name .. " (will be loaded)")
+                            end
                         else
                             -- Clean up empty options if no replacement was made
                             if body.options and next(body.options) == nil then
@@ -832,6 +846,73 @@ server {
             ngx.say(cjson.encode({ 
                 duplicates = duplicates,
                 count = #duplicates,
+                timestamp = ngx.time()
+            }))
+        }
+    }
+    
+    # Endpoint to sync context sizes from running models
+    location /api/ui/sync-contexts {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            local http = require "resty.http"
+            
+            -- Get running models with details
+            local running_models, model_details = model_router.get_running_models()
+            local synced_count = 0
+            local contexts = {}
+            
+            -- For each running model, get its details and extract context
+            for model_name, instances in pairs(running_models) do
+                if #instances > 0 then
+                    -- Use the first instance to get model details
+                    local instance = instances[1]
+                    local httpc = http.new()
+                    httpc:set_timeout(5000)
+                    
+                    local res, err = httpc:request_uri("http://" .. instance .. ":11434/api/show", {
+                        method = "POST",
+                        body = cjson.encode({ model = model_name }),
+                        headers = {
+                            ["Content-Type"] = "application/json"
+                        }
+                    })
+                    
+                    if res and res.status == 200 then
+                        local success, data = pcall(cjson.decode, res.body)
+                        if success and data then
+                            -- Extract context from model info
+                            local context_size = nil
+                            
+                            -- Check if there's a specific num_ctx in model_info
+                            if data.model_info then
+                                -- Look for various possible locations of context info
+                                if data.model_info["general.context_length"] then
+                                    context_size = tonumber(data.model_info["general.context_length"])
+                                elseif data.details and data.details.family and data.model_info[data.details.family .. ".context_length"] then
+                                    context_size = tonumber(data.model_info[data.details.family .. ".context_length"])
+                                end
+                            end
+                            
+                            -- If we found a context size, store it
+                            if context_size and context_size > 0 then
+                                ngx.shared.model_mappings:set("ctx:" .. model_name, context_size)
+                                contexts[model_name] = context_size
+                                synced_count = synced_count + 1
+                                ngx.log(ngx.INFO, "Synced context size " .. context_size .. " for model " .. model_name)
+                            end
+                        end
+                    end
+                end
+            end
+            
+            -- Output result
+            ngx.say(cjson.encode({ 
+                success = true,
+                synced_count = synced_count,
+                contexts = contexts,
                 timestamp = ngx.time()
             }))
         }

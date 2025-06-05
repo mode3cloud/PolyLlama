@@ -713,13 +713,19 @@ server {
         }
     }
     
-    location /api/tags       { 
-        proxy_pass http://polyllama_backend/api/tags;       
-        include /etc/nginx/proxy_params.conf; 
-        
-        # Add header to indicate which instance served this request
-        header_filter_by_lua_block {
-            ngx.header["X-Served-By"] = "load_balancer"
+    location /api/tags {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            
+            -- Get all models with sorting
+            local all_models_data = model_router.get_all_models()
+            
+            -- Return the sorted models
+            ngx.say(cjson.encode({
+                models = all_models_data.models
+            }))
         }
     }
     

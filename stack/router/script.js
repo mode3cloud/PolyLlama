@@ -187,6 +187,8 @@ async function fetchAvailableModels() {
         if (response.ok) {
             const data = await response.json();
             availableModels = data.models || [];
+            // Ensure consistent alphabetical sorting
+            availableModels.sort((a, b) => a.name.localeCompare(b.name));
             return availableModels;
         }
     } catch (error) {
@@ -358,6 +360,9 @@ function filterAndDisplayModels() {
         }
     });
 
+    // Ensure filtered models maintain alphabetical order
+    filteredModels.sort((a, b) => a.name.localeCompare(b.name));
+    
     displayModels(filteredModels);
 }
 

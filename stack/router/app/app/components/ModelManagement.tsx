@@ -52,7 +52,7 @@ export default function ModelManagement({
   }, [])
 
   return (
-    <section className="mb-8">
+    <section className="my-8">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-semibold text-gray-900">Model Management</h2>
       </div>

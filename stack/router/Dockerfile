@@ -78,6 +78,12 @@ CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
 # ======= Production stage
 FROM nginx-base AS production
 
+# Install pnpm in the production container
+ENV PNPM_HOME="/pnpm"
+ENV PATH="$PNPM_HOME:$PATH"
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN npm install -g corepack@latest && corepack enable && corepack install -g pnpm@latest
+
 # Copy production build files
 COPY --from=build /app/node_modules /app/node_modules
 COPY --from=build /app/.next /app/.next

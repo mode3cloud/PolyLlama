@@ -1,29 +1,27 @@
 'use client'
 
-import { useGPUMetrics } from '../hooks/useGPUMetrics'
-
 export interface GPUDeviceInfo {
   index: number;
   name: string;
   pci_bus: string;
 }
 
-interface GPUDeviceProps {
-  device: GPUDeviceInfo;
-  instanceName?: string;
+interface GPUMetrics {
+  index: number
+  memory_used: number
+  memory_total: number
+  gpu_utilization: number
+  temperature: number
+  power_draw: number
+  timestamp: number
 }
 
-export default function GPUDevice({ device, instanceName }: GPUDeviceProps) {
-  // Don't pass instanceName to get all metrics, then filter
-  const { metrics: allMetrics } = useGPUMetrics()
-  
-  // Get metrics for this specific instance
-  const instanceMetrics = instanceName && allMetrics ? allMetrics[instanceName] : undefined
-  
-  // Find metrics for this specific device
-  const deviceMetrics = instanceMetrics?.devices && Array.isArray(instanceMetrics.devices) 
-    ? instanceMetrics.devices.find(m => m.index === device.index)
-    : undefined
+interface GPUDeviceProps {
+  device: GPUDeviceInfo;
+  deviceMetrics?: GPUMetrics;
+}
+
+export default function GPUDevice({ device, deviceMetrics }: GPUDeviceProps) {
   
   // Calculate percentages and colors
   const memoryPercent = deviceMetrics 

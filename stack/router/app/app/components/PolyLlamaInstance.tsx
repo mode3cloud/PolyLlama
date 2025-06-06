@@ -12,6 +12,16 @@ interface CPUMetricsData {
   timestamp: number
 }
 
+interface GPUMetrics {
+  index: number
+  memory_used: number
+  memory_total: number
+  gpu_utilization: number
+  temperature: number
+  power_draw: number
+  timestamp: number
+}
+
 interface PolyLlamaInstanceProps {
   instance: Instance;
   status: any;
@@ -19,6 +29,7 @@ interface PolyLlamaInstanceProps {
   modelContexts: Record<string, number>;
   gpuGroupName?: string;
   gpuDevices?: GPUDeviceInfo[];
+  gpuMetrics?: GPUMetrics[];
   cpuMetrics?: CPUMetricsData;
   onUnloadModel: (modelName: string, instanceName: string) => void;
 }
@@ -30,6 +41,7 @@ export default function PolyLlamaInstance({
   modelContexts,
   gpuGroupName,
   gpuDevices,
+  gpuMetrics,
   cpuMetrics,
   onUnloadModel
 }: PolyLlamaInstanceProps) {
@@ -110,13 +122,16 @@ export default function PolyLlamaInstance({
         <div className="bg-white rounded-xl p-6 shadow-sm">
           <div className="text-sm text-gray-600 mb-3 font-medium">GPU Devices</div>
           <div className="space-y-2">
-            {gpuDevices.map((device) => (
-              <GPUDevice 
-                key={device.index} 
-                device={device} 
-                instanceName={instance.name}
-              />
-            ))}
+            {gpuDevices.map((device) => {
+              const deviceMetrics = gpuMetrics?.find(m => m.index === device.index)
+              return (
+                <GPUDevice 
+                  key={device.index} 
+                  device={device} 
+                  deviceMetrics={deviceMetrics}
+                />
+              )
+            })}
           </div>
         </div>
       ) : cpuMetrics ? (

@@ -94,9 +94,10 @@ export default function FlowChart({ instances, instanceStatuses, runningModels, 
             const status = instanceStatuses[instance.name] || { status: 'offline', name: instance.name }
             const { groupName, devices } = getGPUGroupInfo(instance.name)
             
-            // Get CPU metrics if this is a CPU instance
+            // Get metrics for this instance
             const instanceMetrics = metrics[instance.name]
             const cpuMetrics = instanceMetrics?.type === 'cpu' ? instanceMetrics.cpu_metrics : undefined
+            const gpuMetrics = instanceMetrics?.type === 'gpu' ? instanceMetrics.devices : undefined
 
             return (
               <PolyLlamaInstance
@@ -107,6 +108,7 @@ export default function FlowChart({ instances, instanceStatuses, runningModels, 
                 modelContexts={modelContexts}
                 gpuGroupName={groupName !== 'CPU-only' ? groupName : undefined}
                 gpuDevices={devices}
+                gpuMetrics={gpuMetrics}
                 cpuMetrics={cpuMetrics}
                 onUnloadModel={handleUnloadModel}
               />

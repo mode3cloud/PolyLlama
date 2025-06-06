@@ -5,12 +5,13 @@ import Header from './components/Header'
 import SystemOverview from './components/SystemOverview'
 import ModelManagement from './components/ModelManagement'
 import LoadModelModal from './components/LoadModelModal'
-import { Instance, Model, RunningModels, ModelMappings } from './types'
+import { Instance, Model, RunningModels, ModelMappings, InstanceStatus, GPUConfig } from './types'
 
 export default function Home() {
   // State
   const [instances, setInstances] = useState<Instance[]>([])
-  const [instanceStatuses, setInstanceStatuses] = useState<Record<string, any>>({})
+  const [instanceStatuses, setInstanceStatuses] = useState<Record<string, InstanceStatus>>({})
+  const [gpuConfig, setGpuConfig] = useState<GPUConfig | null>(null)
   const [availableModels, setAvailableModels] = useState<Model[]>([])
   const [runningModels, setRunningModels] = useState<RunningModels>({})
   const [modelMappings, setModelMappings] = useState<ModelMappings>({})
@@ -41,8 +42,9 @@ export default function Home() {
   // Fetch all data
   const refreshData = useCallback(async () => {
     try {
-      const [statusRes, modelsRes, runningRes, mappingsRes, contextsRes] = await Promise.all([
+      const [statusRes, gpuConfigRes, modelsRes, runningRes, mappingsRes, contextsRes] = await Promise.all([
         fetch('/api/ui/instance-status'),
+        fetch('/api/ui/gpu-config'),
         fetch('/api/tags'),
         fetch('/api/ui/running-models'),
         fetch('/api/ui/model-mappings'),
@@ -51,11 +53,16 @@ export default function Home() {
 
       if (statusRes.ok) {
         const data = await statusRes.json()
-        const statuses: Record<string, any> = {}
-        data.instances.forEach((instance: any) => {
+        const statuses: Record<string, InstanceStatus> = {}
+        data.instances.forEach((instance: InstanceStatus) => {
           statuses[instance.name] = instance
         })
         setInstanceStatuses(statuses)
+      }
+
+      if (gpuConfigRes.ok) {
+        const data = await gpuConfigRes.json()
+        setGpuConfig(data)
       }
 
       if (modelsRes.ok) {
@@ -206,6 +213,9 @@ export default function Home() {
         isOpen={loadModalOpen}
         modelName={selectedModel}
         instances={instances}
+        instanceStatuses={instanceStatuses}
+        gpuConfig={gpuConfig}
+        runningModels={runningModels}
         onClose={() => setLoadModalOpen(false)}
         onConfirm={async (modelName, instanceName, contextLength) => {
           // Handle model loading

@@ -11,6 +11,23 @@ PolyLlama is an open source stack for running [Ollama](https://ollama.com) in ad
 
 ---
 
+## 📷 Screenshots
+
+### Launch `./polyllama.sh`
+
+<img src="docs/images/startup.png" alt="PolyLLama Startup Output" width="800"/>
+
+### UI Console `http://localhost:11434/`
+
+<img src="docs/images/ui-console.png" alt="PolyLLama UI Console" width="1200"/>
+
+
+### Load Model
+
+<img src="docs/images/load-model.png" alt="PolyLLama Load Model" width="550"/>
+
+---
+
 ## 🏗️ Dynamic Architecture
 
 PolyLlama **discovers your system’s capabilities** and generates the optimal deployment—whether you have a single GPU, a mixed multi-GPU workstation, or a humble CPU-only server.

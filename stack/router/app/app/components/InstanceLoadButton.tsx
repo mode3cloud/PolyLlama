@@ -3,12 +3,35 @@
 import { useState } from 'react'
 import { useGPUMetrics } from '../hooks/useGPUMetrics'
 
+interface InstanceMetrics {
+  instance: string
+  type: 'gpu' | 'cpu'
+  group_name?: string
+  devices?: Array<{
+    index: number
+    memory_used: number
+    memory_total: number
+    gpu_utilization: number
+    temperature: number
+    power_draw: number
+    timestamp: number
+  }>
+  cpu_metrics?: {
+    memory_used: number
+    memory_total: number
+    temperature?: number
+    is_cpu_instance: boolean
+    timestamp: number
+  }
+}
+
 interface InstanceLoadButtonProps {
   instanceName: string;
   gpuGroupName?: string;
   status: 'online' | 'offline';
   modelAlreadyLoaded: boolean;
   isLoading: boolean;
+  anyInstanceLoading: boolean;
   onLoad: (instanceName: string) => void;
 }
 
@@ -18,26 +41,17 @@ export default function InstanceLoadButton({
   status,
   modelAlreadyLoaded,
   isLoading,
+  anyInstanceLoading,
   onLoad
 }: InstanceLoadButtonProps) {
-  const { metrics } = useGPUMetrics(instanceName)
+  const { metrics } = useGPUMetrics(instanceName) as { metrics: InstanceMetrics | undefined; loading: boolean; error: string | null }
 
   const getMemoryInfo = () => {
     if (!metrics) return null
     
-    if (metrics.type === 'gpu' && metrics.devices && metrics.devices.length > 0) {
-      // For GPU instances, sum up memory across all devices
-      const totalUsed = metrics.devices.reduce((sum, device) => sum + device.memory_used, 0)
-      const totalAvailable = metrics.devices.reduce((sum, device) => sum + device.memory_total, 0)
-      const freeMemory = totalAvailable - totalUsed
-      
-      return {
-        used: totalUsed,
-        total: totalAvailable,
-        free: freeMemory,
-        unit: 'MB',
-        type: 'GPU'
-      }
+    // For GPU instances, we now show individual GPU memory bars, so skip this
+    if (metrics.type === 'gpu') {
+      return null
     } else if (metrics.type === 'cpu' && metrics.cpu_metrics) {
       // For CPU instances, show system memory
       const totalUsed = metrics.cpu_metrics.memory_used
@@ -77,7 +91,7 @@ export default function InstanceLoadButton({
     return 'Online'
   }
 
-  const isDisabled = status === 'offline' || modelAlreadyLoaded || isLoading
+  const isDisabled = status === 'offline' || modelAlreadyLoaded || isLoading || anyInstanceLoading
 
   return (
     <div className="border border-gray-200 rounded-lg p-4 mb-3">
@@ -95,7 +109,30 @@ export default function InstanceLoadButton({
         )}
       </div>
 
-      {memoryInfo && (
+      {/* Show individual GPU memory bars for GPU instances */}
+      {metrics && metrics.type === 'gpu' && metrics.devices && metrics.devices.length > 0 ? (
+        <div className="mb-3 space-y-2">
+          {metrics.devices.map((device, index) => {
+            const deviceFree = device.memory_total - device.memory_used
+            const usagePercent = (device.memory_used / device.memory_total) * 100
+            
+            return (
+              <div key={device.index}>
+                <div className="flex items-center justify-between text-sm text-gray-600 mb-1">
+                  <span>GPU {device.index} Memory</span>
+                  <span>{formatMemory(deviceFree)} / {formatMemory(device.memory_total)} free</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-2">
+                  <div 
+                    className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                    style={{ width: `${usagePercent}%` }}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      ) : memoryInfo && (
         <div className="mb-3">
           <div className="flex items-center justify-between text-sm text-gray-600 mb-1">
             <span>{memoryInfo.type} Memory</span>
@@ -128,6 +165,8 @@ export default function InstanceLoadButton({
           'Already Loaded'
         ) : status === 'offline' ? (
           'Instance Offline'
+        ) : anyInstanceLoading && !isLoading ? (
+          'Loading on another instance...'
         ) : (
           'Load on this instance'
         )}

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Instance, InstanceStatus, GPUConfig, RunningModels } from '../types'
 import InstanceLoadButton from './InstanceLoadButton'
+import { getApiUrl } from '../utils'
 
 interface LoadModelModalProps {
   isOpen: boolean;
@@ -39,7 +40,7 @@ export default function LoadModelModal({
 
   const fetchModelDetails = async () => {
     try {
-      const response = await fetch('/api/ui/model-details', {
+      const response = await fetch(getApiUrl('/api/ui/model-details'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: modelName })
@@ -47,7 +48,7 @@ export default function LoadModelModal({
 
       if (response.ok) {
         const data = await response.json()
-        
+
         // Extract default context size from model info
         if (data.model_info && data.details && data.details.family) {
           const contextKey = data.details.family + '.context_length'
@@ -97,10 +98,10 @@ export default function LoadModelModal({
 
   const getGPUGroupName = (instanceName: string): string | undefined => {
     if (!gpuConfig) return undefined
-    
+
     const groupIndex = gpuConfig.instance_mapping[instanceName]
     if (groupIndex === undefined || groupIndex === -1) return undefined
-    
+
     const group = gpuConfig.groups[groupIndex]
     return group?.name
   }
@@ -119,7 +120,7 @@ export default function LoadModelModal({
       <div className="bg-white p-0 rounded-xl w-[90%] max-w-[600px] shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex justify-between items-center px-8 py-6 border-b border-gray-200">
           <h3 className="text-xl font-semibold text-gray-900 m-0">Load Model: {modelName}</h3>
-          <button 
+          <button
             className="text-gray-500 text-3xl font-bold cursor-pointer bg-transparent border-none p-0 w-8 h-8 flex items-center justify-center transition-colors hover:text-gray-700 disabled:opacity-30 disabled:cursor-not-allowed"
             onClick={handleClose}
             disabled={hasAnyLoading}
@@ -148,13 +149,13 @@ export default function LoadModelModal({
             <label className="block mb-3 font-medium text-gray-700 text-sm">
               Available Instances:
             </label>
-            
+
             {instances.length === 0 ? (
               <div className="text-center p-8 text-gray-500">
                 No instances available
               </div>
             ) : (
-              <div className="space-y-3 max-h-80 overflow-y-auto">
+              <div className="space-y-3 max-h-120 overflow-y-auto">
                 {instances.map(instance => {
                   const status = instanceStatuses[instance.name]
                   const gpuGroupName = getGPUGroupName(instance.name)
@@ -170,6 +171,7 @@ export default function LoadModelModal({
                         status={status?.status || 'offline'}
                         modelAlreadyLoaded={modelLoaded}
                         isLoading={isLoading}
+                        anyInstanceLoading={loadingInstances.size > 0}
                         onLoad={handleInstanceLoad}
                       />
                       {error && (

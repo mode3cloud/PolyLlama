@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { getApiUrl } from '../utils'
 
 interface GPUMetrics {
   index: number
@@ -39,7 +40,7 @@ export function useGPUMetrics(instanceName?: string) {
   useEffect(() => {
     const fetchMetrics = async () => {
       try {
-        const response = await fetch('/api/ui/gpu-metrics')
+        const response = await fetch(getApiUrl('/api/ui/gpu-metrics'))
         if (!response.ok) throw new Error('Failed to fetch metrics')
         
         const data: GPUMetricsResponse = await response.json()

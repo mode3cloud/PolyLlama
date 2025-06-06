@@ -5,15 +5,16 @@ import Header from './components/Header'
 import SystemOverview from './components/SystemOverview'
 import ModelManagement from './components/ModelManagement'
 import LoadModelModal from './components/LoadModelModal'
-import { Instance, Model, RunningModels, ModelMappings } from './types'
+import { Instance, Model, RunningModels, InstanceStatus, GPUConfig } from './types'
+import { getApiUrl } from './utils'
 
 export default function Home() {
   // State
   const [instances, setInstances] = useState<Instance[]>([])
-  const [instanceStatuses, setInstanceStatuses] = useState<Record<string, any>>({})
+  const [instanceStatuses, setInstanceStatuses] = useState<Record<string, InstanceStatus>>({})
+  const [gpuConfig, setGpuConfig] = useState<GPUConfig | null>(null)
   const [availableModels, setAvailableModels] = useState<Model[]>([])
   const [runningModels, setRunningModels] = useState<RunningModels>({})
-  const [modelMappings, setModelMappings] = useState<ModelMappings>({})
   const [modelContexts, setModelContexts] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [loadModalOpen, setLoadModalOpen] = useState(false)
@@ -22,7 +23,7 @@ export default function Home() {
   // Initialize instances
   const initializeInstances = useCallback(async () => {
     try {
-      const response = await fetch('/api/ui/instance-count')
+      const response = await fetch(getApiUrl('/api/ui/instance-count'))
       if (response.ok) {
         const data = await response.json()
         const instanceCount = data.instance_count || 2
@@ -41,21 +42,27 @@ export default function Home() {
   // Fetch all data
   const refreshData = useCallback(async () => {
     try {
-      const [statusRes, modelsRes, runningRes, mappingsRes, contextsRes] = await Promise.all([
-        fetch('/api/ui/instance-status'),
-        fetch('/api/tags'),
-        fetch('/api/ui/running-models'),
-        fetch('/api/ui/model-mappings'),
-        fetch('/api/ui/get-contexts')
+      const [statusRes, gpuConfigRes, modelsRes, runningRes, mappingsRes, contextsRes] = await Promise.all([
+        fetch(getApiUrl('/api/ui/instance-status')),
+        fetch(getApiUrl('/api/ui/gpu-config')),
+        fetch(getApiUrl('/api/tags')),
+        fetch(getApiUrl('/api/ui/running-models')),
+        fetch(getApiUrl('/api/ui/model-mappings')),
+        fetch(getApiUrl('/api/ui/get-contexts'))
       ])
 
       if (statusRes.ok) {
         const data = await statusRes.json()
-        const statuses: Record<string, any> = {}
-        data.instances.forEach((instance: any) => {
+        const statuses: Record<string, InstanceStatus> = {}
+        data.instances.forEach((instance: InstanceStatus) => {
           statuses[instance.name] = instance
         })
         setInstanceStatuses(statuses)
+      }
+
+      if (gpuConfigRes.ok) {
+        const data = await gpuConfigRes.json()
+        setGpuConfig(data)
       }
 
       if (modelsRes.ok) {
@@ -74,7 +81,6 @@ export default function Home() {
 
       if (mappingsRes.ok) {
         const data = await mappingsRes.json()
-        setModelMappings(data.mappings || {})
       }
 
       let currentContexts: Record<string, number> = {}
@@ -91,12 +97,12 @@ export default function Home() {
       
       if (hasRunningModels && hasMissingContexts) {
         try {
-          const syncResponse = await fetch('/api/ui/sync-contexts')
+          const syncResponse = await fetch(getApiUrl('/api/ui/sync-contexts'))
           if (syncResponse.ok) {
             const syncData = await syncResponse.json()
             console.log(`Synced context sizes for ${syncData.synced_count} models`)
             // Re-fetch contexts after sync
-            const contextsRes2 = await fetch('/api/ui/get-contexts')
+            const contextsRes2 = await fetch(getApiUrl('/api/ui/get-contexts'))
             if (contextsRes2.ok) {
               const data = await contextsRes2.json()
               setModelContexts(data.contexts || {})
@@ -130,7 +136,7 @@ export default function Home() {
       const instances = runningModels[modelName] || []
       
       for (const instanceName of instances) {
-        const response = await fetch('/api/generate', {
+        const response = await fetch(getApiUrl('/api/generate'), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -206,6 +212,9 @@ export default function Home() {
         isOpen={loadModalOpen}
         modelName={selectedModel}
         instances={instances}
+        instanceStatuses={instanceStatuses}
+        gpuConfig={gpuConfig}
+        runningModels={runningModels}
         onClose={() => setLoadModalOpen(false)}
         onConfirm={async (modelName, instanceName, contextLength) => {
           // Handle model loading
@@ -215,7 +224,7 @@ export default function Home() {
               payload.options = { num_ctx: parseInt(contextLength) }
             }
 
-            const response = await fetch('/api/generate', {
+            const response = await fetch(getApiUrl('/api/generate'), {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',
@@ -228,7 +237,7 @@ export default function Home() {
               // Store context if specified
               if (contextLength) {
                 try {
-                  await fetch('/api/ui/store-context', {
+                  await fetch(getApiUrl('/api/ui/store-context'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({

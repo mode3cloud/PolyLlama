@@ -67,15 +67,6 @@ export default function PolyLlamaInstance({
 
         {/* Content */}
         <div className="p-6">
-          {/* GPU Group Info */}
-          {gpuGroupName && (
-            <div className="flex items-center gap-4 mb-6 pb-4 border-b border-gray-200">
-              <div className="bg-gray-100 px-4 py-2 rounded-md text-sm text-gray-700 font-medium">
-                {gpuGroupName} - {gpuDevices?.length || 0} GPU(s)
-              </div>
-            </div>
-          )}
-
           {/* Status and Models Count */}
           <div className="grid grid-cols-2 gap-4 mb-6">
             <div className="bg-gray-50 p-3 rounded-md">
@@ -125,9 +116,9 @@ export default function PolyLlamaInstance({
             {gpuDevices.map((device) => {
               const deviceMetrics = gpuMetrics?.find(m => m.index === device.index)
               return (
-                <GPUDevice 
-                  key={device.index} 
-                  device={device} 
+                <GPUDevice
+                  key={device.index}
+                  device={device}
                   deviceMetrics={deviceMetrics}
                 />
               )

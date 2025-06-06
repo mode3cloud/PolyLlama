@@ -15,7 +15,11 @@
       "Bash(rm:*)",
       "Bash(pnpm install:*)",
       "Bash(pnpm view:*)",
-      "Bash(pnpm build:*)"
+      "Bash(pnpm build:*)",
+      "mcp__github__create_issue",
+      "mcp__github__add_issue_comment",
+      "mcp__github__get_issue",
+      "Bash(git checkout:*)"
     ],
     "deny": []
   }

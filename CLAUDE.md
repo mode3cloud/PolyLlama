@@ -135,3 +135,6 @@ Models are routed using this hierarchy:
 - Ensure all `polyllamaX` services can resolve each other via Docker networks
 - Check that nginx upstream pool matches actual running services
 - Verify GPU assignments in container environment variables
+
+## Development Guidelines
+- We use pnpm NOT npm

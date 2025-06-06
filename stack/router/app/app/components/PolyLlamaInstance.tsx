@@ -2,6 +2,25 @@
 
 import { Instance, RunningModels } from '../types'
 import GPUDevice, { GPUDeviceInfo } from './GPUDevice'
+import CPUMetrics from './CPUMetrics'
+
+interface CPUMetricsData {
+  memory_used: number
+  memory_total: number
+  temperature?: number
+  is_cpu_instance: boolean
+  timestamp: number
+}
+
+interface GPUMetrics {
+  index: number
+  memory_used: number
+  memory_total: number
+  gpu_utilization: number
+  temperature: number
+  power_draw: number
+  timestamp: number
+}
 
 interface PolyLlamaInstanceProps {
   instance: Instance;
@@ -10,6 +29,8 @@ interface PolyLlamaInstanceProps {
   modelContexts: Record<string, number>;
   gpuGroupName?: string;
   gpuDevices?: GPUDeviceInfo[];
+  gpuMetrics?: GPUMetrics[];
+  cpuMetrics?: CPUMetricsData;
   onUnloadModel: (modelName: string, instanceName: string) => void;
 }
 
@@ -20,6 +41,8 @@ export default function PolyLlamaInstance({
   modelContexts,
   gpuGroupName,
   gpuDevices,
+  gpuMetrics,
+  cpuMetrics,
   onUnloadModel
 }: PolyLlamaInstanceProps) {
   const instanceModels = Object.keys(runningModels).filter(model =>
@@ -31,17 +54,15 @@ export default function PolyLlamaInstance({
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
       {/* Column 1: Instance details */}
       <div className="bg-white rounded-xl overflow-hidden shadow-sm transition-all hover:shadow-md">
-        {/* Header */}
+        {/* Header - show CPU badge for CPU instances */}
         <div className="bg-gradient-to-r from-gray-700 to-gray-800 text-white px-6 py-5 flex items-center justify-between">
           <div className="flex items-center gap-2 text-lg font-semibold">
             <span className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-success animate-pulse-soft' : 'bg-danger'}`}></span>
             <span>{instance.name}</span>
           </div>
-          {gpuGroupName && (
-            <span className="text-xs bg-white/20 px-3 py-1 rounded">
-              {gpuGroupName}
-            </span>
-          )}
+          <span className="text-xs bg-white/20 px-3 py-1 rounded">
+            {gpuGroupName || 'CPU'}
+          </span>
         </div>
 
         {/* Content */}
@@ -96,17 +117,29 @@ export default function PolyLlamaInstance({
         </div>
       </div>
 
-      {/* Column 2: GPU Devices */}
-      {gpuDevices && gpuDevices.length > 0 && (
+      {/* Column 2: GPU Devices OR CPU Metrics */}
+      {gpuDevices && gpuDevices.length > 0 ? (
         <div className="bg-white rounded-xl p-6 shadow-sm">
           <div className="text-sm text-gray-600 mb-3 font-medium">GPU Devices</div>
           <div className="space-y-2">
-            {gpuDevices.map((device) => (
-              <GPUDevice key={device.index} device={device} />
-            ))}
+            {gpuDevices.map((device) => {
+              const deviceMetrics = gpuMetrics?.find(m => m.index === device.index)
+              return (
+                <GPUDevice 
+                  key={device.index} 
+                  device={device} 
+                  deviceMetrics={deviceMetrics}
+                />
+              )
+            })}
           </div>
         </div>
-      )}
+      ) : cpuMetrics ? (
+        <div className="bg-white rounded-xl p-6 shadow-sm">
+          <div className="text-sm text-gray-600 mb-3 font-medium">System Resources</div>
+          <CPUMetrics metrics={cpuMetrics} />
+        </div>
+      ) : null}
     </div>
   )
 }

@@ -29,6 +29,10 @@ ENV DEBIAN_FRONTEND=
 COPY startServices.sh /root/startServices.sh
 RUN chmod +x /root/startServices.sh
 
-EXPOSE 11434
+# Copy GPU metrics server
+COPY gpu_metrics_server.py /root/gpu_metrics_server.py
+RUN chmod +x /root/gpu_metrics_server.py
+
+EXPOSE 11434 11435
 
 ENTRYPOINT ["/root/startServices.sh"]

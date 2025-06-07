@@ -13,8 +13,10 @@ export default function ChatPage() {
 
   return (
     <div className="h-screen flex flex-col">
-      <Header onRefresh={handleRefresh} />
-      <div className="flex-1">
+      <div className="flex-shrink-0">
+        <Header onRefresh={handleRefresh} />
+      </div>
+      <div className="flex-1 overflow-hidden">
         <ChatInterface key={refreshKey} onRefresh={handleRefresh} />
       </div>
     </div>

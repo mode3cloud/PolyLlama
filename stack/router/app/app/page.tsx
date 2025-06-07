@@ -27,7 +27,7 @@ export default function Home() {
       if (response.ok) {
         const data = await response.json()
         const instanceCount = data.instance_count || 2
-        
+
         const newInstances: Instance[] = []
         for (let i = 1; i <= instanceCount; i++) {
           newInstances.push({ name: `polyllama${i}` })
@@ -94,7 +94,7 @@ export default function Home() {
       const runningModelNames = Object.keys(runningModelsData)
       const hasRunningModels = runningModelNames.length > 0
       const hasMissingContexts = runningModelNames.some(model => !currentContexts[model])
-      
+
       if (hasRunningModels && hasMissingContexts) {
         try {
           const syncResponse = await fetch(getApiUrl('/api/ui/sync-contexts'))
@@ -134,7 +134,7 @@ export default function Home() {
 
     try {
       const instances = runningModels[modelName] || []
-      
+
       for (const instanceName of instances) {
         const response = await fetch(getApiUrl('/api/generate'), {
           method: 'POST',
@@ -179,8 +179,10 @@ export default function Home() {
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col">
-        <Header onRefresh={refreshData} />
-        <main className="flex-1 max-w-[1400px] mx-auto p-4 md:p-8 w-full">
+        <div className="fixed top-0 left-0 right-0 z-50">
+          <Header onRefresh={refreshData} />
+        </div>
+        <main className="flex-1 max-w-[1400px] mx-auto p-4 md:p-8 w-full pt-20">
           <div className="text-center p-8 text-gray-500">Loading...</div>
         </main>
       </div>
@@ -189,16 +191,18 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <Header onRefresh={refreshData} />
-      <main className="flex-1 max-w-[1400px] mx-auto p-4 md:p-8 w-full">
-        <SystemOverview 
+      <div className="fixed top-0 left-0 right-0 z-50">
+        <Header onRefresh={refreshData} />
+      </div>
+      <main className="flex-1 max-w-[1400px] mx-auto p-4 md:p-8 w-full mt-12">
+        <SystemOverview
           instances={instances}
           instanceStatuses={instanceStatuses}
           runningModels={runningModels}
           modelContexts={modelContexts}
           onRefresh={refreshData}
         />
-        
+
         <ModelManagement
           availableModels={availableModels}
           runningModels={runningModels}
@@ -252,7 +256,7 @@ export default function Home() {
                   console.error('Failed to store context length:', error)
                 }
               }
-              
+
               setLoadModalOpen(false)
               setTimeout(refreshData, 2000)
               // TODO: Add success toast

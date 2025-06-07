@@ -36,11 +36,11 @@ COPY services/mcp_tools /app/mcp_tools
 RUN mkdir -p /tmp/llm-proxy-uploads
 
 # Expose LLM proxy service port
-EXPOSE 8085
+EXPOSE 11435
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8085/health || exit 1
+    CMD curl -f http://localhost:11435/health || exit 1
 
 # Run the LLM Proxy service
 CMD ["python", "main.py"]

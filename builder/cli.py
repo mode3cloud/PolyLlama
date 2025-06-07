@@ -8,6 +8,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -57,6 +59,50 @@ class PolyLlamaCLI:
             else:
                 print("⚠️  .env file not found and .env.example doesn't exist")
                 print("   The stack will use default environment settings")
+
+    def tail_log_file(self, stop_event):
+        """Tail the log file and display only the last 3 lines"""
+        if not self.log_file.exists():
+            return
+        
+        last_position = 0
+        displayed_lines = ["", "", ""]  # Initialize with 3 empty lines
+        
+        while not stop_event.is_set():
+            try:
+                with open(self.log_file, "r") as f:
+                    f.seek(last_position)
+                    new_content = f.read()
+                    if new_content:
+                        # Split into lines and add to our buffer
+                        new_lines = new_content.strip().split('\n')
+                        if new_lines and new_lines[0]:  # Only add non-empty lines
+                            for line in new_lines:
+                                if line.strip():  # Only process non-empty lines
+                                    displayed_lines.append(line)
+                                    displayed_lines = displayed_lines[-3:]  # Keep only last 3
+                            
+                            # Move cursor up 3 lines
+                            print("\033[3A", end="", flush=True)
+                            
+                            # Print the 3 lines (always print 3 to maintain spacing)
+                            for i in range(3):
+                                # Clear the entire line
+                                print("\033[2K", end="", flush=True)
+                                if i < len(displayed_lines) and displayed_lines[i]:
+                                    # Truncate long lines
+                                    line = displayed_lines[i]
+                                    truncated = line[:117] + "..." if len(line) > 120 else line
+                                    print(f"\r   │ {truncated}", flush=True)
+                                else:
+                                    print(f"\r   │", flush=True)
+                    
+                    last_position = f.tell()
+                
+                time.sleep(0.1)  # Poll every 100ms
+            except Exception:
+                # Handle file access errors gracefully
+                time.sleep(0.5)
 
     def detect_and_generate(self, dev_mode: bool = False) -> Dict:
         """Detect hardware and generate configuration"""
@@ -168,12 +214,35 @@ class PolyLlamaCLI:
             subprocess.run(["docker-compose", "-f", str(self.compose_file), "pull"])
         else:
             print(f"   Output logged to: {self.log_file}")
+            print("   ┌─ Pull Progress ──────────────────────────────────────────────────────")
+            print("   │")
+            print("   │")
+            print("   │")
+            
+            # Start the tail thread
+            stop_event = threading.Event()
+            tail_thread = threading.Thread(target=self.tail_log_file, args=(stop_event,))
+            tail_thread.daemon = True
+            tail_thread.start()
+            
+            # Run the pull command
             with open(self.log_file, "w") as log:
                 subprocess.run(
                     ["docker-compose", "-f", str(self.compose_file), "pull"],
                     stdout=log,
                     stderr=subprocess.STDOUT,
                 )
+            
+            # Stop the tail thread
+            stop_event.set()
+            tail_thread.join(timeout=1)
+            
+            # Clear the progress display
+            print("\033[3A", end="", flush=True)
+            for _ in range(3):
+                print("\033[2K", end="", flush=True)
+                print("\033[1B", end="", flush=True)
+            print("\r   └──────────────────────────────────────────────────────────────────────", flush=True)
 
         # Build services
         print("🔨 Building services...")
@@ -189,8 +258,31 @@ class PolyLlamaCLI:
             print(
                 f"   This may take a few minutes... output logged to: {self.log_file}"
             )
+            print("   ┌─ Build Progress ─────────────────────────────────────────────────────")
+            print("   │")
+            print("   │")
+            print("   │")
+            
+            # Start the tail thread
+            stop_event = threading.Event()
+            tail_thread = threading.Thread(target=self.tail_log_file, args=(stop_event,))
+            tail_thread.daemon = True
+            tail_thread.start()
+            
+            # Run the build command
             with open(self.log_file, "a") as log:
                 result = subprocess.run(build_cmd, stdout=log, stderr=subprocess.STDOUT)
+            
+            # Stop the tail thread
+            stop_event.set()
+            tail_thread.join(timeout=1)
+            
+            # Clear the progress display and show completion
+            print("\033[3A", end="", flush=True)
+            for _ in range(3):
+                print("\033[2K", end="", flush=True)
+                print("\033[1B", end="", flush=True)
+            print("\r   └──────────────────────────────────────────────────────────────────────", flush=True)
 
         # Check if build was successful
         if result.returncode != 0:

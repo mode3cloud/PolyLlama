@@ -16,11 +16,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Expose port
-EXPOSE 8085
+EXPOSE 11435
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:8085/health || exit 1
+    CMD curl -f http://localhost:11435/health || exit 1
 
 # Run the application
 CMD ["python", "main.py"]

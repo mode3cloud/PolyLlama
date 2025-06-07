@@ -28,6 +28,11 @@ if ! python3 -c "import yaml" >/dev/null 2>&1; then
     exit 1
 fi
 
+if ! python3 -c "import pytest" >/dev/null 2>&1; then
+    echo "❌ Pytest is required. Install with: pip install pytest"
+    exit 1
+fi
+
 echo "✅ All dependencies found"
 echo ""
 
@@ -42,8 +47,18 @@ if python3 tests/generation.py; then
     
     if python3 tests/edge_cases.py; then
         echo ""
-        echo "🎉 All tests completed successfully!"
-        exit 0
+        echo "🚀 Running pytest suite..."
+        echo ""
+        
+        if python3 -m pytest tests/test_cli.py -v; then
+            echo ""
+            echo "🎉 All tests completed successfully!"
+            exit 0
+        else
+            echo ""
+            echo "❌ Pytest tests failed!"
+            exit 1
+        fi
     else
         echo ""
         echo "❌ Edge case tests failed!"

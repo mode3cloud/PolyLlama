@@ -27,13 +27,13 @@ services:
     container_name: llm-proxy
     hostname: llm-proxy
     ports:
-      - "8085:8085"
+      - "11435:11435"
     env_file:
       - ../../.env
     environment:
       - OLLAMA_API_BASE=http://router:11434
       - LLM_PROXY_HOST=0.0.0.0
-      - LLM_PROXY_PORT=8085
+      - LLM_PROXY_PORT=11435
     depends_on:
       - router
   

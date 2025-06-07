@@ -72,7 +72,6 @@ export interface StreamChunk {
   error?: string;
 }
 
-<<<<<<< HEAD
 export interface SearchModelTag {
   name: string;
   size: string;
@@ -159,5 +158,4 @@ export interface StreamChunk {
   type: 'connected' | 'content' | 'complete' | 'error' | 'done';
   content?: string;
   error?: string;
->>>>>>> a14b1b8 (feat: Add LiteLLM-based chat interface with proper architecture)
 }

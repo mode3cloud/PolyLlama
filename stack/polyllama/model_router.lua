@@ -1079,10 +1079,12 @@ function _M.parse_ollama_search_html(html)
                               string.match(context, 'pulls?:%s*([%d,]+%s*[KkMm]?)') or
                               "Unknown"
                     
-                    -- Look for size information
+                    -- Look for size information with more patterns
                     size = string.match(context, '(%d+%.?%d*%s*[GM]B)') or
                           string.match(context, 'size:%s*(%d+%.?%d*%s*[GM]B)') or
-                          "Unknown"
+                          string.match(context, '(%d+%.?%d*[GM])%s*%-') or
+                          string.match(context, '>(%d+%.?%d*%s*[GM]B)<') or
+                          ""
                 end
                 
                 local model_info = {
@@ -1098,8 +1100,8 @@ function _M.parse_ollama_search_html(html)
                 -- Add default tags based on common patterns
                 -- Look for specific model variants mentioned in the context
                 if model_name and model_name ~= "" then
-                    -- Always add a latest tag
-                    table.insert(model_info.tags, { name = "latest", size = size })
+                    -- Always add a latest tag with a default size if not found
+                    table.insert(model_info.tags, { name = "latest", size = size ~= "" and size or "varies" })
                     
                     -- Add specific tags based on model type
                     local model_lower = string.lower(model_name)
@@ -1126,6 +1128,16 @@ function _M.parse_ollama_search_html(html)
                         table.insert(model_info.tags, { name = "6.7b", size = "3.8GB" })
                         table.insert(model_info.tags, { name = "33b", size = "19GB" })
                         table.insert(model_info.tags, { name = "67b", size = "39GB" })
+                    else
+                        -- For unknown models, check if we already added a latest tag
+                        -- If the latest tag has no size info, provide common sizes
+                        if #model_info.tags == 1 and model_info.tags[1].name == "latest" and 
+                           (model_info.tags[1].size == "varies" or model_info.tags[1].size == "") then
+                            -- Add common model sizes as additional tags
+                            table.insert(model_info.tags, { name = "small", size = "~2GB" })
+                            table.insert(model_info.tags, { name = "medium", size = "~4GB" })
+                            table.insert(model_info.tags, { name = "large", size = "~8GB" })
+                        end
                     end
                 end
                 

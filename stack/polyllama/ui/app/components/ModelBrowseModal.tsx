@@ -27,9 +27,18 @@ export default function ModelBrowseModal({
   const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set())
   const [pullingModels, setPullingModels] = useState<Set<string>>(new Set())
 
-  // Available instances for selection
-  const availableInstances = useMemo(() => {
-    return instances.filter(instance => {
+  // Find the CPU instance (always the last one)
+  const cpuInstance = useMemo(() => {
+    // CPU instance is always the last one
+    const lastInstance = instances[instances.length - 1]
+    if (lastInstance) {
+      const status = instanceStatuses[lastInstance.name]
+      if (status && status.status === 'online') {
+        return lastInstance
+      }
+    }
+    // Fallback to any available instance if CPU is not online
+    return instances.find(instance => {
       const status = instanceStatuses[instance.name]
       return status && status.status === 'online'
     })
@@ -94,7 +103,12 @@ export default function ModelBrowseModal({
   }, [])
 
   // Pull a specific model tag
-  const handlePullModel = useCallback(async (model: SearchModel, tag: string, instanceName?: string) => {
+  const handlePullModel = useCallback(async (model: SearchModel, tag: string) => {
+    if (!cpuInstance) {
+      console.error('No available instance to pull model to')
+      return
+    }
+
     const fullModelName = `${model.name}:${tag}`
     const pullKey = fullModelName
 
@@ -107,7 +121,7 @@ export default function ModelBrowseModal({
         body: JSON.stringify({
           model: model.name,
           tag: tag,
-          instance: instanceName
+          instance: cpuInstance.name
         })
       })
 
@@ -132,7 +146,7 @@ export default function ModelBrowseModal({
         return next
       })
     }
-  }, [onPullStarted])
+  }, [onPullStarted, cpuInstance])
 
   // Reset state when modal opens/closes
   useEffect(() => {
@@ -254,43 +268,22 @@ export default function ModelBrowseModal({
                           <div key={tag.name} className="flex items-center justify-between p-2 bg-blue-50 border border-blue-200 rounded">
                             <div className="flex items-center gap-2">
                               <span className="font-medium text-blue-900">{model.name}:{tag.name}</span>
-                              <span className="text-blue-700 text-xs">({tag.size})</span>
+                              <span className="text-blue-700 text-xs">({tag.size || 'size varies'})</span>
                             </div>
-                            <div className="flex items-center gap-2">
-                              {availableInstances.length > 1 && (
-                                <select 
-                                  className="text-xs border border-blue-300 rounded px-2 py-1"
-                                  onChange={(e) => {
-                                    if (e.target.value) {
-                                      handlePullModel(model, tag.name, e.target.value)
-                                      e.target.value = '' // Reset selection
-                                    }
-                                  }}
-                                  disabled={isPulling}
-                                >
-                                  <option value="">Pull to...</option>
-                                  {availableInstances.map(instance => (
-                                    <option key={instance.name} value={instance.name}>
-                                      {instance.name}
-                                    </option>
-                                  ))}
-                                </select>
+                            <button
+                              onClick={() => handlePullModel(model, tag.name)}
+                              disabled={isPulling || !cpuInstance}
+                              className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
+                            >
+                              {isPulling ? (
+                                <>
+                                  <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
+                                  Pulling...
+                                </>
+                              ) : (
+                                'Pull'
                               )}
-                              <button
-                                onClick={() => handlePullModel(model, tag.name)}
-                                disabled={isPulling}
-                                className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1"
-                              >
-                                {isPulling ? (
-                                  <>
-                                    <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin"></div>
-                                    Pulling...
-                                  </>
-                                ) : (
-                                  'Pull'
-                                )}
-                              </button>
-                            </div>
+                            </button>
                           </div>
                         )
                       })}
@@ -300,7 +293,7 @@ export default function ModelBrowseModal({
                         <div key={tag.name} className="flex items-center justify-between p-2 bg-green-50 border border-green-200 rounded">
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-green-900">{model.name}:{tag.name}</span>
-                            <span className="text-green-700 text-xs">({tag.size})</span>
+                            <span className="text-green-700 text-xs">({tag.size || 'size varies'})</span>
                           </div>
                           <span className="px-2 py-1 bg-green-100 text-green-800 text-xs rounded">
                             Downloaded

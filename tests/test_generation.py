@@ -14,7 +14,7 @@ import yaml
 import re
 
 
-class PolyLlamaGenerationTest:
+class TestPolyLlamaGeneration:
     """Test class for PolyLlama file generation"""
 
     def __init__(self):
@@ -286,7 +286,7 @@ class PolyLlamaGenerationTest:
 
 
 # Global test instance
-tester = PolyLlamaGenerationTest()
+tester = TestPolyLlamaGeneration()
 
 
 def two_gpu_groups():

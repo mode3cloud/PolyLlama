@@ -3,9 +3,11 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChatMessage, ChatModel, StreamChunk } from '../types'
 
-const LLM_PROXY_URL = process.env.NODE_ENV === 'production' 
-  ? 'http://llm-proxy:8085' 
+const LLM_PROXY_URL = process.env.NODE_ENV === 'production'
+  ? 'http://llm-proxy:8085'
   : 'http://localhost:8085'
+
+console.log('LLM Proxy URL:', LLM_PROXY_URL, 'Environment:', process.env.NODE_ENV)
 
 interface ChatInterfaceProps {
   onRefresh: () => void
@@ -111,32 +113,34 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
           if (line.startsWith('data: ')) {
             const data = line.slice(6).trim()
             if (data === '') continue
-            
+
             try {
               const chunk: StreamChunk = JSON.parse(data)
               
+              console.log('Received chunk:', chunk)
+
               if (chunk.type === 'content' && chunk.content) {
                 assistantMessage.content += chunk.content
-                setMessages(prev => 
-                  prev.map((msg, idx) => 
+                setMessages(prev =>
+                  prev.map((msg, idx) =>
                     idx === prev.length - 1 ? { ...assistantMessage } : msg
                   )
                 )
               } else if (chunk.type === 'error') {
                 console.error('Stream error:', chunk.error)
                 assistantMessage.content += `\n\n*Error: ${chunk.error}*`
-                setMessages(prev => 
-                  prev.map((msg, idx) => 
+                setMessages(prev =>
+                  prev.map((msg, idx) =>
                     idx === prev.length - 1 ? { ...assistantMessage } : msg
                   )
                 )
               } else if (chunk.type === 'done') {
                 break
+              } else if (chunk.type === 'connected') {
+                console.log('Stream connected')
               }
             } catch (parseError) {
-              if (data !== '{"type": "done"}') {
-                console.warn('Failed to parse chunk:', data, parseError)
-              }
+              console.error('Failed to parse chunk:', data, parseError)
             }
           }
         }
@@ -179,7 +183,7 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
       const role = msg.role.charAt(0).toUpperCase() + msg.role.slice(1)
       return `**${role}:** ${msg.content}`
     }).join('\n\n')
-    
+
     const blob = new Blob([markdown], { type: 'text/markdown' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -207,7 +211,7 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-gray-50">
+    <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b border-gray-200 p-4">
         <div className="flex items-center justify-between max-w-4xl mx-auto">
@@ -229,7 +233,7 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
                 </optgroup>
               ))}
             </select>
-            
+
             {selectedModel && (
               <span className="text-sm text-gray-600">
                 Provider: {models.find(m => m.id === selectedModel)?.provider || 'Unknown'}
@@ -271,18 +275,17 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
               <p className="text-sm mt-2">Select a model and start chatting with your AI assistant.</p>
             </div>
           )}
-          
+
           {messages.map((message, index) => (
             <div
               key={index}
               className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[80%] rounded-lg p-4 ${
-                  message.role === 'user'
+                className={`max-w-[80%] rounded-lg p-4 ${message.role === 'user'
                     ? 'bg-blue-500 text-white'
                     : 'bg-white border border-gray-200 text-gray-900'
-                }`}
+                  }`}
               >
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex-1 whitespace-pre-wrap">{message.content}</div>
@@ -311,7 +314,7 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
               type="text"
               value={input}
               onChange={(e) => setInput(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
+              onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && sendMessage()}
               placeholder={selectedModel ? "Type your message..." : "Select a model to start chatting"}
               className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               disabled={isLoading || !selectedModel}

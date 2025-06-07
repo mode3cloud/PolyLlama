@@ -64,6 +64,7 @@ async def startup_event():
     # Initialize services
     message_manager = MessageManager()
     llm_service = MultiLLMService(neo4j_driver=None)  # No Neo4j for now
+    llm_service.message_manager = message_manager  # Set message manager directly
     mcp_client = MCPClient(LLMProxyConfig.MCP_SERVICE_URL)
     
     # Connect MCP client

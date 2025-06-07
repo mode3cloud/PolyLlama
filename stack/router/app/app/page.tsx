@@ -203,8 +203,11 @@ export default function Home() {
           availableModels={availableModels}
           runningModels={runningModels}
           modelContexts={modelContexts}
+          instances={instances}
+          instanceStatuses={instanceStatuses}
           onLoadModel={handleLoadModel}
           onUnloadModel={handleUnloadModel}
+          onRefresh={refreshData}
         />
       </main>
 

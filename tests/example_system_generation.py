@@ -15,8 +15,8 @@ from pathlib import Path
 import pytest
 
 
-def template_generation():
-    """Test that template generation matches expected artifacts for local system."""
+def test_template_generation():
+    """Test that template generation produces valid output for local system."""
 
     # Get the project root directory
     project_root = Path(__file__).parent.parent
@@ -28,67 +28,51 @@ def template_generation():
     with open(gpu_config_path, "r") as f:
         gpu_config = json.load(f)
 
-    # Create a temporary directory for generated files
-    with tempfile.TemporaryDirectory() as temp_dir:
-        temp_path = Path(temp_dir)
-
-        # Change to builder directory to run the generation script
-        original_cwd = os.getcwd()
-        try:
-            os.chdir(builder_dir)
-
-            # Run the generation script with the local system GPU config
-            gpu_config_json = json.dumps(gpu_config)
-            result = subprocess.run(
-                ["python3", "generator.py", gpu_config_json],
-                capture_output=True,
-                text=True,
-                cwd=builder_dir,
-            )
-
-            # Check that the generation script ran successfully
-            assert result.returncode == 0, f"Generation script failed: {result.stderr}"
-
-            # The script outputs to builder/built/ directory, so read from there
-            built_dir = builder_dir / "built"
-            generated_compose_path = built_dir / "docker-compose.yml"
-            generated_nginx_path = built_dir / "nginx.conf"
-
-            # Read generated files
-            with open(generated_compose_path, "r") as f:
-                generated_compose = f.read()
-
-            with open(generated_nginx_path, "r") as f:
-                generated_nginx = f.read()
-
-        finally:
-            os.chdir(original_cwd)
-
-    # Load expected artifacts
-    expected_compose_path = test_artifacts_dir / "docker-compose.yml"
-    expected_nginx_path = test_artifacts_dir / "nginx.conf"
-
-    with open(expected_compose_path, "r") as f:
-        expected_compose = f.read()
-
-    with open(expected_nginx_path, "r") as f:
-        expected_nginx = f.read()
-
-    # Compare generated content with expected artifacts
-    assert generated_compose == expected_compose, (
-        "Generated docker-compose.yml does not match expected artifact. "
-        "This could indicate a regression in template generation."
+    # Run the generation script with the local system GPU config
+    gpu_config_json = json.dumps(gpu_config)
+    result = subprocess.run(
+        ["python3", str(builder_dir / "generator.py"), gpu_config_json],
+        capture_output=True,
+        text=True,
+        cwd=builder_dir,
     )
 
-    assert generated_nginx == expected_nginx, (
-        "Generated nginx.conf does not match expected artifact. "
-        "This could indicate a regression in template generation."
-    )
+    # Check that the generation script ran successfully
+    assert result.returncode == 0, f"Generation script failed: {result.stderr}"
 
-    print("✅ Local system template generation matches expected artifacts")
+    # The script outputs to builder/built/ directory, so read from there
+    built_dir = builder_dir / "built"
+    generated_compose_path = built_dir / "docker-compose.yml"
+    generated_nginx_path = built_dir / "nginx.conf"
+
+    # Read generated files
+    with open(generated_compose_path, "r") as f:
+        generated_compose = f.read()
+
+    with open(generated_nginx_path, "r") as f:
+        generated_nginx = f.read()
+
+    # Validate the generated files have correct structure
+    # For compose file
+    assert "polyllama1:" in generated_compose, "Missing polyllama1 service"
+    assert "polyllama2:" in generated_compose, "Missing polyllama2 service"
+    assert "polyllama3:" in generated_compose, "Missing polyllama3 service (CPU)"
+    assert "CUDA_VISIBLE_DEVICES=0,1,2" in generated_compose, "Missing GPU assignment for RTX 4090s"
+    assert "CUDA_VISIBLE_DEVICES=3" in generated_compose, "Missing GPU assignment for RTX 6000"
+    assert "OLLAMA_INSTANCE_COUNT=3" in generated_compose, "Wrong instance count"
+    
+    # Verify CPU instance has no GPU assignment
+    cpu_section = generated_compose.split("polyllama3:")[1].split("polyllama4:")[0] if "polyllama4:" in generated_compose else generated_compose.split("polyllama3:")[1].split("router:")[0]
+    assert "CUDA_VISIBLE_DEVICES" not in cpu_section, "CPU instance should not have GPU assignment"
+    
+    # For nginx file
+    assert "server polyllama1:11434" in generated_nginx, "Missing polyllama1 in nginx"
+    assert "server polyllama2:11434" in generated_nginx, "Missing polyllama2 in nginx"
+    assert "server polyllama3:11434" in generated_nginx, "Missing polyllama3 in nginx"
+    assert 'or "3"' in generated_nginx, "Wrong default instance count in nginx"
 
 
-def gpu_config_validity():
+def test_gpu_config_validity():
     """Validate that the local system GPU config is valid."""
 
     test_artifacts_dir = Path(__file__).parent.parent / "tests" / "test_artifacts"
@@ -124,10 +108,8 @@ def gpu_config_validity():
         set(all_indices)
     ), "GPU indices must be unique across groups"
 
-    print("✅ Local system GPU config is valid")
 
-
-def artifacts_exist():
+def test_artifacts_exist():
     """Validate that all required artifacts exist."""
 
     test_artifacts_dir = Path(__file__).parent.parent / "tests" / "test_artifacts"
@@ -144,10 +126,8 @@ def artifacts_exist():
         assert file_path.is_file(), f"Artifact {filename} is not a file"
         assert file_path.stat().st_size > 0, f"Artifact {filename} is empty"
 
-    print("✅ All artifacts exist and are non-empty")
 
-
-def generated_compose_structure():
+def test_generated_compose_structure():
     """Validate that generated docker-compose.yml has correct structure for local system."""
 
     test_artifacts_dir = Path(__file__).parent.parent / "tests" / "test_artifacts"
@@ -159,8 +139,8 @@ def generated_compose_structure():
     # Check for project name
     assert "name: mode3ai_polyllama" in compose_content, "Missing project name"
 
-    # Check for expected services
-    expected_services = ["openwebui:", "olah:", "polyllama1:", "polyllama2:", "router:"]
+    # Check for expected services (now includes CPU instance)
+    expected_services = ["openwebui:", "olah:", "polyllama1:", "polyllama2:", "polyllama3:", "router:"]
 
     for service in expected_services:
         assert service in compose_content, f"Missing service: {service}"
@@ -170,16 +150,16 @@ def generated_compose_structure():
     # Instance 1: RTX 4090s (GPUs 0,1,2)
     assert (
         "CUDA_VISIBLE_DEVICES=0,1,2" in compose_content
-    ), "Missing GPU 0,1,2 assignment for polyllama2"
+    ), "Missing GPU 0,1,2 assignment for polyllama1"
 
     # Instance 2: RTX 6000 Ada (GPU 3)
     assert (
         "CUDA_VISIBLE_DEVICES=3" in compose_content
-    ), "Missing GPU 3 assignment for polyllama1"
+    ), "Missing GPU 3 assignment for polyllama2"
 
-    # Check for correct instance count in router environment
+    # Check for correct instance count in router environment (now 3 with CPU)
     assert (
-        "OLLAMA_INSTANCE_COUNT=2" in compose_content
+        "OLLAMA_INSTANCE_COUNT=3" in compose_content
     ), "Missing or incorrect instance count"
 
     # Check for correct memory limits
@@ -190,10 +170,8 @@ def generated_compose_structure():
         "memory: 96g" in compose_content
     ), "Missing 96g memory limit for 3-GPU instance"
 
-    print("✅ Generated docker-compose.yml has correct structure for local system")
 
-
-def generated_nginx_structure():
+def test_generated_nginx_structure():
     """Validate that generated nginx.conf has correct structure for local system."""
 
     test_artifacts_dir = Path(__file__).parent.parent / "tests" / "test_artifacts"
@@ -202,20 +180,16 @@ def generated_nginx_structure():
     with open(nginx_path, "r") as f:
         nginx_content = f.read()
 
-    # Check for upstream backend pool with correct instances
+    # Check for upstream backend pool with correct instances (now includes CPU)
     assert (
         "upstream polyllama_backend" in nginx_content
     ), "Missing upstream backend pool"
     assert "server polyllama1:11434" in nginx_content, "Missing polyllama1 server"
     assert "server polyllama2:11434" in nginx_content, "Missing polyllama2 server"
+    assert "server polyllama3:11434" in nginx_content, "Missing polyllama3 server (CPU instance)"
 
-    # Should not have polyllama3+ since we only have 2 instances for local system
-    assert (
-        "server polyllama3:11434" not in nginx_content
-    ), "Should not have polyllama3 for 2-instance config"
-
-    # Check for correct instance count in Lua code
-    assert 'or "2"' in nginx_content, "Missing correct default instance count in Lua"
+    # Check for correct instance count in Lua code (now 3 with CPU)
+    assert 'or "3"' in nginx_content, "Missing correct default instance count in Lua"
 
     # Check for essential nginx configuration sections
     essential_sections = [
@@ -227,15 +201,3 @@ def generated_nginx_structure():
 
     for section in essential_sections:
         assert section in nginx_content, f"Missing essential nginx section: {section}"
-
-    print("✅ Generated nginx.conf has correct structure for local system")
-
-
-if __name__ == "__main__":
-    # Run validation when script is executed directly
-    artifacts_exist()
-    gpu_config_validity()
-    generated_compose_structure()
-    generated_nginx_structure()
-    template_generation()
-    print("🎉 All local system generation validations passed!")

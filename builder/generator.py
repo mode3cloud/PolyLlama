@@ -3,7 +3,6 @@ Docker Compose file generator for PolyLlama
 """
 
 import json
-import shutil
 from pathlib import Path
 from typing import Dict, List
 from jinja2 import Environment, FileSystemLoader
@@ -63,17 +62,9 @@ class ComposeGenerator:
         Returns:
             List of instance configurations for template
         """
-        if not gpu_groups:
-            # CPU-only configuration
-            return [{
-                "number": 1,
-                "gpu_indices": None,
-                "memory_limit": 16,
-                "gpu_name": "CPU-only",
-                "gpu_count": 0,
-            }]
-
         instances = []
+        
+        # Add GPU instances
         for i, group in enumerate(gpu_groups, 1):
             # Calculate memory limit based on GPU count
             gpu_count = len(group["indices"])
@@ -87,6 +78,16 @@ class ComposeGenerator:
                 "gpu_count": gpu_count,
                 "gpu_group_index": i - 1,  # 0-based index for matching with gpu_groups
             })
+        
+        # Always add CPU instance as the last instance
+        cpu_instance_number = len(gpu_groups) + 1 if gpu_groups else 1
+        instances.append({
+            "number": cpu_instance_number,
+            "gpu_indices": None,
+            "memory_limit": 16,
+            "gpu_name": "CPU-only",
+            "gpu_count": 0,
+        })
 
         return instances
 

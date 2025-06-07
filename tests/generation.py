@@ -299,7 +299,7 @@ def two_gpu_groups():
             ]
         },
         test_name="Two GPU Groups (4090 + 6000)",
-        expected_instances=2,
+        expected_instances=3,  # 2 GPU groups + 1 CPU instance
     )
 
 
@@ -314,7 +314,7 @@ def three_gpu_groups():
             ]
         },
         test_name="Three GPU Groups (individual)",
-        expected_instances=3,
+        expected_instances=4,  # 3 GPU groups + 1 CPU instance
     )
 
 
@@ -323,7 +323,7 @@ def single_gpu_group():
     assert tester.run_test(
         gpu_config={"gpu_groups": [{"name": "RTX 4090", "indices": [0, 1, 2, 3]}]},
         test_name="Single GPU Group (all GPUs)",
-        expected_instances=1,
+        expected_instances=2,  # 1 GPU group + 1 CPU instance
     )
 
 
@@ -348,7 +348,7 @@ def mixed_gpu_types():
             ]
         },
         test_name="Mixed GPU types (4 groups)",
-        expected_instances=4,
+        expected_instances=5,  # 4 GPU groups + 1 CPU instance
     )
 
 
@@ -366,7 +366,7 @@ def large_configuration():
             ]
         },
         test_name="Large configuration (6 groups)",
-        expected_instances=6,
+        expected_instances=7,  # 6 GPU groups + 1 CPU instance
     )
 
 

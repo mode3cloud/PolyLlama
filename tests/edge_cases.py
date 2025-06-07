@@ -48,11 +48,11 @@ def single_gpu():
     assert result.returncode == 0, f"Generation failed: {result.stderr}"
 
     print("   ✅ Single GPU configuration generated successfully")
-    # Check that only 1 instance was created
+    # Check that 2 instances were created (1 GPU + 1 CPU)
     assert (
-        "Generated 1 instance(s)" in result.stdout
+        "Generated 2 instance(s)" in result.stdout
     ), f"Incorrect instance count for single GPU. Output: {result.stdout}"
-    print("   ✅ Correct instance count for single GPU")
+    print("   ✅ Correct instance count for single GPU (1 GPU + 1 CPU)")
 
 
 def large_gpu_indices():
@@ -76,6 +76,11 @@ def large_gpu_indices():
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=root_dir)
     assert result.returncode == 0, f"Generation failed: {result.stderr}"
     print("   ✅ Large GPU indices handled successfully")
+    # Check that 3 instances were created (2 GPU groups + 1 CPU)
+    assert (
+        "Generated 3 instance(s)" in result.stdout
+    ), f"Incorrect instance count for large GPU indices. Output: {result.stdout}"
+    print("   ✅ Correct instance count for large GPU indices (2 GPU + 1 CPU)")
 
 
 def many_instances():
@@ -98,9 +103,9 @@ def many_instances():
 
     print("   ✅ Many instances configuration generated successfully")
     assert (
-        "Generated 10 instance(s)" in result.stdout
+        "Generated 11 instance(s)" in result.stdout
     ), f"Incorrect instance count for many instances. Output: {result.stdout}"
-    print("   ✅ Correct instance count for many instances")
+    print("   ✅ Correct instance count for many instances (10 GPU + 1 CPU)")
 
 
 if __name__ == "__main__":

@@ -85,6 +85,25 @@ services:
             - driver: nvidia
               capabilities: [ gpu ]
 
+  polyllama3:
+    container_name: polyllama3
+    hostname: polyllama3
+    build:
+      dockerfile: Dockerfile
+      context: ../../stack/ollama
+    volumes:
+      - ~/.cache/huggingface/hub:/root/.cache/huggingface/hub
+      - ~/ollama:/root/.ollama
+    env_file:
+      - ../../.env
+    environment:
+      - OLLAMA_SCHED_SPREAD=1
+      - CUDA_DEVICE_ORDER=PCI_BUS_ID
+    deploy:
+      resources:
+        limits:
+          memory: 16g
+
 
   router:
     container_name: router
@@ -101,10 +120,11 @@ services:
     env_file:
       - ../../.env
     environment:
-      - OLLAMA_INSTANCE_COUNT=2
+      - OLLAMA_INSTANCE_COUNT=3
     depends_on:
       - polyllama1
       - polyllama2
+      - polyllama3
 
 volumes:
   openwebui_data:

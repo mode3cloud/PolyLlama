@@ -12,7 +12,7 @@ builder/built/
 _local.todo.txt
 !.claude
 !CLAUDE.md
-.coverage
+.coverage*
 coverage.xml
 
 node_modules

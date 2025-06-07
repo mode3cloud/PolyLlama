@@ -4,14 +4,12 @@ PolyLlama CLI - Main entry point for the polyllama command
 """
 
 import argparse
-import json
-import os
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict
 
 from .detector import GPUDetector
 from .generator import ComposeGenerator
@@ -114,8 +112,8 @@ class PolyLlamaCLI:
         config = {"gpu_groups": gpu_groups}
         generator.generate(config, self.built_dir, dev_mode=dev_mode)
 
-        # Calculate instance count
-        instance_count = len(gpu_groups) if gpu_groups else 1
+        # Calculate instance count (always includes CPU instance)
+        instance_count = len(gpu_groups) + 1
 
         return {
             "gpu_groups": gpu_groups,
@@ -313,12 +311,15 @@ class PolyLlamaCLI:
         print(f"🔍 Total GPUs: {config['gpu_count']}")
         print("")
 
+        print("📊 Instance → GPU Mapping:")
         if config["gpu_groups"]:
-            print("📊 Instance → GPU Mapping:")
             for i, group in enumerate(config["gpu_groups"], 1):
                 indices_str = ",".join(map(str, group["indices"]))
                 print(f"  polyllama{i} → {group['name']} (GPUs: {indices_str})")
-            print("")
+        # Always show CPU instance as the last one
+        cpu_instance_num = len(config["gpu_groups"]) + 1
+        print(f"  polyllama{cpu_instance_num} → CPU-only (no GPU)")
+        print("")
 
         print(
             "🌐+🤖 Polyllama Endpoint (UI and Ollama Router): http://localhost:11434/"
@@ -439,7 +440,7 @@ class PolyLlamaCLI:
             print("    - Will create 1 Ollama instance using CPU only")
             print("    - Suitable for smaller models and inference")
         else:
-            print("  🎯 Dynamic GPU Configuration:")
+            print("  🎯 Dynamic GPU + CPU Configuration:")
             for i, group in enumerate(config["gpu_groups"], 1):
                 indices = group["indices"]
                 gpu_count = len(indices)
@@ -447,7 +448,12 @@ class PolyLlamaCLI:
                 print(
                     f"    - Instance {i}: {group['name']} (GPUs: {indices_str}) - {gpu_count} GPU(s)"
                 )
-            print("    - Each group gets dedicated Ollama instance")
+            # Show CPU instance
+            cpu_instance_num = len(config["gpu_groups"]) + 1
+            print(f"    - Instance {cpu_instance_num}: CPU-only (no GPU) - for lightweight models")
+            print("")
+            print("    - Each GPU group gets dedicated Ollama instance")
+            print("    - CPU instance always available as fallback")
             print("    - OLLAMA_SCHED_SPREAD=1 for optimal GPU utilization")
             print("    - CUDA_DEVICE_ORDER=PCI_BUS_ID for consistent ordering")
 

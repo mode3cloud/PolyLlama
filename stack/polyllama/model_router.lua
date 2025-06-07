@@ -1030,84 +1030,128 @@ function _M.parse_ollama_search_html(html)
         return models
     end
     
-    -- Pattern to match model cards in the HTML
-    -- This is a simplified parser that looks for common patterns in ollama.com's HTML structure
+    -- Updated patterns for current ollama.com structure
+    -- Look for model cards which typically have a structure like:
+    -- <a href="/library/modelname">...</a>
+    -- or <a href="/username/modelname">...</a>
     
-    -- Look for model links and information
-    -- Pattern: /library/modelname or /username/modelname followed by model info
-    local model_pattern = 'href="(/[^"]+)"[^>]*>.-<h3[^>]*>([^<]+)</h3>'
-    
-    for url, name in string.gmatch(html, model_pattern) do
-        if url and name and (string.match(url, "^/library/") or string.match(url, "^/[%w%-_]+/[%w%-_]+$")) then
+    -- First, try to find model cards with links
+    for model_block in string.gmatch(html, '<a[^>]+href="(/[^"]+)"[^>]*>(.-)</a>') do
+        local url, content = string.match(model_block, 'href="(/[^"]+)"[^>]*>(.-)</a>')
+        
+        if url and (string.match(url, "^/library/") or string.match(url, "^/[%w%-_]+/[%w%-_%.]+$")) then
             -- Extract model name from URL
             local model_name = string.match(url, "/([^/]+)$")
-            if model_name then
-                -- Look for additional info around this model
+            if model_name and model_name ~= "" then
+                -- Extract the title from the content
+                local title = string.match(content, '<h%d[^>]*>([^<]+)</h%d>') or
+                            string.match(content, '<div[^>]*>([^<]+)</div>') or
+                            string.match(content, '<span[^>]*>([^<]+)</span>') or
+                            model_name
+                
+                -- Clean up the title
+                title = title:gsub("^%s*(.-)%s*$", "%1"):gsub("&nbsp;", " "):gsub("&amp;", "&")
+                
+                -- Look for additional info in a wider context around this model
+                local start_pos = string.find(html, url, 1, true)
+                local description = ""
+                local downloads = "Unknown"
+                local size = "Unknown"
+                
+                if start_pos then
+                    -- Get context around the model (before and after)
+                    local context_start = math.max(1, start_pos - 500)
+                    local context_end = math.min(string.len(html), start_pos + 1500)
+                    local context = string.sub(html, context_start, context_end)
+                    
+                    -- Look for description patterns
+                    description = string.match(context, '<p[^>]*>([^<]+)</p>') or
+                                string.match(context, 'description"[^>]*>([^<]+)<') or
+                                string.match(context, '<div[^>]+text%-gray[^>]*>([^<]+)</div>') or
+                                ""
+                    
+                    -- Clean up description
+                    description = description:gsub("^%s*(.-)%s*$", "%1"):gsub("&nbsp;", " "):gsub("&amp;", "&")
+                    
+                    -- Look for download/pull count
+                    downloads = string.match(context, '([%d,]+%s*[KkMm]?)%s*pulls?') or
+                              string.match(context, '([%d,]+%s*[KkMm]?)%s*downloads?') or
+                              string.match(context, 'pulls?:%s*([%d,]+%s*[KkMm]?)') or
+                              "Unknown"
+                    
+                    -- Look for size information
+                    size = string.match(context, '(%d+%.?%d*%s*[GM]B)') or
+                          string.match(context, 'size:%s*(%d+%.?%d*%s*[GM]B)') or
+                          "Unknown"
+                end
+                
                 local model_info = {
                     name = model_name,
-                    title = name:gsub("^%s*(.-)%s*$", "%1"), -- trim whitespace
+                    title = title ~= model_name and title or model_name,
                     url = "https://ollama.com" .. url,
-                    description = "",
-                    downloads = 0,
+                    description = description,
+                    downloads = downloads,
                     tags = {},
-                    size = "Unknown"
+                    size = size
                 }
                 
-                -- Try to extract description, downloads, and tags from surrounding HTML
-                -- This is a best-effort extraction based on common HTML patterns
-                local start_pos = string.find(html, url, 1, true)
-                if start_pos then
-                    -- Look for description in the next 1000 characters
-                    local context = string.sub(html, start_pos, start_pos + 1000)
+                -- Add default tags based on common patterns
+                -- Look for specific model variants mentioned in the context
+                if model_name and model_name ~= "" then
+                    -- Always add a latest tag
+                    table.insert(model_info.tags, { name = "latest", size = size })
                     
-                    -- Extract description
-                    local desc = string.match(context, '<p[^>]*>([^<]+)</p>') or 
-                                string.match(context, 'description[^>]*>([^<]+)<') or ""
-                    model_info.description = desc:gsub("^%s*(.-)%s*$", "%1")
-                    
-                    -- Extract download count
-                    local downloads = string.match(context, '(%d+[%w%.]*) downloads') or 
-                                    string.match(context, '(%d+) pulls') or "0"
-                    model_info.downloads = downloads
-                    
-                    -- Extract model size
-                    local size = string.match(context, '(%d+[%w%.]*[GM]B)') or "Unknown"
-                    model_info.size = size
+                    -- Add specific tags based on model type
+                    local model_lower = string.lower(model_name)
+                    if string.match(model_lower, "llama") then
+                        table.insert(model_info.tags, { name = "7b", size = "3.8GB" })
+                        table.insert(model_info.tags, { name = "13b", size = "7.3GB" })
+                        table.insert(model_info.tags, { name = "70b", size = "39GB" })
+                    elseif string.match(model_lower, "mistral") then
+                        table.insert(model_info.tags, { name = "7b", size = "4.1GB" })
+                    elseif string.match(model_lower, "mixtral") then
+                        table.insert(model_info.tags, { name = "8x7b", size = "26GB" })
+                        table.insert(model_info.tags, { name = "8x22b", size = "88GB" })
+                    elseif string.match(model_lower, "gemma") then
+                        table.insert(model_info.tags, { name = "2b", size = "1.4GB" })
+                        table.insert(model_info.tags, { name = "7b", size = "4.8GB" })
+                    elseif string.match(model_lower, "phi") then
+                        table.insert(model_info.tags, { name = "3.5", size = "2.2GB" })
+                        table.insert(model_info.tags, { name = "3", size = "2.0GB" })
+                    elseif string.match(model_lower, "qwen") then
+                        table.insert(model_info.tags, { name = "0.5b", size = "394MB" })
+                        table.insert(model_info.tags, { name = "7b", size = "4.5GB" })
+                        table.insert(model_info.tags, { name = "14b", size = "8.9GB" })
+                    elseif string.match(model_lower, "deepseek") then
+                        table.insert(model_info.tags, { name = "6.7b", size = "3.8GB" })
+                        table.insert(model_info.tags, { name = "33b", size = "19GB" })
+                        table.insert(model_info.tags, { name = "67b", size = "39GB" })
+                    end
                 end
                 
-                -- Add common tags for known models (this could be expanded)
-                if string.match(model_name, "llama") then
-                    table.insert(model_info.tags, { name = "latest", size = "4.7GB" })
-                    table.insert(model_info.tags, { name = "7b", size = "4.7GB" })
-                    table.insert(model_info.tags, { name = "13b", size = "7.3GB" })
-                elseif string.match(model_name, "mistral") then
-                    table.insert(model_info.tags, { name = "latest", size = "4.1GB" })
-                    table.insert(model_info.tags, { name = "7b", size = "4.1GB" })
-                elseif string.match(model_name, "codellama") then
-                    table.insert(model_info.tags, { name = "latest", size = "3.8GB" })
-                    table.insert(model_info.tags, { name = "7b", size = "3.8GB" })
-                    table.insert(model_info.tags, { name = "13b", size = "7.3GB" })
-                else
-                    -- Default tag
-                    table.insert(model_info.tags, { name = "latest", size = model_info.size })
+                -- Only add the model if it has a valid name
+                if model_name ~= "png" and model_name ~= "jpg" and model_name ~= "gif" and 
+                   model_name ~= "svg" and model_name ~= "ico" and model_name ~= "webp" then
+                    table.insert(models, model_info)
                 end
-                
-                table.insert(models, model_info)
             end
         end
     end
     
-    -- Fallback: if no models found, try a simpler pattern
+    -- If we still don't have models, try a different approach
+    -- Look for model listings in specific div or section patterns
     if #models == 0 then
-        -- Look for any model references in the HTML
-        for model_ref in string.gmatch(html, '"([%w%-_]+/[%w%-_]+)"') do
-            if not string.match(model_ref, "^https?://") then -- exclude URLs
-                local model_name = string.match(model_ref, "/([^/]+)$") or model_ref
+        ngx.log(ngx.WARN, "No models found with primary pattern, trying fallback patterns")
+        
+        -- Try to find models in list items or divs
+        for model_ref in string.gmatch(html, '/library/([%w%-_%.]+)') do
+            if model_ref and model_ref ~= "" and 
+               model_ref ~= "png" and model_ref ~= "jpg" and model_ref ~= "gif" then
                 table.insert(models, {
-                    name = model_name,
-                    title = model_name,
-                    url = "https://ollama.com/" .. model_ref,
-                    description = "Model from ollama.com",
+                    name = model_ref,
+                    title = model_ref,
+                    url = "https://ollama.com/library/" .. model_ref,
+                    description = "Model from ollama.com library",
                     downloads = "Unknown",
                     tags = {{ name = "latest", size = "Unknown" }},
                     size = "Unknown"
@@ -1115,6 +1159,8 @@ function _M.parse_ollama_search_html(html)
             end
         end
     end
+    
+    ngx.log(ngx.INFO, "Parsed " .. #models .. " models from ollama.com search")
     
     return models
 end

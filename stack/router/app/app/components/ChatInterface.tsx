@@ -116,7 +116,7 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
 
             try {
               const chunk: StreamChunk = JSON.parse(data)
-              
+
               console.log('Received chunk:', chunk)
 
               if (chunk.type === 'content' && chunk.content) {
@@ -213,7 +213,7 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
   return (
     <div className="flex flex-col h-full bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-4">
+      <div className="bg-white border-b border-gray-200 p-4 flex-shrink-0">
         <div className="flex items-center justify-between max-w-4xl mx-auto">
           <div className="flex items-center gap-4">
             <select
@@ -267,7 +267,7 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
       </div>
 
       {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4">
+      <div className="flex-1 overflow-y-auto p-4 min-h-0">
         <div className="max-w-4xl mx-auto space-y-4">
           {messages.length === 0 && (
             <div className="text-center text-gray-500 py-8">
@@ -283,8 +283,8 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
             >
               <div
                 className={`max-w-[80%] rounded-lg p-4 ${message.role === 'user'
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-white border border-gray-200 text-gray-900'
+                  ? 'bg-blue-500 text-white'
+                  : 'bg-white border border-gray-200 text-gray-900'
                   }`}
               >
                 <div className="flex items-start justify-between gap-2">
@@ -307,7 +307,7 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
       </div>
 
       {/* Input */}
-      <div className="bg-white border-t border-gray-200 p-4">
+      <div className="bg-white border-t border-gray-200 p-4 flex-shrink-0">
         <div className="max-w-4xl mx-auto">
           <div className="flex gap-3">
             <input

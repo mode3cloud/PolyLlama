@@ -27,8 +27,8 @@ export default function Header({ onRefresh }: HeaderProps) {
   }
 
   return (
-    <header className="bg-white/95 backdrop-blur-md border-b border-gray-200 sticky top-0 z-[100]">
-      <div className="max-w-[1400px] mx-auto px-4 md:px-8 py-4 flex items-center justify-between">
+    <header className="bg-white/95 backdrop-blur-md border-b border-gray-200 h-16">
+      <div className="max-w-[1400px] mx-auto px-4 md:px-8 h-full flex items-center justify-between">
         <div className="flex items-center gap-8">
           <div className="flex items-center gap-3 text-2xl font-bold text-gray-900">
             <div className="w-10 h-10 bg-gradient-to-br from-primary to-primary-dark rounded-lg flex items-center justify-center text-2xl">

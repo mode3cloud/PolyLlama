@@ -3,5 +3,5 @@ uvicorn[standard]==0.24.0
 pydantic==2.5.0
 litellm==1.61.15
 httpx==0.25.2
-python-multipart==0.0.6
+python-multipart==0.0.18
 neo4j==5.14.0

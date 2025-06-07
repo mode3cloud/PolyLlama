@@ -18,4 +18,5 @@ coverage.xml
 node_modules
 .pnpm
 .next
-stack/router/app/tsconfig.tsbuildinfo
+stack/polyllama/ui/tsconfig.tsbuildinfo
+.claude/settings.local.json

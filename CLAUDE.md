@@ -13,7 +13,7 @@ PolyLlama is a dynamic multi-instance Ollama orchestration system that automatic
 - **Structure**: Only generated files are placed in `builder/built/`, Dockerfiles remain in `stack/`
 
 ### Request Routing Architecture
-- **Entry Point**: Nginx router (`stack/router/`) serves as the single API endpoint at `:11434`
+- **Entry Point**: Nginx router (`stack/polyllama/`) serves as the single API endpoint at `:11434`
 - **Smart Routing**: `model_router.lua` implements intelligent model-to-instance routing with:
   - Least-loaded instance assignment for new models
   - Model state tracking via shared memory (`model_mappings`)
@@ -112,8 +112,8 @@ Models are routed using this hierarchy:
 - `builder/nginx.conf.j2`: Nginx configuration template
 
 ### Routing Logic
-- `stack/router/model_router.lua`: Request routing and load balancing
-- `stack/router/script.js`: Web UI for monitoring and control
+- `stack/polyllama/model_router.lua`: Request routing and load balancing
+- `stack/polyllama/script.js`: Web UI for monitoring and control
 
 ### Testing
 - `tests/test_generation.py`: Main test scenarios (2-6 GPU groups, CPU-only)

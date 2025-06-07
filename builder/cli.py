@@ -324,7 +324,7 @@ class PolyLlamaCLI:
             "🌐+🤖 Polyllama Endpoint (UI and Ollama Router): http://localhost:11434/"
         )
         if dev_mode:
-            print("💡 Edit files in stack/router/app/ for hot reloading")
+            print("💡 Edit files in stack/polyllama/ui/ for hot reloading")
         print("")
         print("📋 Service Status:")
         subprocess.run(["docker-compose", "-f", str(self.compose_file), "ps"])

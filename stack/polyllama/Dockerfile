@@ -11,18 +11,18 @@ RUN corepack install -g pnpm@latest
 # Development dependencies
 FROM node-base AS dev-deps
 WORKDIR /app
-COPY ./app/package.json ./app/pnpm-lock.yaml ./app/.npmrc ./
+COPY ./ui/package.json ./ui/pnpm-lock.yaml ./ui/.npmrc ./
 RUN pnpm install --frozen-lockfile
 
 # Production build
 FROM node-base AS prod-deps
 WORKDIR /app
-COPY ./app/package.json ./app/pnpm-lock.yaml ./app/.npmrc ./
+COPY ./ui/package.json ./ui/pnpm-lock.yaml ./ui/.npmrc ./
 RUN pnpm install --frozen-lockfile
 
 FROM prod-deps AS build
 WORKDIR /app
-COPY ./app ./
+COPY ./ui ./
 RUN pnpm run build
 RUN pnpm install --prod --frozen-lockfile
 

@@ -962,7 +962,7 @@ function _M.search_ollama_models(query, page)
             ["Connection"] = "keep-alive",
             ["Upgrade-Insecure-Requests"] = "1"
         },
-        ssl_verify = true
+        ssl_verify = false
     })
     
     if not res or res.status ~= 200 then

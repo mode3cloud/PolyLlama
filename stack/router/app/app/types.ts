@@ -44,6 +44,7 @@ export interface ModelMappings {
   [modelName: string]: string; // Maps model to instance
 }
 
+<<<<<<< HEAD
 export interface SearchModelTag {
   name: string;
   size: string;
@@ -103,4 +104,32 @@ export interface PullStatusesResponse {
   success: boolean;
   pull_statuses: PullStatus[];
   count: number;
+=======
+// Chat interface types
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  timestamp?: string;
+  tool_name?: string;
+  tool_call_id?: string;
+}
+
+export interface ChatModel {
+  id: string;
+  name: string;
+  provider: string;
+  size?: number;
+}
+
+export interface ChatSession {
+  id: string;
+  created_at: string;
+  message_count: number;
+}
+
+export interface StreamChunk {
+  type: 'connected' | 'content' | 'complete' | 'error' | 'done';
+  content?: string;
+  error?: string;
+>>>>>>> a14b1b8 (feat: Add LiteLLM-based chat interface with proper architecture)
 }

@@ -19,6 +19,23 @@ services:
     volumes:
       - olah_data_repos:/app/repos
       - olah_data_mirrors:/app/mirrors
+
+  llm-proxy:
+    build:
+      context: ../../stack/llm-proxy
+      dockerfile: Dockerfile
+    container_name: llm-proxy
+    hostname: llm-proxy
+    ports:
+      - "8085:8085"
+    env_file:
+      - ../../.env
+    environment:
+      - OLLAMA_API_BASE=http://router:11434
+      - LLM_PROXY_HOST=0.0.0.0
+      - LLM_PROXY_PORT=8085
+    depends_on:
+      - router
   
   polyllama1:
     container_name: polyllama1

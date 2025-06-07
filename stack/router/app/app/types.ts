@@ -44,6 +44,34 @@ export interface ModelMappings {
   [modelName: string]: string; // Maps model to instance
 }
 
+// Chat interface types
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  timestamp?: string;
+  tool_name?: string;
+  tool_call_id?: string;
+}
+
+export interface ChatModel {
+  id: string;
+  name: string;
+  provider: string;
+  size?: number;
+}
+
+export interface ChatSession {
+  id: string;
+  created_at: string;
+  message_count: number;
+}
+
+export interface StreamChunk {
+  type: 'connected' | 'content' | 'complete' | 'error' | 'done';
+  content?: string;
+  error?: string;
+}
+
 <<<<<<< HEAD
 export interface SearchModelTag {
   name: string;

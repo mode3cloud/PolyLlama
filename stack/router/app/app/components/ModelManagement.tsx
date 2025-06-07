@@ -1,27 +1,38 @@
 'use client'
 
 import { useState, useCallback, useMemo } from 'react'
-import { Model, RunningModels } from '../types'
+import { Model, RunningModels, Instance, InstanceStatus } from '../types'
 import ModelRow from './ModelRow'
+import ModelBrowseModal from './ModelBrowseModal'
+import ModelPullManager from './ModelPullManager'
 
 interface ModelManagementProps {
   availableModels: Model[];
   runningModels: RunningModels;
   modelContexts: Record<string, number>;
+  instances: Instance[];
+  instanceStatuses: Record<string, InstanceStatus>;
   onLoadModel: (modelName: string) => void;
   onUnloadModel: (modelName: string) => void;
+  onRefresh: () => void;
 }
 
 export default function ModelManagement({
   availableModels,
   runningModels,
   modelContexts,
+  instances,
+  instanceStatuses,
   onLoadModel,
-  onUnloadModel
+  onUnloadModel,
+  onRefresh
 }: ModelManagementProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [currentFilter, setCurrentFilter] = useState<'all' | 'loaded' | 'available'>('all')
   const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set())
+  const [browseModalOpen, setBrowseModalOpen] = useState(false)
+  const [pullManagerVisible, setPullManagerVisible] = useState(false)
+  const [activePullIds, setActivePullIds] = useState<string[]>([])
 
   const filteredModels = useMemo(() => {
     return availableModels.filter(model => {
@@ -51,10 +62,45 @@ export default function ModelManagement({
     })
   }, [])
 
+  // Handle pull started from browse modal
+  const handlePullStarted = useCallback((pullId: string, model: string, tag: string) => {
+    setActivePullIds(prev => [...prev, pullId])
+    setPullManagerVisible(true)
+    // TODO: Add toast notification for pull started
+  }, [])
+
+  // Handle pull completed
+  const handlePullCompleted = useCallback((model: string) => {
+    // Refresh data to show new model
+    onRefresh()
+    // TODO: Add toast notification for pull completed
+  }, [onRefresh])
+
+  // Open browse modal
+  const handleOpenBrowse = useCallback(() => {
+    setBrowseModalOpen(true)
+  }, [])
+
+  // Close browse modal
+  const handleCloseBrowse = useCallback(() => {
+    setBrowseModalOpen(false)
+  }, [])
+
+  // Close pull manager
+  const handleClosePullManager = useCallback(() => {
+    setPullManagerVisible(false)
+  }, [])
+
   return (
     <section className="my-8">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-semibold text-gray-900">Model Management</h2>
+        <button
+          onClick={handleOpenBrowse}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+        >
+          Browse Models
+        </button>
       </div>
       <div className="bg-white rounded-xl p-8 shadow-sm">
         <div className="flex gap-4 mb-6 flex-wrap">
@@ -117,6 +163,23 @@ export default function ModelManagement({
           </tbody>
         </table>
       </div>
+
+      {/* Browse Models Modal */}
+      <ModelBrowseModal
+        isOpen={browseModalOpen}
+        instances={instances}
+        instanceStatuses={instanceStatuses}
+        onClose={handleCloseBrowse}
+        onPullStarted={handlePullStarted}
+      />
+
+      {/* Pull Manager */}
+      <ModelPullManager
+        isVisible={pullManagerVisible}
+        onClose={handleClosePullManager}
+        activePullIds={activePullIds}
+        onPullCompleted={handlePullCompleted}
+      />
     </section>
   )
 }

@@ -930,4 +930,377 @@ function _M.get_all_models()
     }
 end
 
+-- Search models from ollama.com
+function _M.search_ollama_models(query, page)
+    local http = require "resty.http"
+    local cjson = require "cjson"
+    
+    page = page or 1
+    query = query or ""
+    
+    -- Validate input
+    if type(query) ~= "string" then
+        return { error = "Invalid query parameter", models = {}, success = false }
+    end
+    
+    -- URL encode the query
+    local encoded_query = ngx.escape_uri(query)
+    local search_url = "https://ollama.com/search?q=" .. encoded_query
+    
+    -- Create HTTP client with longer timeout for web requests
+    local httpc = http.new()
+    httpc:set_timeout(15000) -- 15 second timeout for external requests
+    
+    local res, err = httpc:request_uri(search_url, {
+        method = "GET",
+        headers = {
+            ["User-Agent"] = "PolyLlama/1.0 (Model Browser)",
+            ["Accept"] = "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            ["Accept-Language"] = "en-US,en;q=0.5",
+            ["Accept-Encoding"] = "gzip, deflate, br",
+            ["DNT"] = "1",
+            ["Connection"] = "keep-alive",
+            ["Upgrade-Insecure-Requests"] = "1"
+        },
+        ssl_verify = true
+    })
+    
+    if not res or res.status ~= 200 then
+        ngx.log(ngx.ERR, "Failed to fetch ollama.com search: " .. (err or "unknown error"))
+        return { 
+            error = "Failed to fetch models from ollama.com: " .. (err or "HTTP " .. (res and res.status or "unknown")), 
+            models = {}, 
+            success = false 
+        }
+    end
+    
+    -- Parse HTML response to extract model information
+    local models = _M.parse_ollama_search_html(res.body)
+    
+    -- Get locally available models to filter out duplicates and mark available tags
+    local local_models_data = _M.get_all_models()
+    local local_models = {}
+    if local_models_data and local_models_data.models then
+        for _, model in ipairs(local_models_data.models) do
+            local_models[model.name] = true
+        end
+    end
+    
+    -- Process search results
+    local processed_models = {}
+    for _, model in ipairs(models) do
+        -- Parse tags and mark which ones are available locally
+        local available_tags = {}
+        local missing_tags = {}
+        
+        if model.tags then
+            for _, tag in ipairs(model.tags) do
+                local full_name = model.name .. ":" .. tag.name
+                if local_models[full_name] then
+                    table.insert(available_tags, tag)
+                else
+                    table.insert(missing_tags, tag)
+                end
+            end
+        end
+        
+        -- Include model if it has missing tags or if we want to show all
+        if #missing_tags > 0 or #available_tags > 0 then
+            model.available_tags = available_tags
+            model.missing_tags = missing_tags
+            model.is_locally_available = #available_tags > 0
+            table.insert(processed_models, model)
+        end
+    end
+    
+    return {
+        models = processed_models,
+        query = query,
+        page = page,
+        success = true,
+        timestamp = ngx.time()
+    }
+end
+
+-- Parse HTML response from ollama.com search to extract model information
+function _M.parse_ollama_search_html(html)
+    local models = {}
+    
+    if not html or html == "" then
+        return models
+    end
+    
+    -- Pattern to match model cards in the HTML
+    -- This is a simplified parser that looks for common patterns in ollama.com's HTML structure
+    
+    -- Look for model links and information
+    -- Pattern: /library/modelname or /username/modelname followed by model info
+    local model_pattern = 'href="(/[^"]+)"[^>]*>.-<h3[^>]*>([^<]+)</h3>'
+    
+    for url, name in string.gmatch(html, model_pattern) do
+        if url and name and (string.match(url, "^/library/") or string.match(url, "^/[%w%-_]+/[%w%-_]+$")) then
+            -- Extract model name from URL
+            local model_name = string.match(url, "/([^/]+)$")
+            if model_name then
+                -- Look for additional info around this model
+                local model_info = {
+                    name = model_name,
+                    title = name:gsub("^%s*(.-)%s*$", "%1"), -- trim whitespace
+                    url = "https://ollama.com" .. url,
+                    description = "",
+                    downloads = 0,
+                    tags = {},
+                    size = "Unknown"
+                }
+                
+                -- Try to extract description, downloads, and tags from surrounding HTML
+                -- This is a best-effort extraction based on common HTML patterns
+                local start_pos = string.find(html, url, 1, true)
+                if start_pos then
+                    -- Look for description in the next 1000 characters
+                    local context = string.sub(html, start_pos, start_pos + 1000)
+                    
+                    -- Extract description
+                    local desc = string.match(context, '<p[^>]*>([^<]+)</p>') or 
+                                string.match(context, 'description[^>]*>([^<]+)<') or ""
+                    model_info.description = desc:gsub("^%s*(.-)%s*$", "%1")
+                    
+                    -- Extract download count
+                    local downloads = string.match(context, '(%d+[%w%.]*) downloads') or 
+                                    string.match(context, '(%d+) pulls') or "0"
+                    model_info.downloads = downloads
+                    
+                    -- Extract model size
+                    local size = string.match(context, '(%d+[%w%.]*[GM]B)') or "Unknown"
+                    model_info.size = size
+                end
+                
+                -- Add common tags for known models (this could be expanded)
+                if string.match(model_name, "llama") then
+                    table.insert(model_info.tags, { name = "latest", size = "4.7GB" })
+                    table.insert(model_info.tags, { name = "7b", size = "4.7GB" })
+                    table.insert(model_info.tags, { name = "13b", size = "7.3GB" })
+                elseif string.match(model_name, "mistral") then
+                    table.insert(model_info.tags, { name = "latest", size = "4.1GB" })
+                    table.insert(model_info.tags, { name = "7b", size = "4.1GB" })
+                elseif string.match(model_name, "codellama") then
+                    table.insert(model_info.tags, { name = "latest", size = "3.8GB" })
+                    table.insert(model_info.tags, { name = "7b", size = "3.8GB" })
+                    table.insert(model_info.tags, { name = "13b", size = "7.3GB" })
+                else
+                    -- Default tag
+                    table.insert(model_info.tags, { name = "latest", size = model_info.size })
+                end
+                
+                table.insert(models, model_info)
+            end
+        end
+    end
+    
+    -- Fallback: if no models found, try a simpler pattern
+    if #models == 0 then
+        -- Look for any model references in the HTML
+        for model_ref in string.gmatch(html, '"([%w%-_]+/[%w%-_]+)"') do
+            if not string.match(model_ref, "^https?://") then -- exclude URLs
+                local model_name = string.match(model_ref, "/([^/]+)$") or model_ref
+                table.insert(models, {
+                    name = model_name,
+                    title = model_name,
+                    url = "https://ollama.com/" .. model_ref,
+                    description = "Model from ollama.com",
+                    downloads = "Unknown",
+                    tags = {{ name = "latest", size = "Unknown" }},
+                    size = "Unknown"
+                })
+            end
+        end
+    end
+    
+    return models
+end
+
+-- Pull a model from Ollama registry
+function _M.pull_model(model_name, tag, target_instance)
+    local http = require "resty.http"
+    local cjson = require "cjson"
+    
+    if not model_name or model_name == "" then
+        return { error = "Model name is required", success = false }
+    end
+    
+    tag = tag or "latest"
+    local full_model_name = model_name .. ":" .. tag
+    
+    -- Determine target instance
+    if not target_instance then
+        target_instance = _M.assign_model_to_least_loaded_instance(full_model_name)
+    end
+    
+    if not target_instance then
+        return { error = "No available instance for model pull", success = false }
+    end
+    
+    -- Acquire loading lock
+    local lock_acquired, existing_loader = _M.lock_model_loading(full_model_name, target_instance)
+    
+    if not lock_acquired and existing_loader then
+        return { 
+            error = "Model is already being pulled by " .. existing_loader, 
+            success = false,
+            existing_loader = existing_loader
+        }
+    end
+    
+    -- Generate unique pull ID for tracking
+    local pull_id = "pull_" .. ngx.time() .. "_" .. ngx.worker.id() .. "_" .. string.gsub(full_model_name, "[^%w]", "_")
+    
+    -- Store pull status in shared memory
+    local pull_status = {
+        id = pull_id,
+        model = full_model_name,
+        instance = target_instance,
+        status = "starting",
+        progress = 0,
+        started_at = ngx.time(),
+        stage = "Initializing"
+    }
+    
+    local status_key = "pull_status:" .. pull_id
+    ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600) -- 1 hour TTL
+    
+    -- Create HTTP client
+    local httpc = http.new()
+    httpc:set_timeout(300000) -- 5 minute timeout for pulls
+    
+    -- Make pull request to the target instance
+    local res, err = httpc:request_uri("http://" .. target_instance .. ":11434/api/pull", {
+        method = "POST",
+        body = cjson.encode({ name = full_model_name }),
+        headers = {
+            ["Content-Type"] = "application/json"
+        }
+    })
+    
+    if not res or res.status ~= 200 then
+        -- Update pull status to failed
+        pull_status.status = "failed"
+        pull_status.error = err or ("HTTP " .. (res and res.status or "unknown"))
+        pull_status.completed_at = ngx.time()
+        ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600)
+        
+        -- Release the loading lock
+        _M.unlock_model_loading(full_model_name)
+        
+        return { 
+            error = "Failed to start model pull: " .. (err or "unknown error"), 
+            success = false,
+            pull_id = pull_id
+        }
+    end
+    
+    -- Update pull status to in progress
+    pull_status.status = "in_progress"
+    pull_status.stage = "Downloading"
+    ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600)
+    
+    -- For streaming responses, we'll track progress in a separate timer
+    -- Since this is a synchronous function, we'll return immediately and let background monitoring handle progress
+    
+    return {
+        success = true,
+        pull_id = pull_id,
+        model = full_model_name,
+        instance = target_instance,
+        message = "Model pull started successfully"
+    }
+end
+
+-- Get pull status for a specific pull operation
+function _M.get_pull_status(pull_id)
+    local cjson = require "cjson"
+    
+    if not pull_id or pull_id == "" then
+        return { error = "Pull ID is required", success = false }
+    end
+    
+    local status_key = "pull_status:" .. pull_id
+    local status_json = ngx.shared.model_mappings:get(status_key)
+    
+    if not status_json then
+        return { error = "Pull status not found", success = false }
+    end
+    
+    local success, status = pcall(cjson.decode, status_json)
+    if not success or not status then
+        return { error = "Failed to decode pull status", success = false }
+    end
+    
+    -- Check if the model is now running (pull completed successfully)
+    if status.status == "in_progress" then
+        local model_name = status.model
+        local running_instance = _M.is_model_running_on_any_instance(model_name)
+        
+        if running_instance then
+            -- Model is now running, update status
+            status.status = "completed"
+            status.progress = 100
+            status.stage = "Completed"
+            status.completed_at = ngx.time()
+            
+            -- Update the stored status
+            ngx.shared.model_mappings:set(status_key, cjson.encode(status), 3600)
+            
+            -- Release the loading lock
+            _M.unlock_model_loading(model_name)
+        else
+            -- Check if it's been too long and mark as potentially failed
+            local elapsed = ngx.time() - status.started_at
+            if elapsed > 1800 then -- 30 minutes
+                status.status = "timeout"
+                status.stage = "Timeout after 30 minutes"
+                status.completed_at = ngx.time()
+                ngx.shared.model_mappings:set(status_key, cjson.encode(status), 3600)
+                
+                -- Release the loading lock
+                _M.unlock_model_loading(model_name)
+            end
+        end
+    end
+    
+    return {
+        success = true,
+        pull_status = status
+    }
+end
+
+-- Get all active pull operations
+function _M.get_all_pull_statuses()
+    local cjson = require "cjson"
+    local pull_statuses = {}
+    
+    local keys = ngx.shared.model_mappings:get_keys() or {}
+    for _, key in ipairs(keys) do
+        if string.match(key, "^pull_status:") then
+            local status_json = ngx.shared.model_mappings:get(key)
+            if status_json then
+                local success, status = pcall(cjson.decode, status_json)
+                if success and status then
+                    table.insert(pull_statuses, status)
+                end
+            end
+        end
+    end
+    
+    -- Sort by start time (newest first)
+    table.sort(pull_statuses, function(a, b) 
+        return (a.started_at or 0) > (b.started_at or 0) 
+    end)
+    
+    return {
+        success = true,
+        pull_statuses = pull_statuses,
+        count = #pull_statuses
+    }
+end
+
 return _M

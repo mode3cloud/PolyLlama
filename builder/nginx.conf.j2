@@ -1152,6 +1152,114 @@ server {
         }
     }
     
+    # Custom endpoint for UI to search models from ollama.com
+    location /api/ui/search-models {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            
+            -- Get query parameter
+            local args = ngx.req.get_uri_args()
+            local query = args.q or args.query or ""
+            local page = tonumber(args.page) or 1
+            
+            -- Perform search
+            local search_result = model_router.search_ollama_models(query, page)
+            
+            -- Return search results
+            ngx.say(cjson.encode(search_result))
+        }
+    }
+    
+    # Custom endpoint for UI to pull models
+    location /api/ui/pull-model {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            
+            -- Read the request body
+            ngx.req.read_body()
+            local body_data = ngx.req.get_body_data()
+            
+            if not body_data then
+                ngx.status = 400
+                ngx.say(cjson.encode({ error = "Missing request body", success = false }))
+                return
+            end
+            
+            local success, body = pcall(cjson.decode, body_data)
+            if not success or not body or not body.model then
+                ngx.status = 400
+                ngx.say(cjson.encode({ error = "Invalid request body or missing model name", success = false }))
+                return
+            end
+            
+            local model_name = body.model
+            local tag = body.tag or "latest"
+            local target_instance = body.instance
+            
+            -- Start the model pull
+            local pull_result = model_router.pull_model(model_name, tag, target_instance)
+            
+            if not pull_result.success then
+                ngx.status = 400
+                ngx.say(cjson.encode(pull_result))
+                return
+            end
+            
+            -- Return pull initiation result
+            ngx.say(cjson.encode(pull_result))
+        }
+    }
+    
+    # Custom endpoint for UI to get pull status
+    location /api/ui/pull-status {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            
+            -- Get pull_id from query parameters
+            local args = ngx.req.get_uri_args()
+            local pull_id = args.pull_id
+            
+            if not pull_id then
+                ngx.status = 400
+                ngx.say(cjson.encode({ error = "Missing pull_id parameter", success = false }))
+                return
+            end
+            
+            -- Get pull status
+            local status_result = model_router.get_pull_status(pull_id)
+            
+            if not status_result.success then
+                ngx.status = 404
+                ngx.say(cjson.encode(status_result))
+                return
+            end
+            
+            -- Return pull status
+            ngx.say(cjson.encode(status_result))
+        }
+    }
+    
+    # Custom endpoint for UI to get all pull statuses
+    location /api/ui/pull-statuses {
+        default_type application/json;
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local model_router = require "model_router"
+            
+            -- Get all pull statuses
+            local statuses_result = model_router.get_all_pull_statuses()
+            
+            -- Return all pull statuses
+            ngx.say(cjson.encode(statuses_result))
+        }
+    }
+    
     # Debug endpoint (kept for backward compatibility)
     location /api/model-mappings {
         default_type application/json;

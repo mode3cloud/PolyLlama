@@ -17,6 +17,42 @@ logger = logging.getLogger(__name__)
 chat_router = APIRouter()
 
 
+@chat_router.get("/test")
+async def test_chat(req: Request):
+    """Test endpoint to verify LLM service is working."""
+    try:
+        llm_service = req.app.state.llm_service
+        
+        # Simple test message
+        test_messages = [{"role": "user", "content": "Say hello"}]
+        
+        result = []
+        async for chunk in llm_service.chat_completion(
+            messages=test_messages,
+            session_id=None,
+            persistence=False,
+            system_prompt="You are a helpful assistant",
+            temperature=0.7,
+            max_tokens=100,
+            tool_manager=None
+        ):
+            result.append(chunk)
+        
+        return {
+            "status": "success",
+            "model": llm_service.model,
+            "chunks_received": len(result),
+            "chunks": result
+        }
+    except Exception as e:
+        logger.error(f"Test chat failed: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "error": str(e),
+            "model": llm_service.model if 'llm_service' in locals() else "unknown"
+        }
+
+
 class ChatMessage(BaseModel):
     """Chat message model."""
     role: str
@@ -46,6 +82,10 @@ async def chat_completion(request: ChatCompletionRequest, req: Request):
         # Set model if provided
         if request.model:
             llm_service.set_model(request.model)
+        else:
+            logger.warning("No model specified in request, using default model")
+        
+        logger.info(f"Processing chat completion request with model: {llm_service.model}")
         
         # Convert pydantic messages to dict format
         messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
@@ -91,6 +131,9 @@ async def _stream_chat_completion(
         # Send initial connection event
         yield "data: {\"type\": \"connected\"}\n\n"
         
+        logger.info(f"Starting chat stream with model: {llm_service.model}")
+        logger.debug(f"Session ID: {session_id}, Messages count: {len(messages)}")
+        
         # Get streaming response from LLM service
         chat_stream = llm_service.chat_completion(
             messages=messages,
@@ -103,15 +146,23 @@ async def _stream_chat_completion(
         )
         
         # Stream chunks
+        chunk_count = 0
         async for chunk in chat_stream:
+            chunk_count += 1
             chunk_data = json.dumps(chunk)
             yield f"data: {chunk_data}\n\n"
+            
+            # Log first few chunks for debugging
+            if chunk_count <= 3:
+                logger.debug(f"Chunk {chunk_count}: {chunk}")
+        
+        logger.info(f"Streamed {chunk_count} chunks")
         
         # Signal completion
         yield "data: {\"type\": \"done\"}\n\n"
         
     except Exception as e:
-        logger.error(f"Error in streaming chat completion: {e}")
+        logger.error(f"Error in streaming chat completion: {e}", exc_info=True)
         error_data = json.dumps({"type": "error", "error": str(e)})
         yield f"data: {error_data}\n\n"
         yield "data: {\"type\": \"done\"}\n\n"

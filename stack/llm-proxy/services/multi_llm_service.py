@@ -33,9 +33,13 @@ class MultiLLMService:
         timeout: int = int(os.getenv("MULTI_LLM_REQUEST_TIMEOUT", "120")),
         max_concurrent: int = int(os.getenv("MULTI_LLM_CLIENT_MAX_CONCURRENT", "3")),
     ) -> None:
-        self.model = model or os.getenv("DEFAULT_LLM_MODEL_NAME", "openai/gpt-4o")
+        # Default to an Ollama model if no OpenAI key is set
+        default_model = "ollama/llama3.2:latest" if not os.getenv("OPENAI_API_KEY") else "openai/gpt-4o"
+        self.model = model or os.getenv("DEFAULT_LLM_MODEL_NAME", default_model)
         self.timeout = timeout
         self.semaphore = asyncio.Semaphore(max_concurrent)
+        
+        logger.info(f"Initialized MultiLLMService with default model: {self.model}")
         
         # Message manager for persistence
         self.message_manager = None
@@ -47,9 +51,13 @@ class MultiLLMService:
         self._prepare_env()
         litellm.modify_params = True
         litellm.REPEATED_STREAMING_CHUNK_LIMIT = 1000
+        # Enable debug logging for LiteLLM
+        if logger.isEnabledFor(logging.DEBUG):
+            litellm.set_verbose = True
     
     def set_model(self, model: str) -> None:
         """Update the current model."""
+        logger.info(f"Setting model to: {model}")
         self.model = model
         self._prepare_env()
     
@@ -126,11 +134,32 @@ class MultiLLMService:
         
         async with self.semaphore:
             try:
+                logger.info(f"Starting chat completion with model: {self.model}")
+                logger.debug(f"Messages: {current_messages}")
+                logger.debug(f"Completion kwargs: {completion_kwargs}")
+                
                 # Make LiteLLM call
-                response = await litellm.acompletion(**completion_kwargs)
+                try:
+                    response = await litellm.acompletion(**completion_kwargs)
+                    
+                    if response is None:
+                        raise ValueError("LiteLLM returned None response")
+                    
+                    # Check if response is an async generator
+                    import inspect
+                    if not inspect.isasyncgen(response):
+                        logger.warning(f"Response is not an async generator: {type(response)}")
+                        
+                except Exception as e:
+                    logger.error(f"Error calling litellm.acompletion: {e}", exc_info=True)
+                    raise
                 
                 # Stream response
+                chunk_count = 0
                 async for chunk in response:
+                    chunk_count += 1
+                    logger.debug(f"Received chunk {chunk_count}: {chunk}")
+                    
                     if hasattr(chunk, "choices") and chunk.choices:
                         delta = chunk.choices[0].delta
                         
@@ -146,6 +175,8 @@ class MultiLLMService:
                             if finish_reason == "stop":
                                 break
                 
+                logger.info(f"Received {chunk_count} chunks from LiteLLM")
+                
                 # Persist final assistant message
                 final_content = "".join(assistant_content)
                 if persistence and final_content:
@@ -154,7 +185,7 @@ class MultiLLMService:
                 yield {"type": "complete", "content": final_content}
                 
             except Exception as e:
-                logger.error(f"Error in chat completion: {e}")
+                logger.error(f"Error in chat completion: {e}", exc_info=True)
                 yield {"type": "error", "error": str(e)}
     
     async def get_available_models(self, provider: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -268,6 +299,8 @@ class MultiLLMService:
         # Set Ollama base URL
         if not os.environ.get("OLLAMA_API_BASE"):
             os.environ["OLLAMA_API_BASE"] = "http://router:11434"
+            
+        logger.info(f"Environment variables set - OLLAMA_API_BASE: {os.environ.get('OLLAMA_API_BASE')}")
     
     async def close(self):
         """Clean up resources."""

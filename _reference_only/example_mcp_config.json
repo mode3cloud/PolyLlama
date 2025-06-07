@@ -1,0 +1,99 @@
+{
+  "mcpServers": {
+    "sequential-thinking": {
+      "autoApprove": [
+        "sequentialthinking"
+      ],
+      "timeout": 60,
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ],
+      "transportType": "stdio"
+    },
+    "browsermcp": {
+      "timeout": 60,
+      "command": "npx",
+      "args": [
+        "@browsermcp/mcp@latest"
+      ],
+      "transportType": "stdio"
+    },
+    "context7": {
+      "autoApprove": [
+        "resolve-library-id",
+        "get-library-docs"
+      ],
+      "timeout": 60,
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp"
+      ],
+      "transportType": "stdio"
+    },
+    "github": {
+      "timeout": 60,
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": ""
+      },
+      "transportType": "stdio"
+    },
+    "desktop-commander": {
+      "timeout": 60,
+      "command": "npx",
+      "args": [
+        "@wonderwhy-er/desktop-commander@latest"
+      ],
+      "transportType": "stdio"
+    },
+    "personal_assitant": {
+      "disabled": false,
+      "timeout": 60,
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:8084/sse",
+        "--allow-http"
+      ],
+      "transportType": "stdio"
+    },
+    "jira-mcp": {
+      "autoApprove": [
+        "jira_get_agile_boards",
+        "jira_get_sprints_from_board",
+        "jira_search",
+        "jira_get_sprint_issues"
+      ],
+      "timeout": 60,
+      "command": "npx",
+      "args": [
+        "mcp-remote",
+        "http://localhost:8085/sse",
+        "--allow-http"
+      ],
+      "transportType": "stdio"
+    },
+    "azureDevOps": {
+      "timeout": 60,
+      "command": "npx",
+      "args": [
+        "-y",
+        "@tiberriver256/mcp-server-azure-devops"
+      ],
+      "env": {
+        "AZURE_DEVOPS_ORG_URL": "https://dev.azure.com/SOMEORG",
+        "AZURE_DEVOPS_AUTH_METHOD": "pat",
+        "AZURE_DEVOPS_PAT": "",
+        "AZURE_DEVOPS_DEFAULT_PROJECT": "PROJ1"
+      },
+      "transportType": "stdio"
+    }
+  }
+}

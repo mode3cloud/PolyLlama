@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Header from '../components/Header'
 import ChatInterface from '../components/ChatInterface'
-import AuthGuard from '../components/AuthGuard'
+import AuthWrapper from '../components/AuthWrapper'
 
 export default function ChatPage() {
   const [refreshKey, setRefreshKey] = useState(0)
@@ -13,7 +13,7 @@ export default function ChatPage() {
   }
 
   return (
-    <AuthGuard>
+    <AuthWrapper>
       <div className="h-screen flex flex-col">
         <div className="flex-shrink-0">
           <Header onRefresh={handleRefresh} />
@@ -22,6 +22,6 @@ export default function ChatPage() {
           <ChatInterface key={refreshKey} onRefresh={handleRefresh} />
         </div>
       </div>
-    </AuthGuard>
+    </AuthWrapper>
   )
 }

@@ -5,6 +5,9 @@ import ApiHelper from "./app/lib/auth/ApiHelper";
 export async function middleware(req: NextRequest) {
   const url = req.nextUrl;
 
+  // With basePath '/ui', the paths in middleware are relative to the basePath
+  // So /ui/api/auth/login appears as /api/auth/login here
+  
   // Protect all API routes under /api/ except auth routes
   if (
     url.pathname.startsWith("/api/") &&
@@ -25,5 +28,6 @@ export async function middleware(req: NextRequest) {
 }
 
 export const config = {
+  // The matcher is relative to the basePath, so this matches /ui/api/*
   matcher: "/api/:path*",
 };

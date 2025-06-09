@@ -1,11 +1,21 @@
 'use client';
 
 import { useAuth } from '../lib/auth/AuthContext';
+import { useEffect, useState } from 'react';
 
 export default function AuthGuard({ children }: { children: React.ReactNode }) {
   const { user, loading, login } = useAuth();
+  const [isReady, setIsReady] = useState(false);
 
-  if (loading) {
+  useEffect(() => {
+    // Only show content after auth check is complete
+    if (!loading) {
+      setIsReady(true);
+    }
+  }, [loading]);
+
+  // Always show loading state initially to prevent flash
+  if (!isReady || loading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">

@@ -26,8 +26,6 @@ services:
       dockerfile: Dockerfile
     container_name: llm-proxy
     hostname: llm-proxy
-    ports:
-      - "11435:11435"
     env_file:
       - ../../.env
     environment:

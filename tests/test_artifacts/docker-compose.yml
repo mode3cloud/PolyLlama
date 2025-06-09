@@ -2,14 +2,14 @@ name: mode3ai_polyllama
 
 services:
   openwebui:
-      build:
-        context: ../../stack/open-webui
-        dockerfile: Dockerfile
-      container_name: openwebui
-      ports:
-        - "8080:8080"
-      volumes:
-        - openwebui_data:/app/backend/data
+    build:
+      context: ../../stack/open-webui
+      dockerfile: Dockerfile
+    container_name: openwebui
+    ports:
+      - "8080:8080"
+    volumes:
+      - openwebui_data:/app/backend/data
 
   olah:
     build:
@@ -26,8 +26,6 @@ services:
       dockerfile: Dockerfile
     container_name: llm-proxy
     hostname: llm-proxy
-    ports:
-      - "11435:11435"
     env_file:
       - ../../.env
     environment:
@@ -36,7 +34,7 @@ services:
       - LLM_PROXY_PORT=11435
     depends_on:
       - router
-  
+
   polyllama1:
     container_name: polyllama1
     hostname: polyllama1
@@ -59,7 +57,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              capabilities: [ gpu ]
+              capabilities: [gpu]
 
   polyllama2:
     container_name: polyllama2
@@ -83,7 +81,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              capabilities: [ gpu ]
+              capabilities: [gpu]
 
   polyllama3:
     container_name: polyllama3
@@ -103,7 +101,6 @@ services:
       resources:
         limits:
           memory: 16g
-
 
   router:
     container_name: router

@@ -5,6 +5,7 @@ import Header from './components/Header'
 import SystemOverview from './components/SystemOverview'
 import ModelManagement from './components/ModelManagement'
 import LoadModelModal from './components/LoadModelModal'
+import AuthGuard from './components/AuthGuard'
 import { Instance, Model, RunningModels, InstanceStatus, GPUConfig } from './types'
 import { getApiUrl } from './utils'
 
@@ -190,12 +191,13 @@ export default function Home() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <div className="fixed top-0 left-0 right-0 z-50">
-        <Header onRefresh={refreshData} />
-      </div>
-      <main className="flex-1 max-w-[1400px] mx-auto p-4 md:p-8 w-full mt-12">
-        <SystemOverview
+    <AuthGuard>
+      <div className="min-h-screen flex flex-col">
+        <div className="fixed top-0 left-0 right-0 z-50">
+          <Header onRefresh={refreshData} />
+        </div>
+        <main className="flex-1 max-w-[1400px] mx-auto p-4 md:p-8 w-full mt-12">
+          <SystemOverview
           instances={instances}
           instanceStatuses={instanceStatuses}
           runningModels={runningModels}
@@ -269,6 +271,7 @@ export default function Home() {
           }
         }}
       />
-    </div>
+      </div>
+    </AuthGuard>
   )
 }

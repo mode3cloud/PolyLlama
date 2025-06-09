@@ -8,11 +8,14 @@
     "start": "next start -p 3000"
   },
   "dependencies": {
+    "@azure/msal-node": "^3.6.0",
+    "jsonwebtoken": "^9.0.2",
     "next": "15.2.4",
     "react": "^18",
     "react-dom": "^18"
   },
   "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.9",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

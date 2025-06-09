@@ -3,9 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChatMessage, ChatModel, StreamChunk } from '../types'
 
-const LLM_PROXY_URL = process.env.NODE_ENV === 'production'
-  ? 'http://llm-proxy:11435'
-  : 'http://localhost:11435'
+const LLM_PROXY_URL = 'http://llm-proxy:11435'
 
 console.log('LLM Proxy URL:', LLM_PROXY_URL, 'Environment:', process.env.NODE_ENV)
 

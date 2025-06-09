@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
+import { useAuth } from '../lib/auth/AuthContext'
 
 interface HeaderProps {
   onRefresh: () => void;
@@ -9,8 +10,10 @@ interface HeaderProps {
 
 export default function Header({ onRefresh }: HeaderProps) {
   const [isSpinning, setIsSpinning] = useState(false)
+  const [showUserMenu, setShowUserMenu] = useState(false)
   const pathname = usePathname()
   const router = useRouter()
+  const { user, logout } = useAuth()
 
   const handleRefresh = useCallback(() => {
     setIsSpinning(true)
@@ -72,6 +75,35 @@ export default function Header({ onRefresh }: HeaderProps) {
             </span>
             <span>Refresh</span>
           </button>
+          
+          {user && (
+            <div className="relative">
+              <button
+                onClick={() => setShowUserMenu(!showUserMenu)}
+                className="flex items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 rounded-md transition-colors"
+              >
+                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-white font-medium">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <span className="hidden md:block">{user.name}</span>
+              </button>
+              
+              {showUserMenu && (
+                <div className="absolute right-0 mt-2 w-48 bg-white rounded-md shadow-lg py-1 z-50">
+                  <div className="px-4 py-2 text-sm text-gray-700 border-b">
+                    <div className="font-medium">{user.name}</div>
+                    <div className="text-gray-500 text-xs">{user.email}</div>
+                  </div>
+                  <button
+                    onClick={logout}
+                    className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
+                  >
+                    Sign out
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </header>

@@ -46,7 +46,7 @@ export default function Home() {
       const [statusRes, gpuConfigRes, modelsRes, runningRes, mappingsRes, contextsRes] = await Promise.all([
         fetchWithAuth('/ui/api/instance-status'),
         fetchWithAuth('/ui/api/gpu-config'),
-        fetchWithAuth('/ui/api/tags'),
+        fetchWithAuth('/ui/api/ollama-models'),
         fetchWithAuth('/ui/api/running-models'),
         fetchWithAuth('/ui/api/model-mappings'),
         fetchWithAuth('/ui/api/get-contexts')

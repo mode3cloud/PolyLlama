@@ -1,6 +1,7 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState, useCallback, useRef } from 'react';
+import { fetchWithAuth } from '../fetchWithAuth';
 
 interface User {
   email: string;
@@ -40,7 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const refreshToken = useCallback(async () => {
     try {
-      const response = await fetch('/ui/api/auth/refresh', {
+      const response = await fetchWithAuth('/ui/api/auth/refresh', {
         method: 'POST',
       });
       
@@ -59,7 +60,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const checkAuth = useCallback(async () => {
     try {
-      const response = await fetch('/ui/api/auth/get_token');
+      const response = await fetchWithAuth('/ui/api/auth/get_token');
       if (response.ok) {
         const token = await response.json();
         const payload = decodeToken(token);
@@ -115,7 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(refreshIntervalRef.current);
     }
     
-    await fetch('/ui/api/auth/logout');
+    await fetchWithAuth('/ui/api/auth/logout');
     setUser(null);
     window.location.href = '/ui';
   };

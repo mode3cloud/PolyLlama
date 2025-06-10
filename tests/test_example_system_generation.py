@@ -57,14 +57,24 @@ def test_template_generation():
     assert "polyllama1:" in generated_compose, "Missing polyllama1 service"
     assert "polyllama2:" in generated_compose, "Missing polyllama2 service"
     assert "polyllama3:" in generated_compose, "Missing polyllama3 service (CPU)"
-    assert "CUDA_VISIBLE_DEVICES=0,1,2" in generated_compose, "Missing GPU assignment for RTX 4090s"
-    assert "CUDA_VISIBLE_DEVICES=3" in generated_compose, "Missing GPU assignment for RTX 6000"
+    assert (
+        "CUDA_VISIBLE_DEVICES=0,1,2" in generated_compose
+    ), "Missing GPU assignment for RTX 4090s"
+    assert (
+        "CUDA_VISIBLE_DEVICES=3" in generated_compose
+    ), "Missing GPU assignment for RTX 6000"
     assert "OLLAMA_INSTANCE_COUNT=3" in generated_compose, "Wrong instance count"
-    
+
     # Verify CPU instance has no GPU assignment
-    cpu_section = generated_compose.split("polyllama3:")[1].split("polyllama4:")[0] if "polyllama4:" in generated_compose else generated_compose.split("polyllama3:")[1].split("router:")[0]
-    assert "CUDA_VISIBLE_DEVICES" not in cpu_section, "CPU instance should not have GPU assignment"
-    
+    cpu_section = (
+        generated_compose.split("polyllama3:")[1].split("polyllama4:")[0]
+        if "polyllama4:" in generated_compose
+        else generated_compose.split("polyllama3:")[1].split("router:")[0]
+    )
+    assert (
+        "CUDA_VISIBLE_DEVICES" not in cpu_section
+    ), "CPU instance should not have GPU assignment"
+
     # For nginx file
     assert "server polyllama1:11434" in generated_nginx, "Missing polyllama1 in nginx"
     assert "server polyllama2:11434" in generated_nginx, "Missing polyllama2 in nginx"
@@ -140,7 +150,14 @@ def test_generated_compose_structure():
     assert "name: mode3ai_polyllama" in compose_content, "Missing project name"
 
     # Check for expected services (now includes CPU instance)
-    expected_services = ["openwebui:", "olah:", "polyllama1:", "polyllama2:", "polyllama3:", "router:"]
+    expected_services = [
+        "openwebui:",
+        "olah:",
+        "polyllama1:",
+        "polyllama2:",
+        "polyllama3:",
+        "router:",
+    ]
 
     for service in expected_services:
         assert service in compose_content, f"Missing service: {service}"
@@ -186,7 +203,9 @@ def test_generated_nginx_structure():
     ), "Missing upstream backend pool"
     assert "server polyllama1:11434" in nginx_content, "Missing polyllama1 server"
     assert "server polyllama2:11434" in nginx_content, "Missing polyllama2 server"
-    assert "server polyllama3:11434" in nginx_content, "Missing polyllama3 server (CPU instance)"
+    assert (
+        "server polyllama3:11434" in nginx_content
+    ), "Missing polyllama3 server (CPU instance)"
 
     # Check for correct instance count in Lua code (now 3 with CPU)
     assert 'or "3"' in nginx_content, "Missing correct default instance count in Lua"
@@ -194,9 +213,9 @@ def test_generated_nginx_structure():
     # Check for essential nginx configuration sections
     essential_sections = [
         "lua_shared_dict model_mappings 10m;",
-        "location /api/ui/instance-status",
+        "location /api/polyllama/instance-status",
         "location ~ ^/api/(generate|chat|embeddings)$",
-        "location /api/ui/instance-count",
+        "location /api/polyllama/instance-count",
     ]
 
     for section in essential_sections:

@@ -33,6 +33,6 @@ RUN chmod +x /root/startServices.sh
 COPY gpu_metrics_server.py /root/gpu_metrics_server.py
 RUN chmod +x /root/gpu_metrics_server.py
 
-EXPOSE 11436
+EXPOSE 11434 11435
 
 ENTRYPOINT ["/root/startServices.sh"]

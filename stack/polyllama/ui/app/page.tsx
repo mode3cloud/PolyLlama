@@ -7,7 +7,7 @@ import ModelManagement from './components/ModelManagement'
 import LoadModelModal from './components/LoadModelModal'
 import AuthWrapper from './components/AuthWrapper'
 import { Instance, Model, RunningModels, InstanceStatus, GPUConfig } from './types'
-import { getApiUrl } from './utils'
+import { fetchWithAuth } from './lib/fetchWithAuth'
 
 export default function Home() {
   // State
@@ -24,7 +24,7 @@ export default function Home() {
   // Initialize instances
   const initializeInstances = useCallback(async () => {
     try {
-      const response = await fetch(getApiUrl('/api/ui/instance-count'))
+      const response = await fetchWithAuth('/ui/api/instance-count')
       if (response.ok) {
         const data = await response.json()
         const instanceCount = data.instance_count || 2
@@ -44,12 +44,12 @@ export default function Home() {
   const refreshData = useCallback(async () => {
     try {
       const [statusRes, gpuConfigRes, modelsRes, runningRes, mappingsRes, contextsRes] = await Promise.all([
-        fetch(getApiUrl('/api/ui/instance-status')),
-        fetch(getApiUrl('/api/ui/gpu-config')),
-        fetch(getApiUrl('/api/tags')),
-        fetch(getApiUrl('/api/ui/running-models')),
-        fetch(getApiUrl('/api/ui/model-mappings')),
-        fetch(getApiUrl('/api/ui/get-contexts'))
+        fetchWithAuth('/ui/api/instance-status'),
+        fetchWithAuth('/ui/api/gpu-config'),
+        fetchWithAuth('/ui/api/tags'),
+        fetchWithAuth('/ui/api/running-models'),
+        fetchWithAuth('/ui/api/model-mappings'),
+        fetchWithAuth('/ui/api/get-contexts')
       ])
 
       if (statusRes.ok) {
@@ -81,7 +81,7 @@ export default function Home() {
       }
 
       if (mappingsRes.ok) {
-        const data = await mappingsRes.json()
+        await mappingsRes.json()
       }
 
       let currentContexts: Record<string, number> = {}
@@ -98,12 +98,12 @@ export default function Home() {
 
       if (hasRunningModels && hasMissingContexts) {
         try {
-          const syncResponse = await fetch(getApiUrl('/api/ui/sync-contexts'))
+          const syncResponse = await fetchWithAuth('/ui/api/sync-contexts')
           if (syncResponse.ok) {
             const syncData = await syncResponse.json()
             console.log(`Synced context sizes for ${syncData.synced_count} models`)
             // Re-fetch contexts after sync
-            const contextsRes2 = await fetch(getApiUrl('/api/ui/get-contexts'))
+            const contextsRes2 = await fetchWithAuth('/ui/api/get-contexts')
             if (contextsRes2.ok) {
               const data = await contextsRes2.json()
               setModelContexts(data.contexts || {})
@@ -137,7 +137,7 @@ export default function Home() {
       const instances = runningModels[modelName] || []
 
       for (const instanceName of instances) {
-        const response = await fetch(getApiUrl('/api/generate'), {
+        const response = await fetchWithAuth('/ui/api/generate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -177,101 +177,99 @@ export default function Home() {
     }
   }, [instances, refreshData])
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex flex-col">
-        <div className="fixed top-0 left-0 right-0 z-50">
-          <Header onRefresh={refreshData} />
-        </div>
-        <main className="flex-1 max-w-[1400px] mx-auto p-4 md:p-8 w-full pt-20">
-          <div className="text-center p-8 text-gray-500">Loading...</div>
-        </main>
-      </div>
-    )
-  }
-
   return (
     <AuthWrapper>
-      <div className="min-h-screen flex flex-col">
+      {loading ? (
+        <div className="min-h-screen flex flex-col">
+          <div className="fixed top-0 left-0 right-0 z-50">
+            <Header onRefresh={refreshData} />
+          </div>
+          <main className="flex-1 max-w-[1400px] mx-auto p-4 md:p-8 w-full pt-20">
+            <div className="text-center p-8 text-gray-500">Loading...</div>
+          </main>
+        </div>
+      ) : (
+        <div className="min-h-screen flex flex-col">
         <div className="fixed top-0 left-0 right-0 z-50">
           <Header onRefresh={refreshData} />
         </div>
         <main className="flex-1 max-w-[1400px] mx-auto p-4 md:p-8 w-full mt-12">
           <SystemOverview
+            instances={instances}
+            instanceStatuses={instanceStatuses}
+            runningModels={runningModels}
+            modelContexts={modelContexts}
+            onRefresh={refreshData}
+          />
+
+          <ModelManagement
+            availableModels={availableModels}
+            runningModels={runningModels}
+            modelContexts={modelContexts}
+            instances={instances}
+            instanceStatuses={instanceStatuses}
+            onLoadModel={handleLoadModel}
+            onUnloadModel={handleUnloadModel}
+            onRefresh={refreshData}
+          />
+        </main>
+
+        <LoadModelModal
+          isOpen={loadModalOpen}
+          modelName={selectedModel}
           instances={instances}
           instanceStatuses={instanceStatuses}
+          gpuConfig={gpuConfig}
           runningModels={runningModels}
-          modelContexts={modelContexts}
-          onRefresh={refreshData}
-        />
-
-        <ModelManagement
-          availableModels={availableModels}
-          runningModels={runningModels}
-          modelContexts={modelContexts}
-          instances={instances}
-          instanceStatuses={instanceStatuses}
-          onLoadModel={handleLoadModel}
-          onUnloadModel={handleUnloadModel}
-          onRefresh={refreshData}
-        />
-      </main>
-
-      <LoadModelModal
-        isOpen={loadModalOpen}
-        modelName={selectedModel}
-        instances={instances}
-        instanceStatuses={instanceStatuses}
-        gpuConfig={gpuConfig}
-        runningModels={runningModels}
-        onClose={() => setLoadModalOpen(false)}
-        onConfirm={async (modelName, instanceName, contextLength) => {
-          // Handle model loading
-          try {
-            const payload: any = { model: modelName, prompt: "", stream: false }
-            if (contextLength) {
-              payload.options = { num_ctx: parseInt(contextLength) }
-            }
-
-            const response = await fetch(getApiUrl('/api/generate'), {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'X-Target-Instance': instanceName
-              },
-              body: JSON.stringify(payload)
-            })
-
-            if (response.ok) {
-              // Store context if specified
+          onClose={() => setLoadModalOpen(false)}
+          onConfirm={async (modelName, instanceName, contextLength) => {
+            // Handle model loading
+            try {
+              const payload: any = { model: modelName, prompt: "", stream: false }
               if (contextLength) {
-                try {
-                  await fetch(getApiUrl('/api/ui/store-context'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      model: modelName,
-                      num_ctx: parseInt(contextLength)
-                    })
-                  })
-                } catch (error) {
-                  console.error('Failed to store context length:', error)
-                }
+                payload.options = { num_ctx: parseInt(contextLength) }
               }
 
-              setLoadModalOpen(false)
-              setTimeout(refreshData, 2000)
-              // TODO: Add success toast
-            } else {
-              throw new Error(`Failed to load model: ${response.statusText}`)
+              const response = await fetchWithAuth('/ui/api/generate', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'X-Target-Instance': instanceName
+                },
+                body: JSON.stringify(payload)
+              })
+
+              if (response.ok) {
+                // Store context if specified
+                if (contextLength) {
+                  try {
+                    await fetchWithAuth('/ui/api/store-context', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        model: modelName,
+                        num_ctx: parseInt(contextLength)
+                      })
+                    })
+                  } catch (error) {
+                    console.error('Failed to store context length:', error)
+                  }
+                }
+
+                setLoadModalOpen(false)
+                setTimeout(refreshData, 2000)
+                // TODO: Add success toast
+              } else {
+                throw new Error(`Failed to load model: ${response.statusText}`)
+              }
+            } catch (error) {
+              console.error('Error loading model:', error)
+              // TODO: Add error toast
             }
-          } catch (error) {
-            console.error('Error loading model:', error)
-            // TODO: Add error toast
-          }
-        }}
-      />
+          }}
+        />
       </div>
+      )}
     </AuthWrapper>
   )
 }

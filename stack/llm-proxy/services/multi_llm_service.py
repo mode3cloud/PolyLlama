@@ -130,6 +130,12 @@ class MultiLLMService:
             **filtered_kwargs,
         }
         
+        # Add API key header for Ollama if configured
+        if self.model.startswith("ollama/") and os.getenv("POLYLLAMA_API_KEY"):
+            completion_kwargs["extra_headers"] = {
+                "api-key": os.getenv("POLYLLAMA_API_KEY")
+            }
+        
         assistant_content = []
         
         async with self.semaphore:
@@ -195,8 +201,20 @@ class MultiLLMService:
         if provider == "ollama" or provider is None:
             # Get Ollama models from PolyLlama router
             try:
+                # Use OLLAMA_API_BASE from environment, default to router:11434
+                ollama_base = os.getenv("OLLAMA_API_BASE", "http://router:11434")
+                
+                # Build headers with API key if available
+                headers = {}
+                api_key = os.getenv("POLYLLAMA_API_KEY")
+                if api_key:
+                    headers["api-key"] = api_key
+                
                 async with httpx.AsyncClient(timeout=5.0) as client:
-                    response = await client.get("http://router:11434/api/tags")
+                    response = await client.get(
+                        f"{ollama_base}/api/tags",
+                        headers=headers
+                    )
                     if response.status_code == 200:
                         data = response.json()
                         for model in data.get("models", []):

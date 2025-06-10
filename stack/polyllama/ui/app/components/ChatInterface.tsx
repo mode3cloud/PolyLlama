@@ -2,10 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChatMessage, ChatModel, StreamChunk } from '../types'
+import { fetchWithAuth } from '../lib/fetchWithAuth'
 
-const LLM_PROXY_URL = 'http://llm-proxy:11435'
-
-console.log('LLM Proxy URL:', LLM_PROXY_URL, 'Environment:', process.env.NODE_ENV)
+// Use relative URLs to hit our Next.js API routes
+const API_BASE_URL = '/ui/api/chat'
 
 interface ChatInterfaceProps {
   onRefresh: () => void
@@ -24,7 +24,7 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
   // Fetch available models
   const fetchModels = useCallback(async () => {
     try {
-      const response = await fetch(`${LLM_PROXY_URL}/api/models`)
+      const response = await fetchWithAuth(`${API_BASE_URL}/models`)
       if (response.ok) {
         const data = await response.json()
         setModels(data.models || [])
@@ -64,7 +64,7 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
     abortControllerRef.current = new AbortController()
 
     try {
-      const response = await fetch(`${LLM_PROXY_URL}/api/chat/completions`, {
+      const response = await fetchWithAuth(`${API_BASE_URL}/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

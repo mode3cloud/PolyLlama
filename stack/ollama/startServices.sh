@@ -2,7 +2,7 @@
 
 # Start GPU metrics server in the background
 echo "Starting GPU metrics server on port 11435..."
-python3 /root/gpu_metrics_server.py &
+python3 /root/gpu_metrics_server.py 11435 &
 
 # Start Ollama in the background on port 11434
 echo "Starting Ollama service on port 11434..."

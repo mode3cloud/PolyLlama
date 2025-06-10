@@ -44,81 +44,155 @@ PolyLlama **discovers your system’s capabilities** and generates the optimal d
 #### Multi-GPU Workstation
 
 ```mermaid
-graph TB
-    subgraph "Hardware Detection"
-        GPU0["🎮 RTX 4090<br/>GPU 0"]
-        GPU1["🎮 RTX 4090<br/>GPU 1"] 
-        GPU2["🎮 RTX 4090<br/>GPU 2"]
-        GPU3["🖥️ RTX 6000 Ada<br/>GPU 3"]
-    end
-    
-    subgraph "PolyLlama Instances"
-        P1["🦙 polyllama1<br/>RTX 6000 Ada<br/>GPU 3"]
-        P2["🦙 polyllama2<br/>RTX 4090<br/>GPUs 0,1,2"]
-    end
-    
-    subgraph "Load Balancer"
-        Router["🔀 Nginx Router<br/>:11434"]
-    end
-    
-    GPU3 --> P1
-    GPU0 --> P2
-    GPU1 --> P2
-    GPU2 --> P2
-    
-    Router --> P1
-    Router --> P2
-    
-    style P1 fill:#e1f5fe
-    style P2 fill:#f3e5f5
-    style Router fill:#fff3e0
+graph TD
+  subgraph "Load Balancer"
+    Router["🔀 Nginx Router<br/>:11434"]
+  end
+
+  subgraph "PolyLlama Instances"
+    P1["🦙 polyllama1<br/>RTX 6000 Ada<br/>GPU 3"]
+    P2["🦙 polyllama2<br/>RTX 4090<br/>GPUs 0,1,2"]
+  end
+
+  subgraph "Hardware Detection"
+    GPU0["🎮 RTX 4090<br/>GPU 0"]
+    GPU1["🎮 RTX 4090<br/>GPU 1"] 
+    GPU2["🎮 RTX 4090<br/>GPU 2"]
+    GPU3["🖥️ RTX 6000 Ada<br/>GPU 3"]
+  end
+
+  Router --> P1
+  Router --> P2
+
+  P1 --> GPU3
+  P2 --> GPU0
+  P2 --> GPU1
+  P2 --> GPU2
+
+  style P1 fill:#e1f5fe
+  style P2 fill:#f3e5f5
+  style Router fill:#fff3e0
 ```
 
 #### Gaming Laptop
 
 ```mermaid
-graph TB
-    subgraph "Hardware Detection"
-        GPU0["🎮 RTX 4070<br/>GPU 0"]
-    end
-    
-    subgraph "PolyLlama Instance"
-        P1["🦙 polyllama1<br/>RTX 4070<br/>GPU 0"]
-    end
-    
-    subgraph "Load Balancer"
-        Router["🔀 Nginx Router<br/>:11434"]
-    end
-    
-    GPU0 --> P1
-    Router --> P1
-    
-    style P1 fill:#e8f5e8
-    style Router fill:#fff3e0
+graph TD
+  subgraph "Load Balancer"
+    Router["🔀 Nginx Router<br/>:11434"]
+  end
+
+  subgraph "PolyLlama Instance"
+    P1["🦙 polyllama1<br/>RTX 4070<br/>GPU 0"]
+  end
+
+  subgraph "Hardware Detection"
+    GPU0["🎮 RTX 4070<br/>GPU 0"]
+  end
+
+  Router --> P1
+  P1 --> GPU0
+
+  style P1 fill:#e8f5e8
+  style Router fill:#fff3e0
 ```
 
 #### CPU-Only System
 
 ```mermaid
 graph TB
-    subgraph "Hardware Detection"
-        CPU["💻 CPU Only<br/>No GPUs Detected"]
-    end
-    
-    subgraph "PolyLlama Instance"
-        P1["🦙 polyllama1<br/>CPU Mode<br/>16GB Memory"]
-    end
-    
-    subgraph "Load Balancer"
-        Router["🔀 Nginx Router<br/>:11434"]
-    end
-    
-    CPU --> P1
-    Router --> P1
-    
-    style P1 fill:#fce4ec
-    style Router fill:#fff3e0
+  Router["🔀 Nginx Router<br/>:11434"]
+  P1["🦙 polyllama1<br/>CPU Mode<br/>16GB Memory"]
+  CPU["💻 CPU Only<br/>No GPUs Detected"]
+
+  Router --> P1
+  P1 --> CPU
+
+  style P1 fill:#fce4ec
+  style Router fill:#fff3e0
 ```
+
+---
+
+## 🔀 API Request Flow Architecture
+
+### Direct Ollama API Calls
+When you make requests to `localhost:11434/api/*`, PolyLlama intelligently routes them:
+
+```mermaid
+graph LR
+    subgraph "Client"
+        App["📱 Application<br/>(curl, SDK, etc.)"]
+    end
+    
+    subgraph "PolyLlama Router"
+        Nginx["🔀 Nginx<br/>:11434"]
+        Lua["📜 Lua Router<br/>(model_router.lua)"]
+    end
+    
+    subgraph "PolyLlama Instances"
+        P1["🦙 polyllama1<br/>RTX 4090 x3"]
+        P2["🦙 polyllama2<br/>RTX 6000 Ada"]
+        P3["🦙 polyllama3<br/>CPU Only"]
+    end
+    
+    App -->|"POST /api/chat<br/>model: llama3"| Nginx
+    Nginx --> Lua
+    Lua -->|"Check model<br/>mappings"| Lua
+    Lua -->|"Route to least<br/>loaded instance"| P1
+    
+    style App fill:#e3f2fd
+    style Nginx fill:#fff3e0
+    style Lua fill:#f3e5f5
+    style P1 fill:#e8f5e9
+    style P2 fill:#fce4ec
+    style P3 fill:#f5f5f5
+```
+
+### Web UI Chat Interface Flow
+The chat interface uses a multi-tier architecture for provider flexibility:
+
+```mermaid
+graph LR
+    subgraph "Browser"
+        UI["🌐 Chat UI<br/>/ui/chat"]
+    end
+    
+    subgraph "Next.js Server"
+        API["📡 API Routes<br/>/ui/api/chat/*"]
+    end
+    
+    subgraph "LLM Proxy"
+        Proxy["🔄 litellm<br/>:11435"]
+    end
+    
+    subgraph "Providers"
+        Ollama["🦙 Ollama<br/>via :11434/api"]
+        OpenAI["🤖 OpenAI API"]
+        Anthropic["🧠 Anthropic API"]
+    end
+    
+    UI -->|"fetch('/ui/api/chat/completions')"| API
+    API -->|"Server-side proxy to llm-proxy:11435"| Proxy
+    Proxy -->|"Route based on model"| Ollama
+    Proxy -->|"gpt-4"| OpenAI
+    Proxy -->|"claude-3"| Anthropic
+    
+    Ollama -->|"Via Nginx router"| P1["🦙 polyllama1"]
+    
+    style UI fill:#e3f2fd
+    style API fill:#f3e5f5
+    style Proxy fill:#fff3e0
+    style Ollama fill:#e8f5e9
+    style OpenAI fill:#e1f5fe
+    style Anthropic fill:#fce4ec
+```
+
+**Key Architecture Points:**
+- **Server-side only**: Browser never directly calls Docker services
+- **Unified endpoint**: Everything accessible via `localhost:11434`
+- **Smart routing**: Models automatically distributed across instances
+- **Multi-provider**: Chat UI supports Ollama, OpenAI, Anthropic, etc.
 
 ---
 
@@ -195,8 +269,135 @@ cd polyllama
 **Copy the `.env.example` to `.env` and set:**
 
 ```bash
-HF_TOKEN=<your_hf_token>  # HuggingFace token for model access
+POLYLLAMA_API_KEY=<your_api_key>  # Optional: API key to protect /api endpoints
+HF_TOKEN=<your_hf_token>          # HuggingFace token for model access
 ```
+
+### API Key Protection (Optional)
+If `POLYLLAMA_API_KEY` is set, all `/api/*` endpoints (except `/api/polyllama/*`) will require authentication via one of:
+- `api-key: <your_api_key>` header
+- `x-api-key: <your_api_key>` header  
+- `Authorization: Bearer <your_api_key>` header
+
+---
+
+## 🔒 Security Architecture
+
+PolyLlama implements a comprehensive security model with multiple layers of authentication to protect LLM access:
+
+### Authentication Overview
+
+```mermaid
+graph TD
+    subgraph "External Access"
+        Browser["🌐 Browser/Client"]
+        API["🔧 API Client"]
+    end
+    
+    subgraph "PolyLlama Security Layers"
+        NextJS["🔐 Next.js App<br/>(OAuth Protected)"]
+        Nginx["🛡️ Nginx Router<br/>(API Key Protected)"]
+        LLMProxy["🤖 LLM Proxy<br/>(Internal Only)"]
+    end
+    
+    subgraph "LLM Backends"
+        Ollama["🦙 Ollama Instances"]
+        OpenAI["🤖 OpenAI API"]
+        Anthropic["🧠 Anthropic API"]
+    end
+    
+    Browser -->|"/ui/*<br/>OAuth Required"| NextJS
+    API -->|"/api/*<br/>API Key Required"| Nginx
+    
+    NextJS -->|"Internal<br/>llm-proxy:11435"| LLMProxy
+    Nginx -->|"Internal<br/>Load Balanced"| Ollama
+    
+    LLMProxy -->|"With API Key"| Nginx
+    LLMProxy -->|"With Provider Keys"| OpenAI
+    LLMProxy -->|"With Provider Keys"| Anthropic
+    
+    style NextJS fill:#e3f2fd
+    style Nginx fill:#fff3e0
+    style LLMProxy fill:#f3e5f5
+```
+
+### Security Layers
+
+#### 1. **Web UI Access (`/ui/*` routes)**
+- **Protection**: Azure OAuth / OIDC authentication
+- **Scope**: All UI pages and `/ui/api/*` endpoints
+- **Implementation**: Next.js middleware validates OAuth tokens
+- **Use Case**: Interactive web access for authenticated users
+
+#### 2. **Ollama API Access (`/api/*` routes)**
+- **Protection**: POLYLLAMA_API_KEY authentication
+- **Scope**: Direct Ollama API endpoints (e.g., `/api/generate`, `/api/chat`)
+- **Implementation**: Nginx Lua scripts validate API keys
+- **Supported Headers**:
+  - `api-key: <your_api_key>`
+  - `x-api-key: <your_api_key>`
+  - `Authorization: Bearer <your_api_key>`
+- **Use Case**: Direct API access for external applications
+
+#### 3. **LLM Proxy (Internal Only)**
+- **Protection**: No external access (no exposed ports)
+- **Access**: Only via internal Docker network (`http://llm-proxy:11435`)
+- **Purpose**: Unified interface for multiple LLM providers
+- **Authentication**: Automatically includes POLYLLAMA_API_KEY when calling Ollama
+
+### Request Flow Examples
+
+#### Example 1: Web UI Chat Request
+```
+Browser → /ui/api/chat/completions (OAuth required)
+  → Next.js validates OAuth token
+  → Next.js server → http://llm-proxy:11435/api/chat/completions
+  → LLM Proxy routes to appropriate provider:
+    - If Ollama model: → http://router:11434/api/chat (with POLYLLAMA_API_KEY)
+    - If OpenAI model: → OpenAI API (with OPENAI_API_KEY)
+    - If Anthropic model: → Anthropic API (with ANTHROPIC_API_KEY)
+```
+
+#### Example 2: Direct API Request
+```
+External Client → /api/generate (POLYLLAMA_API_KEY required)
+  → Nginx validates API key
+  → Nginx load balances to Ollama instance
+  → Response returned to client
+```
+
+### Security Benefits
+
+1. **No Direct LLM Access**: External clients cannot directly access the LLM proxy or individual Ollama instances
+2. **Dual Authentication**: Different authentication methods for different use cases (OAuth for UI, API key for programmatic access)
+3. **Internal Service Isolation**: LLM proxy is completely isolated from external access
+4. **Credential Protection**: Provider API keys (OpenAI, Anthropic) are never exposed to clients
+5. **Audit Trail**: All requests are authenticated and can be logged for security auditing
+
+### Configuration
+
+To enable full security:
+
+1. **Set OAuth Provider** (for UI access):
+   ```bash
+   # In .env file
+   OAUTH_CLIENT_ID=your-oauth-client-id
+   OAUTH_CLIENT_SECRET=your-oauth-client-secret
+   OAUTH_ISSUER=https://your-oauth-provider.com
+   ```
+
+2. **Set API Key** (for API access):
+   ```bash
+   # In .env file
+   POLYLLAMA_API_KEY=your-secure-api-key
+   ```
+
+3. **Set LLM Provider Keys** (as needed):
+   ```bash
+   # In .env file
+   OPENAI_API_KEY=your-openai-key
+   ANTHROPIC_API_KEY=your-anthropic-key
+   ```
 
 ---
 

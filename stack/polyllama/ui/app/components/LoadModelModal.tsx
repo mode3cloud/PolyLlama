@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Instance, InstanceStatus, GPUConfig, RunningModels } from '../types'
 import InstanceLoadButton from './InstanceLoadButton'
-import { getApiUrl } from '../utils'
+import { fetchWithAuth } from '../lib/fetchWithAuth'
 
 interface LoadModelModalProps {
   isOpen: boolean;
@@ -40,7 +40,7 @@ export default function LoadModelModal({
 
   const fetchModelDetails = async () => {
     try {
-      const response = await fetch(getApiUrl('/api/ui/model-details'), {
+      const response = await fetchWithAuth('/ui/api/model-details', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: modelName })

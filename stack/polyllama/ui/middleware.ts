@@ -8,6 +8,9 @@ export async function middleware(req: NextRequest) {
   // With basePath '/ui', the paths in middleware are relative to the basePath
   // So /ui/api/auth/login appears as /api/auth/login here
   
+  console.log(`[Middleware] Path: ${url.pathname}, Full URL: ${req.url}`);
+  console.log(`[Middleware] Cookies:`, req.cookies.getAll());
+  
   // Protect all API routes under /api/ except auth routes
   if (
     url.pathname.startsWith("/api/") &&
@@ -17,11 +20,16 @@ export async function middleware(req: NextRequest) {
     !url.pathname.startsWith("/api/auth/get_token") &&
     !url.pathname.startsWith("/api/auth/refresh")
   ) {
+    console.log(`[Middleware] Checking auth for protected route: ${url.pathname}`);
     const token = await ApiHelper.GetToken(req);
+    console.log(`[Middleware] Token found:`, !!token);
+    
     if (!token || token.tokenHasExpired()) {
-      console.log("Token is invalid or has expired", req.url);
+      console.log(`[Middleware] Token is invalid or has expired for ${req.url}`);
+      console.log(`[Middleware] Token expired:`, token?.tokenHasExpired());
       return new NextResponse(null, { status: 401 });
     }
+    console.log(`[Middleware] Token is valid, proceeding`);
   }
   
   return NextResponse.next();

@@ -30,6 +30,31 @@ Templates are in:
 - `builder/docker-compose.yml.j2` → `builder/built/docker-compose.yml`
 - `builder/nginx.conf.j2` → `builder/built/nginx.conf`
 
+### Web UI and API Architecture
+**CRITICAL: All API calls must be server-side only. Client browsers cannot access Docker service names.**
+
+The system exposes a unified interface on port `:11434`:
+- `/api/*` - Routed by Nginx to appropriate Ollama instances via Lua logic
+- `/ui/*` - Next.js web UI for monitoring and chat interface
+
+**API Communication Patterns:**
+1. **Ollama API Access** (Dashboard/Monitoring):
+   - UI components use `/api/*` endpoints (e.g., `/api/models`, `/api/generate`)
+   - These are routed by Nginx to the appropriate Ollama instance
+   - Example: `fetch('/api/models')` from the UI hits `localhost:11434/api/models`
+
+2. **LLM Proxy Access** (Chat Interface):
+   - Chat UI uses Next.js API routes: `/ui/api/chat/*`
+   - Next.js server-side routes proxy to `http://llm-proxy:11435`
+   - This enables multi-provider support (OpenAI, Anthropic, etc.) via litellm
+   - Example: `fetch('/ui/api/chat/models')` → Next.js API → `http://llm-proxy:11435/api/models`
+
+**Key Design Principles:**
+- Never make direct calls to Docker service names from client-side code
+- All inter-service communication happens server-side
+- The UI at `/ui` can call both `/api/*` (Ollama) and `/ui/api/*` (LLM proxy) endpoints
+- LLM proxy may internally call back to Ollama via `localhost:11434/api/*`
+
 ## Common Commands
 
 ### Launch and Management
@@ -90,7 +115,7 @@ The `OLLAMA_INSTANCE_COUNT` environment variable flows through the system:
 1. Set in router service environment in `builder/built/docker-compose.yml`
 2. Read by nginx `init_by_lua_block` into shared memory (`env_vars`)
 3. Used by `model_router.lua` via `get_instance_count()` function
-4. JavaScript UI reads via `/api/ui/instance-count` endpoint
+4. JavaScript UI reads via `/api/polyllama/instance-count` endpoint
 
 ## Model Routing Logic
 
@@ -128,13 +153,29 @@ Models are routed using this hierarchy:
 
 ### Routing Issues
 - Check nginx error logs in router container
-- Examine shared memory state via `/api/ui/model-mappings`
+- Examine shared memory state via `/api/polyllama/model-mappings`
 - Verify `OLLAMA_INSTANCE_COUNT` propagation
 
 ### Service Communication
 - Ensure all `polyllamaX` services can resolve each other via Docker networks
 - Check that nginx upstream pool matches actual running services
 - Verify GPU assignments in container environment variables
+
+## API Key Protection
+
+When `POLYLLAMA_API_KEY` is set in the `.env` file:
+- All `/api/*` endpoints are protected (except `/api/polyllama/*` which are internal UI endpoints)
+- Authentication is required via one of these headers:
+  - `api-key: <your_api_key>`
+  - `x-api-key: <your_api_key>`
+  - `Authorization: Bearer <your_api_key>`
+- The protection is implemented in nginx using Lua access_by_lua_block
+- LiteLLM proxy automatically passes the API key when calling Ollama endpoints
+
+Implementation details:
+- API key check is done in `builder/nginx.conf.j2` for each protected endpoint
+- The router service loads the API key from the .env file via env_file directive
+- LiteLLM proxy adds the API key as `api-key` header when calling Ollama models
 
 ## Development Guidelines
 - We use pnpm NOT npm

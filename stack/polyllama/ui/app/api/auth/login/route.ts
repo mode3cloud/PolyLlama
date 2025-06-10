@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRedirectUri } from "../../../lib/auth/config";
 
 export async function GET(req: NextRequest) {
-  const redirectUri = getRedirectUri();
+  const redirectUri = getRedirectUri(req.headers);
   
   if (
     process.env.AZURE_AD_CLIENT_ID === undefined ||

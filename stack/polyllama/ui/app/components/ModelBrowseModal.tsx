@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo } from 'react'
 import { SearchModel, SearchModelsResponse, Instance, InstanceStatus, PullResponse } from '../types'
-import { getApiUrl } from '../utils'
+import { fetchWithAuth } from '../lib/fetchWithAuth'
 
 interface ModelBrowseModalProps {
   isOpen: boolean;
@@ -56,7 +56,7 @@ export default function ModelBrowseModal({
     setSearchError(null)
 
     try {
-      const response = await fetch(getApiUrl('/api/ui/search-models') + `?q=${encodeURIComponent(query)}`)
+      const response = await fetchWithAuth('/ui/api/search-models' + `?q=${encodeURIComponent(query)}`)
       
       if (!response.ok) {
         throw new Error(`Search failed: ${response.statusText}`)
@@ -115,7 +115,7 @@ export default function ModelBrowseModal({
     setPullingModels(prev => new Set(prev).add(pullKey))
 
     try {
-      const response = await fetch(getApiUrl('/api/ui/pull-model'), {
+      const response = await fetchWithAuth('/ui/api/pull-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

@@ -6,7 +6,7 @@ import { getOriginalBaseURL } from "../../../lib/auth/utils";
 import { getRedirectUri } from "../../../lib/auth/config";
 
 export async function GET(req: NextRequest) {
-  const redirectUri = getRedirectUri();
+  const redirectUri = getRedirectUri(req.headers);
   
   if (
     process.env.AZURE_AD_CLIENT_ID === undefined ||
@@ -73,6 +73,7 @@ export async function GET(req: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
+      path: "/",
       maxAge: 15 * 60, // 15 minutes in seconds
     });
     
@@ -81,6 +82,7 @@ export async function GET(req: NextRequest) {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
+      path: "/",
       maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
     });
     

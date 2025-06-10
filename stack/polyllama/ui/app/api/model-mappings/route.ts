@@ -1,8 +1,9 @@
+import { serverFetch } from '@/app/lib/serverFetch';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
   try {
-    const response = await fetch('http://localhost:11434/api/polyllama/model-mappings', {
+    const response = await serverFetch('http://router:11434/api/polyllama/model-mappings', {
       headers: {
         'Accept': 'application/json',
       },

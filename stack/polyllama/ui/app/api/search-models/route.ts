@@ -1,3 +1,4 @@
+import { serverFetch } from '@/app/lib/serverFetch';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function GET(request: NextRequest) {
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const response = await fetch(`http://localhost:11434/api/polyllama/search-models?q=${encodeURIComponent(query)}`, {
+    const response = await serverFetch(`http://router:11434/api/polyllama/search-models?q=${encodeURIComponent(query)}`, {
       headers: {
         'Accept': 'application/json',
       },

@@ -117,37 +117,123 @@ graph TB
 ## 🔀 API Request Flow Architecture
 
 ### Direct Ollama API Calls
+
 When you make requests to `localhost:11434/api/*`, PolyLlama intelligently routes them:
 
+#### PolyLlama Internal Endpoints
+
+These endpoints provide PolyLlama-specific functionality and are protected by the same API key authentication as standard Ollama endpoints when `POLYLLAMA_API_KEY` is configured.
+
+| Endpoint | Method | Description | Implementation |
+|----------|--------|-------------|----------------|
+| `/api/polyllama/instance-status` | GET | Returns health status of all PolyLlama instances | Polls each instance's `/api/version` endpoint |
+| `/api/polyllama/instance-count` | GET | Returns the number of configured instances | Reads from shared memory `OLLAMA_INSTANCE_COUNT` |
+| `/api/polyllama/gpu-config` | GET | Returns GPU configuration and instance mapping | Static config from build-time template |
+| `/api/polyllama/gpu-metrics` | GET | Returns real-time GPU/CPU metrics for all instances | Collects from instance metrics endpoints every 2s |
+| `/api/polyllama/running-models` | GET | Returns all currently loaded models across instances | Aggregates from all instance `/api/ps` endpoints |
+| `/api/polyllama/model-details` | POST | Get detailed info for a specific model | Routes to appropriate instance's `/api/show` |
+| `/api/polyllama/model-mappings` | GET | Returns model-to-instance mappings and cache | Shows internal routing state |
+| `/api/polyllama/get-contexts` | GET | Returns stored context lengths for models | Reads from shared memory context cache |
+| `/api/polyllama/store-context` | POST | Stores context length for a model | Writes to shared memory for num_ctx tracking |
+| `/api/polyllama/clean-mappings` | POST | Removes mappings for unloaded models | Cleans up stale routing entries |
+| `/api/polyllama/duplicate-models` | GET | Detects models loaded on multiple instances | Helps identify routing issues |
+| `/api/polyllama/sync-contexts` | POST | Syncs context sizes from running models | Updates context cache from loaded models |
+| `/api/polyllama/search-models` | GET | Search models on ollama.com | Proxies to ollama.com model search |
+| `/api/polyllama/pull-model` | POST | Initiate model pull to specific instance | Starts async model download |
+| `/api/polyllama/pull-status` | GET | Get status of a model pull operation | Tracks download progress |
+| `/api/polyllama/pull-statuses` | GET | Get all active pull operations | Lists all ongoing downloads |
+| `/api/*` | ALL | Standard Ollama API endpoints | Load-balanced routing with model affinity |
+
 ```mermaid
-graph LR
-    subgraph "Client"
-        App["📱 Application<br/>(curl, SDK, etc.)"]
+graph TB
+    subgraph "Clients"
+        Browser["🌐 Web UI<br/>localhost:11434/ui"]
+        API["🔧 API Client<br/>(curl, SDK, etc.)"]
     end
     
-    subgraph "PolyLlama Router"
-        Nginx["🔀 Nginx<br/>:11434"]
-        Lua["📜 Lua Router<br/>(model_router.lua)"]
+    subgraph "PolyLlama Router [:11434]"
+        subgraph "API Endpoints"
+            Internal["📊 /api/polyllama/*<br/>Internal Management APIs"]
+            Ollama["🦙 /api/*<br/>Standard Ollama APIs"]
+        end
+        
+        subgraph "Routing Logic"
+            Lua["📜 Lua Router<br/>(model_router.lua)"]
+            Memory["💾 Shared Memory<br/>• Model mappings<br/>• Context sizes<br/>• Instance count<br/>• GPU metrics"]
+        end
     end
     
-    subgraph "PolyLlama Instances"
-        P1["🦙 polyllama1<br/>RTX 4090 x3"]
-        P2["🦙 polyllama2<br/>RTX 6000 Ada"]
-        P3["🦙 polyllama3<br/>CPU Only"]
+    subgraph "Backend Services"
+        P1["🦙 polyllama1<br/>RTX 4090 x3<br/>:11434"]
+        P2["🦙 polyllama2<br/>RTX 6000 Ada<br/>:11434"]
+        P3["🦙 polyllama3<br/>CPU Only<br/>:11434"]
+        
+        GPU1["🎮 GPU Metrics<br/>:11435"]
+        GPU2["🎮 GPU Metrics<br/>:11435"]
     end
     
-    App -->|"POST /api/chat<br/>model: llama3"| Nginx
-    Nginx --> Lua
-    Lua -->|"Check model<br/>mappings"| Lua
-    Lua -->|"Route to least<br/>loaded instance"| P1
+    subgraph "External Services"
+        OllamaHub["🌍 ollama.com<br/>Model Search"]
+    end
     
-    style App fill:#e3f2fd
-    style Nginx fill:#fff3e0
-    style Lua fill:#f3e5f5
-    style P1 fill:#e8f5e9
-    style P2 fill:#fce4ec
+    %% Client connections
+    Browser -->|"Monitor & Control"| Internal
+    API -->|"LLM Operations"| Ollama
+    
+    %% Internal API flows
+    Internal -->|"Read/Write"| Memory
+    Internal -->|"Status Checks"| P1
+    Internal -->|"Status Checks"| P2
+    Internal -->|"Status Checks"| P3
+    Internal -->|"Model Search"| OllamaHub
+    
+    %% Ollama API flows
+    Ollama -->|"Route Request"| Lua
+    Lua -->|"Check Mappings"| Memory
+    Lua -->|"Model Affinity<br/>or Load Balance"| P1
+    Lua -->|"Model Affinity<br/>or Load Balance"| P2
+    Lua -->|"Model Affinity<br/>or Load Balance"| P3
+    
+    %% Metrics collection
+    GPU1 -.->|"Collect GPU Data"| Memory
+    GPU2 -.->|"Collect GPU Data"| Memory
+    P3 -.->|"Collect CPU Data"| Memory
+    
+    %% Instance associations
+    P1 -.->|"Metrics"| GPU1
+    P2 -.->|"Metrics"| GPU2
+    
+    style Browser fill:#e3f2fd
+    style API fill:#e1f5fe
+    style Internal fill:#f3e5f5
+    style Ollama fill:#fff3e0
+    style Lua fill:#fce4ec
+    style Memory fill:#e8f5e9
+    style P1 fill:#c8e6c9
+    style P2 fill:#ffccbc
     style P3 fill:#f5f5f5
+    style OllamaHub fill:#b3e5fc
 ```
+
+#### How PolyLlama Routes Requests
+
+1. **Internal Management APIs** (`/api/polyllama/*`)
+   * Used by the Web UI for monitoring and control
+   * Direct access to shared memory for instant status
+   * Aggregate data from all instances (models, metrics, status)
+   * Manage model downloads and routing configuration
+
+2. **Standard Ollama APIs** (`/api/*`)
+   * Compatible with all Ollama clients and SDKs
+   * Smart routing based on model affinity
+   * Automatic load balancing for new models
+   * Context size preservation across requests
+
+3. **Shared Memory Store**
+   * Model-to-instance mappings for sticky routing
+   * Context sizes to maintain model performance
+   * GPU/CPU metrics updated every 2 seconds
+   * Instance configuration from startup
 
 ### Web UI Chat Interface Flow
 The chat interface uses a multi-tier architecture for provider flexibility:
@@ -274,7 +360,7 @@ HF_TOKEN=<your_hf_token>          # HuggingFace token for model access
 ```
 
 ### API Key Protection (Optional)
-If `POLYLLAMA_API_KEY` is set, all `/api/*` endpoints (except `/api/polyllama/*`) will require authentication via one of:
+If `POLYLLAMA_API_KEY` is set, ALL `/api/*` endpoints (including both Ollama and PolyLlama management endpoints) will require authentication via one of:
 - `api-key: <your_api_key>` header
 - `x-api-key: <your_api_key>` header  
 - `Authorization: Bearer <your_api_key>` header
@@ -329,15 +415,17 @@ graph TD
 - **Implementation**: Next.js middleware validates OAuth tokens
 - **Use Case**: Interactive web access for authenticated users
 
-#### 2. **Ollama API Access (`/api/*` routes)**
+#### 2. **API Access (`/api/*` routes)**
 - **Protection**: POLYLLAMA_API_KEY authentication
-- **Scope**: Direct Ollama API endpoints (e.g., `/api/generate`, `/api/chat`)
+- **Scope**: ALL `/api/*` endpoints including:
+  - Standard Ollama API endpoints (e.g., `/api/generate`, `/api/chat`)
+  - PolyLlama management endpoints (e.g., `/api/polyllama/instance-status`)
 - **Implementation**: Nginx Lua scripts validate API keys
 - **Supported Headers**:
   - `api-key: <your_api_key>`
   - `x-api-key: <your_api_key>`
   - `Authorization: Bearer <your_api_key>`
-- **Use Case**: Direct API access for external applications
+- **Use Case**: Direct API access for external applications and management tools
 
 #### 3. **LLM Proxy (Internal Only)**
 - **Protection**: No external access (no exposed ports)

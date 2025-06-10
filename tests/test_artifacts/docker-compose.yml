@@ -108,10 +108,15 @@ services:
     build:
       context: ../../stack/polyllama
       dockerfile: Dockerfile
-      target: production
+      target: development
     volumes:
       - ../../stack/polyllama/model_router.lua:/usr/local/openresty/lualib/model_router.lua
       - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      # Development mode: bind mount the app source
+      - ../../stack/polyllama/ui:/app
+      # Preserve node_modules in the container
+      - /app/node_modules
+      - /app/.next
     ports:
       - "11434:11434"
     env_file:

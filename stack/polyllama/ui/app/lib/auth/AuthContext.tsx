@@ -44,7 +44,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const response = await fetchWithAuth('/ui/api/auth/refresh', {
         method: 'POST',
       });
-      
+
       if (response.ok) {
         await response.json();
         // Re-check auth to get updated user info
@@ -64,22 +64,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (response.ok) {
         const token = await response.json();
         const payload = decodeToken(token);
-        
+
         if (payload) {
           setUser({ email: payload.email, name: payload.name });
-          
+
           // Calculate time until token expires
           const now = Date.now() / 1000;
           const expiresIn = payload.exp - now;
-          
+
           // Refresh token 1 minute before it expires
           const refreshIn = Math.max(0, (expiresIn - 60) * 1000);
-          
+
           // Clear any existing interval
           if (refreshIntervalRef.current) {
             clearTimeout(refreshIntervalRef.current);
           }
-          
+
           // Set up automatic refresh
           if (refreshIn > 0) {
             refreshIntervalRef.current = setTimeout(() => {
@@ -97,7 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     checkAuth();
-    
+
     // Cleanup on unmount
     return () => {
       if (refreshIntervalRef.current) {
@@ -107,7 +107,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [checkAuth]);
 
   const login = () => {
-    window.location.href = '/ui/api/auth/login';
+    const protocol = window.location.protocol;
+    const host = window.location.hostname;
+    const port = window.location.port;
+    let fullDomain = `${protocol}//${host}`;
+    if (
+      (protocol === 'http:' && port && port !== '80') ||
+      (protocol === 'https:' && port && port !== '443')
+    ) {
+      fullDomain += `:${port}`;
+    }
+    console.log(fullDomain);
+    window.location.href = '/ui/api/auth/login?baseDomain=' + encodeURIComponent(fullDomain);
   };
 
   const logout = async () => {
@@ -115,8 +126,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (refreshIntervalRef.current) {
       clearTimeout(refreshIntervalRef.current);
     }
+
+    try {
+      await fetchWithAuth('/ui/api/auth/logout');
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
     
-    await fetchWithAuth('/ui/api/auth/logout');
     setUser(null);
     window.location.href = '/ui';
   };

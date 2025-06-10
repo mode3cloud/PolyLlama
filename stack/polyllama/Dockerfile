@@ -60,6 +60,7 @@ COPY --from=dev-deps /app/node_modules /app/node_modules
 
 # Copy nginx configs
 COPY proxy_params.conf /etc/nginx/proxy_params.conf
+COPY forwarded-headers.conf /etc/nginx/conf.d/00-forwarded-headers.conf
 COPY model_router.lua /etc/nginx/model_router.lua
 
 # Copy supervisord config for development
@@ -93,6 +94,7 @@ RUN mkdir -p /app/public
 
 # Copy nginx configs
 COPY proxy_params.conf /etc/nginx/proxy_params.conf
+COPY forwarded-headers.conf /etc/nginx/conf.d/00-forwarded-headers.conf
 COPY model_router.lua /etc/nginx/model_router.lua
 
 # Copy supervisord config for production

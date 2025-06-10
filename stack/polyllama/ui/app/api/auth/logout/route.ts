@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ConfidentialClientApplication } from "@azure/msal-node";
 import { cookies } from "next/headers";
-import { getOriginalBaseURL } from "../../../lib/auth/utils";
 import { getRedirectUri } from "../../../lib/auth/config";
 
 export async function GET(req: NextRequest) {
-  const redirectUri = getRedirectUri(req.headers);
-  
+  // We don't need redirectUri for logout, but keeping the check for consistency
+  const redirectUri = getRedirectUri(null);
+
   if (
     process.env.AZURE_AD_CLIENT_ID === undefined ||
     process.env.AZURE_AD_TENANT_ID === undefined ||
@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
       { status: 500 },
     );
   }
-  
+
   const msalConfig = {
     auth: {
       clientId: process.env.AZURE_AD_CLIENT_ID,
@@ -29,16 +29,16 @@ export async function GET(req: NextRequest) {
 
   const pca = new ConfidentialClientApplication(msalConfig);
   const accounts = await pca.getTokenCache().getAllAccounts();
-  
+
   accounts.forEach((account) => {
     pca.getTokenCache().removeAccount(account);
   });
-  
+
   const cookieStore = await cookies();
   cookieStore.delete("auth_token_server");
   cookieStore.delete("refresh_token_server");
   
-  return NextResponse.redirect(
-    new URL("/ui", getOriginalBaseURL(req)).toString(),
-  );
+  // Return success response instead of redirect
+  // The client will handle the redirect
+  return NextResponse.json({ success: true });
 }

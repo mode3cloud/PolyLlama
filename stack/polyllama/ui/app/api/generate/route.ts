@@ -1,19 +1,20 @@
+import { serverFetch } from '@/app/lib/serverFetch';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
     const targetInstance = request.headers.get('X-Target-Instance');
-    
+
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
-    
+
     if (targetInstance) {
       headers['X-Target-Instance'] = targetInstance;
     }
-    
-    const response = await fetch('http://localhost:11434/api/generate', {
+
+    const response = await serverFetch('http://router:11434/api/generate', {
       method: 'POST',
       headers,
       body: JSON.stringify(body),

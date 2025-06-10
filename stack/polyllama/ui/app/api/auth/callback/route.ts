@@ -2,21 +2,38 @@ import { ConfidentialClientApplication } from "@azure/msal-node";
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { createTokenPair } from "../../../lib/auth/jwt";
-import { getOriginalBaseURL } from "../../../lib/auth/utils";
 import { getRedirectUri } from "../../../lib/auth/config";
 
 export async function GET(req: NextRequest) {
-  const redirectUri = getRedirectUri(req.headers);
-  
   if (
     process.env.AZURE_AD_CLIENT_ID === undefined ||
     process.env.AZURE_AD_TENANT_ID === undefined ||
-    process.env.AZURE_AD_CLIENT_SECRET === undefined ||
-    !redirectUri
+    process.env.AZURE_AD_CLIENT_SECRET === undefined
   ) {
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 },
+    );
+  }
+
+  const state = req.nextUrl.searchParams.get("state");
+  const code = req.nextUrl.searchParams.get("code");
+  const baseDomain = state ? decodeURIComponent(state) : undefined;
+
+  // Debug logging
+  console.log("Auth callback received:", {
+    state,
+    code: code ? "present" : "missing",
+    redirectUri: getRedirectUri(baseDomain),
+    searchParams: req.nextUrl.searchParams.toString(),
+  });
+
+  // Validate code parameter
+  if (!code) {
+    console.error("Missing authorization code in callback");
+    return NextResponse.json(
+      { error: "Bad Request", message: "Missing authorization code" },
+      { status: 400 },
     );
   }
 
@@ -30,15 +47,15 @@ export async function GET(req: NextRequest) {
 
   const pca = new ConfidentialClientApplication(msalConfig);
   const tokenRequest = {
-    code: req.nextUrl.searchParams.get("code") as string,
+    code,
     scopes: ["user.read"],
-    redirectUri: redirectUri,
+    redirectUri: getRedirectUri(baseDomain),
   };
 
   try {
     const response = await pca.acquireTokenByCode(tokenRequest);
     const userName = response.account!.username;
-    
+
     if (!userName) {
       console.error("No username found in auth response");
       return NextResponse.json(
@@ -46,13 +63,13 @@ export async function GET(req: NextRequest) {
         { status: 500 },
       );
     }
-    
+
     const allowedUsers =
       process.env.AZURE_AD_ALLOWED_USERS?.toLowerCase().split(";") ?? [];
     const allowedDomains =
       process.env.AZURE_AD_ALLOWED_DOMAINS?.toLowerCase().split(";") ?? [];
     const userDomain = userName.toLowerCase().split("@")[1];
-    
+
     if (
       !allowedUsers.includes(userName.toLowerCase()) &&
       !allowedDomains.includes(userDomain)
@@ -64,10 +81,10 @@ export async function GET(req: NextRequest) {
       userName,
       response.account!.name ?? "Unnamed User",
     );
-    
+
     console.log("User authenticated:", userName);
     const cookieStore = await cookies();
-    
+
     // Set access token (15 minutes)
     cookieStore.set("auth_token_server", accessToken, {
       httpOnly: true,
@@ -76,7 +93,7 @@ export async function GET(req: NextRequest) {
       path: "/",
       maxAge: 15 * 60, // 15 minutes in seconds
     });
-    
+
     // Set refresh token (7 days)
     cookieStore.set("refresh_token_server", refreshToken, {
       httpOnly: true,
@@ -85,14 +102,37 @@ export async function GET(req: NextRequest) {
       path: "/",
       maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
     });
-    
-    return NextResponse.redirect(
-      new URL("/ui", getOriginalBaseURL(req)).toString(),
-    );
+
+    // Redirect to home page after successful authentication
+    const redirectUrl = baseDomain ? `${baseDomain}/ui` : "/ui";
+    return NextResponse.redirect(new URL(redirectUrl, req.url));
   } catch (error: any) {
     console.error("Callback error:", error);
+    console.error("Error details:", {
+      errorCode: error.errorCode,
+      errorMessage: error.errorMessage,
+      correlationId: error.correlationId,
+      stack: error.stack,
+    });
+
+    // Provide more specific error responses
+    if (error.errorCode === "request_cannot_be_made") {
+      return NextResponse.json(
+        {
+          error: "Authentication Failed",
+          message: "Invalid or missing authorization code",
+          details: error.errorMessage
+        },
+        { status: 400 },
+      );
+    }
+
     return NextResponse.json(
-      { error: "Internal Server Error", errorMessage: error.errorMessage },
+      {
+        error: "Internal Server Error",
+        message: error.errorMessage || "Authentication failed",
+        errorCode: error.errorCode
+      },
       { status: 500 },
     );
   }

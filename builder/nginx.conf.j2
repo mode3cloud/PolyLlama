@@ -1,3 +1,6 @@
+# Include forwarded headers configuration
+include /etc/nginx/conf.d/00-forwarded-headers.conf;
+
 # Define shared memory zones for Lua modules to cache mappings
 lua_shared_dict model_mappings 10m;
 
@@ -204,9 +207,11 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $http_host;
-        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # Use mapped variables that handle both direct and proxied scenarios
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+        proxy_set_header X-Forwarded-Host $forwarded_host;
+        proxy_set_header X-Forwarded-Port $forwarded_port;
         
         # For Next.js HMR in development
         proxy_read_timeout 86400;
@@ -222,8 +227,9 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $http_host;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+        proxy_set_header X-Forwarded-Host $forwarded_host;
+        proxy_set_header X-Forwarded-Port $forwarded_port;
     }
 
     
@@ -231,6 +237,50 @@ server {
     
     # Custom endpoint for instance status
     location /api/polyllama/instance-status {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -762,6 +812,50 @@ server {
     
     # Custom endpoint for UI to get stored context lengths
     location /api/polyllama/get-contexts {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -789,6 +883,50 @@ server {
     
     # Custom endpoint for UI to store context length for loaded models
     location /api/polyllama/store-context {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -840,6 +978,50 @@ server {
 
     # Custom endpoint for UI to get instance count
     location /api/polyllama/instance-count {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -855,6 +1037,50 @@ server {
     
     # Custom endpoint for UI to get GPU configuration
     location /api/polyllama/gpu-config {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -891,6 +1117,50 @@ server {
     
     # Custom endpoint for UI to get GPU and CPU metrics
     location /api/polyllama/gpu-metrics {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -968,6 +1238,50 @@ server {
 
     # Custom endpoint for UI to get running models
     location /api/polyllama/running-models {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -993,6 +1307,50 @@ server {
     
     # Custom endpoint for UI to get model details
     location /api/polyllama/model-details {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         
         content_by_lua_block {
@@ -1296,6 +1654,50 @@ server {
 
     # Custom endpoint for UI to get model mappings
     location /api/polyllama/model-mappings {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1329,6 +1731,50 @@ server {
     
     # Endpoint to clean up mappings for non-running models
     location /api/polyllama/clean-mappings {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1348,6 +1794,50 @@ server {
     
     # Endpoint to detect duplicate model instances
     location /api/polyllama/duplicate-models {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1370,6 +1860,50 @@ server {
     
     # Endpoint to sync context sizes from running models
     location /api/polyllama/sync-contexts {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1437,6 +1971,50 @@ server {
     
     # Custom endpoint for UI to search models from ollama.com
     location /api/polyllama/search-models {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1457,6 +2035,50 @@ server {
     
     # Custom endpoint for UI to pull models
     location /api/polyllama/pull-model {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1499,6 +2121,50 @@ server {
     
     # Custom endpoint for UI to get pull status
     location /api/polyllama/pull-status {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1530,6 +2196,50 @@ server {
     
     # Custom endpoint for UI to get all pull statuses
     location /api/polyllama/pull-statuses {
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"

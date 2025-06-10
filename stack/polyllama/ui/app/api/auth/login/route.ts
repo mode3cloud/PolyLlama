@@ -3,8 +3,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { getRedirectUri } from "../../../lib/auth/config";
 
 export async function GET(req: NextRequest) {
-  const redirectUri = getRedirectUri(req.headers);
-  
+  const baseDomain = req.nextUrl.searchParams.get("baseDomain");
+
+  const redirectUri = getRedirectUri(baseDomain);
+
   if (
     process.env.AZURE_AD_CLIENT_ID === undefined ||
     process.env.AZURE_AD_TENANT_ID === undefined ||
@@ -16,7 +18,7 @@ export async function GET(req: NextRequest) {
       { status: 500 },
     );
   }
-  
+
   const msalConfig = {
     auth: {
       clientId: process.env.AZURE_AD_CLIENT_ID,
@@ -30,6 +32,7 @@ export async function GET(req: NextRequest) {
   const authCodeUrlParameters = {
     scopes: ["user.read"],
     redirectUri: redirectUri,
+    state: encodeURIComponent(baseDomain!), // Pass returnUrl in state
   };
 
   try {

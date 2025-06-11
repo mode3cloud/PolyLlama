@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChatMessage, ChatModel, StreamChunk } from '../types'
 import { fetchWithAuth } from '../lib/fetchWithAuth'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
 // Use relative URLs to hit our Next.js API routes
 const API_BASE_URL = '/ui/api/chat'
@@ -286,11 +288,86 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
                   }`}
               >
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 whitespace-pre-wrap">{message.content}</div>
+                  <div className="flex-1">
+                    {message.role === 'user' ? (
+                      <div className="whitespace-pre-wrap">{message.content}</div>
+                    ) : (
+                      <div className="prose prose-sm max-w-none prose-gray">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                          pre: ({ children }) => (
+                            <pre className="bg-gray-800 text-gray-100 rounded-lg p-4 overflow-x-auto my-2">
+                              {children}
+                            </pre>
+                          ),
+                          code: ({ className, children, ...props }) => {
+                            const match = /language-(\w+)/.exec(className || '')
+                            const isInline = !match
+                            return isInline ? (
+                              <code className="bg-gray-200 rounded px-1.5 py-0.5 text-sm font-mono" {...props}>
+                                {children}
+                              </code>
+                            ) : (
+                              <code className="text-sm font-mono" {...props}>
+                                {children}
+                              </code>
+                            )
+                          },
+                          a: ({ href, children }) => (
+                            <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">
+                              {children}
+                            </a>
+                          ),
+                          ul: ({ children }) => (
+                            <ul className="list-disc list-inside space-y-1 my-2">{children}</ul>
+                          ),
+                          ol: ({ children }) => (
+                            <ol className="list-decimal list-inside space-y-1 my-2">{children}</ol>
+                          ),
+                          blockquote: ({ children }) => (
+                            <blockquote className="border-l-4 border-gray-300 pl-4 italic my-2 text-gray-700">{children}</blockquote>
+                          ),
+                          h1: ({ children }) => (
+                            <h1 className="text-2xl font-bold mt-4 mb-2">{children}</h1>
+                          ),
+                          h2: ({ children }) => (
+                            <h2 className="text-xl font-bold mt-3 mb-2">{children}</h2>
+                          ),
+                          h3: ({ children }) => (
+                            <h3 className="text-lg font-bold mt-2 mb-1">{children}</h3>
+                          ),
+                          p: ({ children }) => (
+                            <p className="my-2">{children}</p>
+                          ),
+                          table: ({ children }) => (
+                            <div className="overflow-x-auto my-2">
+                              <table className="min-w-full border-collapse border border-gray-300">
+                                {children}
+                              </table>
+                            </div>
+                          ),
+                          th: ({ children }) => (
+                            <th className="border border-gray-300 px-4 py-2 bg-gray-100 font-semibold text-left">
+                              {children}
+                            </th>
+                          ),
+                          td: ({ children }) => (
+                            <td className="border border-gray-300 px-4 py-2">
+                              {children}
+                            </td>
+                          ),
+                        }}
+                        >
+                          {message.content}
+                        </ReactMarkdown>
+                      </div>
+                    )}
+                  </div>
                   {message.role === 'assistant' && (
                     <button
                       onClick={() => copyMessage(message.content)}
-                      className="text-gray-400 hover:text-gray-600 p-1 rounded"
+                      className="text-gray-400 hover:text-gray-600 p-1 rounded flex-shrink-0"
                       title="Copy message"
                     >
                       📋

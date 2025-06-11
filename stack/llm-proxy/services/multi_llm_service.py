@@ -25,6 +25,10 @@ class MultiLLMService:
     Provides a single interface for all LLM providers through LiteLLM.
     """
     
+    # Class-level cache for model lists
+    _model_cache: Dict[str, tuple[List[Dict[str, Any]], float]] = {}
+    _cache_ttl = 300  # 5 minutes
+    
     def __init__(
         self,
         model: str | None = None,
@@ -196,6 +200,14 @@ class MultiLLMService:
     
     async def get_available_models(self, provider: Optional[str] = None) -> List[Dict[str, Any]]:
         """Get available models from all providers or a specific provider."""
+        # Check cache first
+        cache_key = provider or "all"
+        if cache_key in self._model_cache:
+            cached_models, cached_time = self._model_cache[cache_key]
+            if time.time() - cached_time < self._cache_ttl:
+                logger.debug(f"Returning cached models for {cache_key}")
+                return cached_models
+        
         models = []
         
         if provider == "ollama" or provider is None:
@@ -228,30 +240,104 @@ class MultiLLMService:
                 logger.warning(f"Failed to get Ollama models: {e}")
         
         if provider == "openai" or provider is None:
-            # Add known OpenAI models if API key is available
-            if os.getenv("OPENAI_API_KEY"):
-                openai_models = [
-                    "gpt-4o", "gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"
-                ]
-                for model in openai_models:
-                    models.append({
-                        "id": f"openai/{model}",
-                        "name": model,
-                        "provider": "openai"
-                    })
+            # Add OpenAI models if API key is available
+            api_key = os.getenv("OPENAI_API_KEY")
+            if api_key:
+                try:
+                    # Fetch models from OpenAI API
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        response = await client.get(
+                            "https://api.openai.com/v1/models",
+                            headers={"Authorization": f"Bearer {api_key}"}
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            openai_models = []
+                            for model in data.get("data", []):
+                                model_id = model.get("id", "")
+                                # Filter for chat models (skip embeddings, images, audio, etc.)
+                                if model_id.startswith(("gpt-", "o1-", "o3-")) and not any(x in model_id for x in ["realtime", "audio"]):
+                                    openai_models.append(model_id)
+                            
+                            # Sort models
+                            openai_models.sort()
+                            
+                            for model in openai_models:
+                                models.append({
+                                    "id": f"openai/{model}",
+                                    "name": model,
+                                    "provider": "openai"
+                                })
+                        else:
+                            logger.warning(f"Failed to fetch OpenAI models: {response.status_code}")
+                            raise Exception(f"API returned {response.status_code}")
+                except Exception as e:
+                    logger.warning(f"Failed to get OpenAI models from API: {e}")
+                    # Fallback to known models
+                    fallback_models = [
+                        "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo",
+                        "o1-preview", "o1-mini", "o3-mini"
+                    ]
+                    for model in fallback_models:
+                        models.append({
+                            "id": f"openai/{model}",
+                            "name": model,
+                            "provider": "openai"
+                        })
         
         if provider == "anthropic" or provider is None:
-            # Add known Anthropic models if API key is available
-            if os.getenv("ANTHROPIC_API_KEY"):
-                anthropic_models = [
-                    "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"
-                ]
-                for model in anthropic_models:
-                    models.append({
-                        "id": f"anthropic/{model}",
-                        "name": model,
-                        "provider": "anthropic"
-                    })
+            # Add Anthropic models if API key is available
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if api_key:
+                try:
+                    # Fetch models from Anthropic API
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        response = await client.get(
+                            "https://api.anthropic.com/v1/models",
+                            headers={
+                                "x-api-key": api_key,
+                                "anthropic-version": "2023-06-01"
+                            }
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            anthropic_models = []
+                            for model in data.get("data", []):
+                                model_id = model.get("id", "")
+                                # Only include models that are actively available
+                                if model.get("status") == "active":
+                                    anthropic_models.append(model_id)
+                            
+                            # Sort models
+                            anthropic_models.sort(reverse=True)  # Newest first
+                            
+                            for model in anthropic_models:
+                                models.append({
+                                    "id": f"anthropic/{model}",
+                                    "name": model,
+                                    "provider": "anthropic"
+                                })
+                        else:
+                            logger.warning(f"Failed to fetch Anthropic models: {response.status_code}")
+                            raise Exception(f"API returned {response.status_code}")
+                except Exception as e:
+                    logger.warning(f"Failed to get Anthropic models from API: {e}")
+                    # Fallback to known models
+                    fallback_models = [
+                        "claude-3-5-sonnet-20241022",
+                        "claude-3-5-haiku-20241022",
+                        "claude-3-opus-20240229",
+                        "claude-3-sonnet-20240229",
+                        "claude-3-haiku-20240307",
+                        "claude-2.1",
+                        "claude-instant-1.2"
+                    ]
+                    for model in fallback_models:
+                        models.append({
+                            "id": f"anthropic/{model}",
+                            "name": model,
+                            "provider": "anthropic"
+                        })
         
         if provider == "google" or provider is None:
             # Add known Google models if API key is available
@@ -274,6 +360,10 @@ class MultiLLMService:
                         "name": model,
                         "provider": "groq"
                     })
+        
+        # Update cache
+        cache_key = provider or "all"
+        self._model_cache[cache_key] = (models, time.time())
         
         return models
     
@@ -310,9 +400,10 @@ class MultiLLMService:
             "openrouter": "OPENROUTER_API_KEY",
         }
         
-        for provider, env_var in provider_env_map.items():
-            if os.getenv(env_var) and env_var not in os.environ:
-                os.environ[env_var] = os.getenv(env_var)
+        for _, env_var in provider_env_map.items():
+            api_key = os.getenv(env_var)
+            if api_key and env_var not in os.environ:
+                os.environ[env_var] = api_key
         
         # Set Ollama base URL
         if not os.environ.get("OLLAMA_API_BASE"):

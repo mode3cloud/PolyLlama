@@ -386,7 +386,7 @@ function _M.assign_model_to_least_loaded_instance(model_name)
         if not string.match(key, "^loading:") then
             local instance = _M.get_safe_instance_mapping(key)
             if instance then
-                local instance_num = tonumber(string.match(instance, "ollama(%d+)"))
+                local instance_num = tonumber(string.match(instance, "polyllama(%d+)"))
                 if instance_num and instance_counts[instance_num] then
                     instance_counts[instance_num].count = instance_counts[instance_num].count + 1
                 end
@@ -1198,6 +1198,25 @@ function _M.pull_model(model_name, tag, target_instance)
         return { error = "No available instance for model pull", success = false }
     end
     
+    -- Check for stale pulls before acquiring lock
+    local keys = ngx.shared.model_mappings:get_keys() or {}
+    for _, key in ipairs(keys) do
+        if string.match(key, "^pull_status:") then
+            local status_json = ngx.shared.model_mappings:get(key)
+            if status_json then
+                local success, status = pcall(cjson.decode, status_json)
+                if success and status and status.model == full_model_name then
+                    -- Check if this pull is stale (older than 5 minutes and still in starting status)
+                    if status.status == "starting" and (ngx.time() - status.started_at) > 300 then
+                        ngx.log(ngx.WARN, "Found stale pull for " .. full_model_name .. ", cleaning up")
+                        ngx.shared.model_mappings:delete(key)
+                        _M.unlock_model_loading(full_model_name)
+                    end
+                end
+            end
+        end
+    end
+    
     -- Acquire loading lock
     local lock_acquired, existing_loader = _M.lock_model_loading(full_model_name, target_instance)
     
@@ -1220,49 +1239,35 @@ function _M.pull_model(model_name, tag, target_instance)
         status = "starting",
         progress = 0,
         started_at = ngx.time(),
-        stage = "Initializing"
+        stage = "Initializing",
+        total = 0,
+        completed = 0
     }
     
     local status_key = "pull_status:" .. pull_id
     ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600) -- 1 hour TTL
     
-    -- Create HTTP client
-    local httpc = http.new()
-    httpc:set_timeout(300000) -- 5 minute timeout for pulls
+    -- Start a timer to handle the streaming pull request
+    -- Create a wrapper function to pass the parameters
+    local function timer_handler(premature)
+        _M.handle_streaming_pull(premature, pull_id, full_model_name, target_instance, status_key)
+    end
     
-    -- Make pull request to the target instance
-    local res, err = httpc:request_uri("http://" .. target_instance .. ":11434/api/pull", {
-        method = "POST",
-        body = cjson.encode({ name = full_model_name }),
-        headers = {
-            ["Content-Type"] = "application/json"
-        }
-    })
-    
-    if not res or res.status ~= 200 then
+    local ok, err = ngx.timer.at(0, timer_handler)
+    if not ok then
+        ngx.log(ngx.ERR, "Failed to create timer for streaming pull: " .. (err or "unknown error"))
         -- Update pull status to failed
         pull_status.status = "failed"
-        pull_status.error = err or ("HTTP " .. (res and res.status or "unknown"))
-        pull_status.completed_at = ngx.time()
+        pull_status.error = "Failed to start background pull: " .. (err or "unknown error")
         ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600)
-        
-        -- Release the loading lock
         _M.unlock_model_loading(full_model_name)
-        
-        return { 
-            error = "Failed to start model pull: " .. (err or "unknown error"), 
+        return {
             success = false,
-            pull_id = pull_id
+            error = "Failed to start background pull process"
         }
     end
     
-    -- Update pull status to in progress
-    pull_status.status = "in_progress"
-    pull_status.stage = "Downloading"
-    ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600)
-    
-    -- For streaming responses, we'll track progress in a separate timer
-    -- Since this is a synchronous function, we'll return immediately and let background monitoring handle progress
+    ngx.log(ngx.INFO, "Started streaming pull timer for " .. full_model_name)
     
     return {
         success = true,
@@ -1271,6 +1276,182 @@ function _M.pull_model(model_name, tag, target_instance)
         instance = target_instance,
         message = "Model pull started successfully"
     }
+end
+
+-- Handle streaming pull request in a timer context
+function _M.handle_streaming_pull(premature, pull_id, full_model_name, target_instance, status_key)
+    if premature then
+        ngx.log(ngx.WARN, "Timer premature exit for pull " .. pull_id)
+        return
+    end
+    
+    ngx.log(ngx.INFO, "Starting streaming pull handler for " .. full_model_name .. " on " .. target_instance)
+    
+    local http = require "resty.http"
+    local cjson = require "cjson"
+    
+    -- Create HTTP client
+    local httpc = http.new()
+    httpc:set_timeout(300000) -- 5 minute timeout for pulls
+    
+    -- Start streaming pull request
+    local res, err = httpc:request({
+        method = "POST",
+        scheme = "http",
+        host = target_instance,
+        port = 11434,
+        path = "/api/pull",
+        body = cjson.encode({ 
+            name = full_model_name,
+            stream = true  -- Enable streaming
+        }),
+        headers = {
+            ["Content-Type"] = "application/json"
+        }
+    })
+    
+    if not res then
+        -- Update pull status to failed
+        local pull_status = {
+            id = pull_id,
+            model = full_model_name,
+            instance = target_instance,
+            status = "failed",
+            error = err or "Connection failed",
+            completed_at = ngx.time()
+        }
+        ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600)
+        _M.unlock_model_loading(full_model_name)
+        return
+    end
+    
+    -- Read streaming response
+    local reader = res.body_reader
+    local buffer_size = 8192
+    local layer_progress = {}
+    local current_status = "in_progress"
+    
+    repeat
+        local buffer, err = reader(buffer_size)
+        if err then
+            ngx.log(ngx.ERR, "Error reading stream: " .. err)
+            break
+        end
+        
+        if buffer then
+            -- Process each line in the buffer
+            for line in buffer:gmatch("[^\n]+") do
+                if line ~= "" then
+                    local success, data = pcall(cjson.decode, line)
+                    if success and data then
+                        -- Update pull status based on Ollama's response
+                        local pull_status_json = ngx.shared.model_mappings:get(status_key)
+                        local pull_status = {}
+                        if pull_status_json then
+                            local decode_success, decoded = pcall(cjson.decode, pull_status_json)
+                            if decode_success and decoded then
+                                pull_status = decoded
+                            end
+                        end
+                        
+                        pull_status.id = pull_id
+                        pull_status.model = full_model_name
+                        pull_status.instance = target_instance
+                        pull_status.status = "in_progress"
+                        
+                        -- Parse different types of status messages from Ollama
+                        if data.status then
+                            pull_status.stage = data.status
+                            
+                            -- Handle different status messages
+                            if data.status:match("pulling") then
+                                -- Format: "pulling <digest>"
+                                if data.digest then
+                                    layer_progress[data.digest] = {
+                                        total = data.total or 0,
+                                        completed = data.completed or 0
+                                    }
+                                end
+                            elseif data.status:match("verifying") then
+                                pull_status.stage = "Verifying layers"
+                            elseif data.status:match("writing") then
+                                pull_status.stage = "Writing manifest"
+                            elseif data.status:match("success") then
+                                current_status = "completed"
+                                pull_status.status = "completed"
+                                pull_status.progress = 100
+                                pull_status.stage = "Completed"
+                                pull_status.completed_at = ngx.time()
+                            end
+                        end
+                        
+                        -- Calculate overall progress from all layers
+                        if data.total and data.completed then
+                            -- Update the specific layer progress
+                            if data.digest then
+                                layer_progress[data.digest] = {
+                                    total = data.total,
+                                    completed = data.completed
+                                }
+                            end
+                            
+                            -- Calculate total progress across all layers
+                            local total_bytes = 0
+                            local completed_bytes = 0
+                            for _, layer in pairs(layer_progress) do
+                                total_bytes = total_bytes + layer.total
+                                completed_bytes = completed_bytes + layer.completed
+                            end
+                            
+                            if total_bytes > 0 then
+                                pull_status.progress = math.floor((completed_bytes / total_bytes) * 100)
+                                pull_status.total = total_bytes
+                                pull_status.completed = completed_bytes
+                            end
+                        end
+                        
+                        -- Store updated status
+                        ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600)
+                        
+                        -- Log progress for debugging
+                        if pull_status.progress and pull_status.progress > 0 then
+                            ngx.log(ngx.INFO, string.format("Pull progress for %s: %d%% (%s)", 
+                                full_model_name, pull_status.progress, pull_status.stage or ""))
+                        end
+                    end
+                end
+            end
+        end
+    until not buffer
+    
+    -- Final status update
+    local final_status_json = ngx.shared.model_mappings:get(status_key)
+    if final_status_json then
+        local decode_success, final_status = pcall(cjson.decode, final_status_json)
+        if decode_success and final_status then
+            if current_status == "completed" then
+                final_status.status = "completed"
+                final_status.progress = 100
+                final_status.stage = "Completed"
+                final_status.completed_at = ngx.time()
+                
+                -- Create model mapping for the successfully pulled model
+                _M.set_model_mapping(full_model_name, target_instance, true)
+            else
+                -- If we didn't get a success status, mark as failed
+                final_status.status = "failed"
+                final_status.error = "Pull ended without success status"
+                final_status.completed_at = ngx.time()
+            end
+            ngx.shared.model_mappings:set(status_key, cjson.encode(final_status), 3600)
+        end
+    end
+    
+    -- Release the loading lock
+    _M.unlock_model_loading(full_model_name)
+    
+    -- Close the connection
+    httpc:close()
 end
 
 -- Get pull status for a specific pull operation
@@ -1293,35 +1474,17 @@ function _M.get_pull_status(pull_id)
         return { error = "Failed to decode pull status", success = false }
     end
     
-    -- Check if the model is now running (pull completed successfully)
+    -- Check if it's been too long and mark as potentially failed
     if status.status == "in_progress" then
-        local model_name = status.model
-        local running_instance = _M.is_model_running_on_any_instance(model_name)
-        
-        if running_instance then
-            -- Model is now running, update status
-            status.status = "completed"
-            status.progress = 100
-            status.stage = "Completed"
+        local elapsed = ngx.time() - status.started_at
+        if elapsed > 1800 then -- 30 minutes
+            status.status = "timeout"
+            status.stage = "Timeout after 30 minutes"
             status.completed_at = ngx.time()
-            
-            -- Update the stored status
             ngx.shared.model_mappings:set(status_key, cjson.encode(status), 3600)
             
             -- Release the loading lock
-            _M.unlock_model_loading(model_name)
-        else
-            -- Check if it's been too long and mark as potentially failed
-            local elapsed = ngx.time() - status.started_at
-            if elapsed > 1800 then -- 30 minutes
-                status.status = "timeout"
-                status.stage = "Timeout after 30 minutes"
-                status.completed_at = ngx.time()
-                ngx.shared.model_mappings:set(status_key, cjson.encode(status), 3600)
-                
-                -- Release the loading lock
-                _M.unlock_model_loading(model_name)
-            end
+            _M.unlock_model_loading(status.model)
         end
     end
     

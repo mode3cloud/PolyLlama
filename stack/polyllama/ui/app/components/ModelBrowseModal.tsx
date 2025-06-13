@@ -128,7 +128,13 @@ export default function ModelBrowseModal({
       const data: PullResponse = await response.json()
 
       if (!data.success) {
-        throw new Error(data.error || 'Failed to start model pull')
+        // Check if it's already being pulled
+        if (data.error && data.error.includes('already being pulled')) {
+          console.log('Model is already being pulled, continuing...')
+          // Don't throw an error, just log it
+        } else {
+          throw new Error(data.error || 'Failed to start model pull')
+        }
       }
 
       if (data.pull_id) {

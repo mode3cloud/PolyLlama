@@ -801,6 +801,37 @@ server {
         proxy_pass http://$target_instance:11434/api/$endpoint;
         include /etc/nginx/proxy_params.conf;
         
+        # Log errors from upstream
+        proxy_intercept_errors on;
+        
+        # Log failed requests with request details
+        log_by_lua_block {
+            local status = ngx.status
+            if status >= 400 then
+                -- Log error with request details
+                local req_body = ngx.req.get_body_data()
+                local truncated_body = req_body
+                if req_body and #req_body > 1000 then
+                    truncated_body = string.sub(req_body, 1, 1000) .. "... (truncated)"
+                end
+                
+                ngx.log(ngx.ERR, string.format(
+                    "Ollama API request failed - Status: %d, Target: %s, Endpoint: %s, Method: %s, Body: %s",
+                    status,
+                    ngx.var.target_instance or "unknown",
+                    ngx.var.endpoint or "unknown",
+                    ngx.req.get_method(),
+                    truncated_body or "no body"
+                ))
+                
+                -- Log response if available
+                local resp_body = ngx.var.upstream_response_body
+                if resp_body then
+                    ngx.log(ngx.ERR, "Ollama error response: " .. resp_body)
+                end
+            end
+        }
+        
         # Add header to indicate which instance served this request
         header_filter_by_lua_block {
             if ngx.var.target_instance and ngx.var.target_instance ~= "" then
@@ -2284,6 +2315,80 @@ server {
                 timestamp = ngx.time(),
                 mapping_count = #keys,
             }))
+        }
+    }
+    
+    # Catch-all for remaining Ollama API endpoints
+    location ~ ^/api/(.*)$ {
+        set $api_endpoint $1;
+        
+        # Check API key if configured
+        access_by_lua_block {
+            local env_vars = ngx.shared.env_vars
+            local api_key = env_vars:get("POLYLLAMA_API_KEY")
+            
+            -- Only enforce API key if one is configured
+            if api_key and api_key ~= "" then
+                local request_key = nil
+                
+                -- Check api-key header
+                local api_key_header = ngx.req.get_headers()["api-key"]
+                if api_key_header == api_key then
+                    request_key = api_key_header
+                end
+                
+                -- Check x-api-key header
+                if not request_key then
+                    local x_api_key_header = ngx.req.get_headers()["x-api-key"]
+                    if x_api_key_header == api_key then
+                        request_key = x_api_key_header
+                    end
+                end
+                
+                -- Check Authorization Bearer token
+                if not request_key then
+                    local auth_header = ngx.req.get_headers()["authorization"]
+                    if auth_header then
+                        local bearer_token = auth_header:match("^Bearer%s+(.+)$")
+                        if bearer_token == api_key then
+                            request_key = bearer_token
+                        end
+                    end
+                end
+                
+                -- If no valid key found, return 401
+                if not request_key then
+                    ngx.status = 401
+                    ngx.header["Content-Type"] = "application/json"
+                    ngx.say('{"error":"Unauthorized - API key required"}')
+                    return ngx.exit(401)
+                end
+            end
+        }
+        
+        # Use load balancing for these endpoints
+        proxy_pass http://polyllama_backend/api/$api_endpoint;
+        include /etc/nginx/proxy_params.conf;
+        
+        # Log errors for debugging
+        log_by_lua_block {
+            local status = ngx.status
+            if status >= 400 then
+                -- Log error with request details
+                local req_body = ngx.req.get_body_data()
+                local truncated_body = req_body
+                if req_body and #req_body > 1000 then
+                    truncated_body = string.sub(req_body, 1, 1000) .. "... (truncated)"
+                end
+                
+                ngx.log(ngx.ERR, string.format(
+                    "Ollama API request failed - Status: %d, Endpoint: /api/%s, Method: %s, Body: %s",
+                    status,
+                    ngx.var.api_endpoint or "unknown",
+                    ngx.req.get_method(),
+                    truncated_body or "no body"
+                ))
+            end
         }
     }
 }

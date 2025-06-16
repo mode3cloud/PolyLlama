@@ -21,3 +21,6 @@ node_modules
 stack/polyllama/ui/tsconfig.tsbuildinfo
 .claude/settings.local.json
 Screenshot*.png
+
+# MCP configuration (contains API keys and secrets)
+mcp-config.json

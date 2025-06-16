@@ -19,6 +19,7 @@ sys.path.insert(0, str(current_dir))
 from api.chat import chat_router
 from api.sessions import sessions_router
 from api.models import models_router
+from api.mcp import mcp_router
 from services.multi_llm_service import MultiLLMService
 from services.message_manager import MessageManager
 from services.mcp_client import MCPClient
@@ -108,6 +109,7 @@ async def health_check():
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(sessions_router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(models_router, prefix="/api/models", tags=["models"])
+app.include_router(mcp_router)  # MCP router already has /api/mcp prefix
 
 
 def main():

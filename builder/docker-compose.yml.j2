@@ -34,6 +34,9 @@ services:
       - OLLAMA_API_BASE=http://router:11434
       - LLM_PROXY_HOST=0.0.0.0
       - LLM_PROXY_PORT=11435
+    volumes:
+      # MCP configuration (optional, create mcp-config.json from mcp-config.example.json)
+      - ../../mcp-config.json:/app/mcp-config.json:ro
     depends_on:
       - router
   
@@ -82,6 +85,8 @@ services:
     volumes:
       - ../../stack/polyllama/model_router.lua:/usr/local/openresty/lualib/model_router.lua
       - ./nginx.conf:/etc/nginx/conf.d/default.conf
+      # MCP configuration (optional, create mcp-config.json from mcp-config.example.json)
+      - ../../mcp-config.json:/app/mcp-config.json:ro
 {% if dev_mode %}
       # Development mode: bind mount the app source
       - ../../stack/polyllama/ui:/app

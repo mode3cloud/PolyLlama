@@ -6,6 +6,29 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     
+    // If MCP tools are enabled, fetch tools from llm-proxy
+    if (body.enableMCPTools && !body.tools) {
+      console.log('[MCP] Tools requested, fetching from llm-proxy...')
+      
+      try {
+        const toolsResponse = await fetch(`${LLM_PROXY_URL}/api/mcp/tools/formatted`)
+        if (toolsResponse.ok) {
+          const toolsData = await toolsResponse.json()
+          if (toolsData.tools && toolsData.tools.length > 0) {
+            body.tools = toolsData.tools
+            console.log(`[MCP] Injected ${toolsData.tools.length} tools into request`)
+          } else {
+            console.log('[MCP] No tools available from llm-proxy')
+          }
+        } else {
+          console.warn('[MCP] Failed to fetch tools from llm-proxy:', toolsResponse.status)
+        }
+      } catch (error) {
+        console.warn('[MCP] Error fetching tools from llm-proxy:', error)
+        // Continue without MCP tools
+      }
+    }
+    
     const response = await fetch(`${LLM_PROXY_URL}/api/chat/completions`, {
       method: 'POST',
       headers: {

@@ -55,6 +55,11 @@ The system exposes a unified interface on port `:11434`:
 - The UI at `/ui` can call both `/api/*` (Ollama) and `/ui/api/*` (LLM proxy) endpoints
 - LLM proxy may internally call back to Ollama via `localhost:11434/api/*`
 
+**API Key and Authentication Patterns:**
+- When accessing `/api/*` endpoints: This is proxied by NGINX lua to a specific backend Ollama instance and MUST be protected by the API-KEY header. It should NEVER be removed. We use this `/api/*` as if it were a transparent single Ollama instance, but it is exposed publicly, so enforcement of an API-KEY is critical.
+
+- When making client calls to `/ui/api/*`: These are NextJS SSE endpoints protected with a JWT, using OAuth to provide identity confirmation before issuing a JWT. Even though we have passed JWT auth when calling `/ui/api/*`, any internal calls to `/api/*` for Ollama must also include the API-KEY to prevent compromising the security of that as an open endpoint.
+
 ## Common Commands
 
 ### Launch and Management

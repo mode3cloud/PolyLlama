@@ -17,8 +17,8 @@ from mcp.client.stdio import stdio_client
 logger = logging.getLogger(__name__)
 
 
-class MCPServerProcess:
-    """Manages a single MCP server process."""
+class MCPServerConnection:
+    """Manages a connection to an MCP server."""
     
     def __init__(self, name: str, config: Dict[str, Any]):
         self.name = name
@@ -26,10 +26,12 @@ class MCPServerProcess:
         self.session: Optional[ClientSession] = None
         self.read_stream = None
         self.write_stream = None
-        self._transport = None
+        self._task = None
+        self._transport_cm = None
+        self._running = False
         
-    async def start(self):
-        """Start the MCP server process and connect to it."""
+    async def _run_server(self):
+        """Run the server connection in a separate task."""
         try:
             # Build the command
             command = self.config.get("command", "")
@@ -43,38 +45,71 @@ class MCPServerProcess:
                 env=env
             )
             
-            # Start the server - stdio_client returns an async context manager
-            self._transport = stdio_client(server_params)
-            transport_result = await self._transport.__aenter__()
+            # Start the server using async with
+            self._transport_cm = stdio_client(server_params)
+            async with self._transport_cm as (read_stream, write_stream):
+                self.read_stream = read_stream
+                self.write_stream = write_stream
+                
+                # Create and initialize the session
+                self.session = ClientSession(self.read_stream, self.write_stream)
+                await self.session.initialize()
+                
+                logger.info(f"Started MCP server '{self.name}' successfully")
+                self._running = True
+                
+                # Keep the connection alive
+                while self._running:
+                    await asyncio.sleep(0.1)
             
-            # Extract the read and write streams
-            if isinstance(transport_result, tuple) and len(transport_result) == 2:
-                self.read_stream, self.write_stream = transport_result
-            else:
-                raise ValueError(f"Unexpected transport result type: {type(transport_result)}")
-            
-            # Create and initialize the session
-            self.session = ClientSession(self.read_stream, self.write_stream)
-            await self.session.initialize()
-            
-            logger.info(f"Started MCP server '{self.name}' successfully")
-            
-        except Exception as e:
-            logger.error(f"Failed to start MCP server '{self.name}': {e}")
+        except asyncio.CancelledError:
+            logger.info(f"MCP server '{self.name}' task cancelled")
             raise
+        except Exception as e:
+            logger.error(f"Failed to run MCP server '{self.name}': {e}")
+            raise
+        finally:
+            self._running = False
+            if self.session:
+                try:
+                    # ClientSession doesn't have a close method, just set to None
+                    self.session = None
+                except Exception as e:
+                    logger.error(f"Error cleaning up session for '{self.name}': {e}")
+    
+    async def start(self, timeout: float = 10.0):
+        """Start the MCP server process with timeout."""
+        # Create the task
+        self._task = asyncio.create_task(self._run_server())
+        
+        # Wait for initialization with timeout
+        start_time = asyncio.get_event_loop().time()
+        while not self._running and not self._task.done():
+            if asyncio.get_event_loop().time() - start_time > timeout:
+                # Cancel the task and clean up
+                self._task.cancel()
+                try:
+                    await self._task
+                except asyncio.CancelledError:
+                    pass
+                raise asyncio.TimeoutError(f"Timeout starting MCP server '{self.name}'")
+            
+            # Check if task failed
+            if self._task.done():
+                # Re-raise the exception from the task
+                await self._task
+            
+            await asyncio.sleep(0.1)
     
     async def stop(self):
         """Stop the MCP server process."""
-        if self.session:
-            await self.session.close()
-            self.session = None
-        
-        if self._transport:
+        self._running = False
+        if self._task and not self._task.done():
+            self._task.cancel()
             try:
-                await self._transport.__aexit__(None, None, None)
-            except Exception as e:
-                logger.error(f"Error closing transport for '{self.name}': {e}")
-            self._transport = None
+                await self._task
+            except asyncio.CancelledError:
+                pass
             
         logger.info(f"Stopped MCP server '{self.name}'")
     
@@ -116,7 +151,7 @@ class MCPManager:
     
     def __init__(self, config_path: str = "/app/mcp-config.json"):
         self.config_path = config_path
-        self.servers: Dict[str, MCPServerProcess] = {}
+        self.servers: Dict[str, MCPServerConnection] = {}
         self.tools_cache: List[Dict[str, Any]] = []
         self._initialized = False
         
@@ -139,9 +174,8 @@ class MCPManager:
             mcp_servers = config.get("mcpServers", {})
             for server_name, server_config in mcp_servers.items():
                 try:
-                    server = MCPServerProcess(server_name, server_config)
-                    # Use asyncio.wait_for with timeout to avoid blocking
-                    await asyncio.wait_for(server.start(), timeout=10.0)
+                    server = MCPServerConnection(server_name, server_config)
+                    await server.start(timeout=10.0)
                     self.servers[server_name] = server
                     logger.info(f"Initialized MCP server: {server_name}")
                 except asyncio.TimeoutError:

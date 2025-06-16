@@ -2318,8 +2318,8 @@ server {
         }
     }
     
-    # Catch-all for remaining Ollama API endpoints
-    location ~ ^/api/(.*)$ {
+    # Catch-all for remaining Ollama API endpoints (excluding /api/polyllama/*)
+    location ~ ^/api/(?!polyllama/)(.*)$ {
         set $api_endpoint $1;
         
         # Check API key if configured

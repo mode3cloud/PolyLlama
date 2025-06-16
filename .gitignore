@@ -20,3 +20,4 @@ node_modules
 .next
 stack/polyllama/ui/tsconfig.tsbuildinfo
 .claude/settings.local.json
+mcp-config.json

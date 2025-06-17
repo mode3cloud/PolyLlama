@@ -138,6 +138,12 @@ class MultiLLMService:
             "stream": True,
             **filtered_kwargs,
         }
+        
+        # Add extra headers for Ollama models to pass API key
+        if self.model.startswith("ollama/") and os.getenv("POLYLLAMA_API_KEY"):
+            completion_kwargs["extra_headers"] = {
+                "Authorization": f"Bearer {os.getenv('POLYLLAMA_API_KEY')}"
+            }
 
         assistant_content = []
 
@@ -295,7 +301,7 @@ class MultiLLMService:
                 return kwargs
 
             # Always allow these common parameters
-            always_allowed = {"api_base", "api_key", "api_version"}
+            always_allowed = {"api_base", "api_key", "api_version", "extra_headers"}
             supported_set = set(supported_params) | always_allowed
 
             filtered = {k: v for k, v in kwargs.items() if k in supported_set}

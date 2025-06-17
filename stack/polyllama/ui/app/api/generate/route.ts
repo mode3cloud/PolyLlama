@@ -6,6 +6,7 @@ export async function POST(request: NextRequest) {
   // This is a standard Ollama endpoint
   return proxyToRouter('/api/generate', {
     method: 'POST',
-    body
+    body,
+    request
   })
 }

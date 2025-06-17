@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
+import AuthButton from './AuthButton'
 
 interface HeaderProps {
   onRefresh: () => void;
@@ -72,6 +73,7 @@ export default function Header({ onRefresh }: HeaderProps) {
             </span>
             <span>Refresh</span>
           </button>
+          <AuthButton />
         </div>
       </div>
     </header>

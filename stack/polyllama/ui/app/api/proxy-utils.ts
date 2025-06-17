@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { verifyAuth } from './auth-utils'
 
 export async function proxyToRouter(
   endpoint: string,
@@ -6,8 +7,19 @@ export async function proxyToRouter(
     method?: string
     body?: any
     headers?: Record<string, string>
+    request?: NextRequest
   } = {}
 ) {
+  // Verify authentication if request is provided
+  if (options.request) {
+    const auth = verifyAuth(options.request)
+    if (!auth.valid) {
+      return NextResponse.json(
+        { error: 'Authentication required' },
+        { status: 401 }
+      )
+    }
+  }
   const url = `http://router:11434${endpoint}`
   
   const headers: Record<string, string> = {

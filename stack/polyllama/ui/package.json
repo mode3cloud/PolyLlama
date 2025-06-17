@@ -8,6 +8,8 @@
     "start": "next start -p 3000"
   },
   "dependencies": {
+    "@types/jsonwebtoken": "^9.0.10",
+    "jsonwebtoken": "^9.0.2",
     "next": "15.2.4",
     "react": "^18",
     "react-dom": "^18"

@@ -6,6 +6,7 @@ import SystemOverview from './components/SystemOverview'
 import ModelManagement from './components/ModelManagement'
 import LoadModelModal from './components/LoadModelModal'
 import { Instance, Model, RunningModels, InstanceStatus, GPUConfig } from './types'
+import { fetchWithAuth } from './lib/fetchWithAuth'
 
 export default function Home() {
   // State
@@ -22,7 +23,7 @@ export default function Home() {
   // Initialize instances
   const initializeInstances = useCallback(async () => {
     try {
-      const response = await fetch('/ui/api/instance-count')
+      const response = await fetchWithAuth('/ui/api/instance-count')
       if (response.ok) {
         const data = await response.json()
         const instanceCount = data.instance_count || 2
@@ -42,12 +43,12 @@ export default function Home() {
   const refreshData = useCallback(async () => {
     try {
       const [statusRes, gpuConfigRes, modelsRes, runningRes, mappingsRes, contextsRes] = await Promise.all([
-        fetch('/ui/api/instance-status'),
-        fetch('/ui/api/gpu-config'),
-        fetch('/ui/api/tags'),
-        fetch('/ui/api/running-models'),
-        fetch('/ui/api/model-mappings'),
-        fetch('/ui/api/get-contexts')
+        fetchWithAuth('/ui/api/instance-status'),
+        fetchWithAuth('/ui/api/gpu-config'),
+        fetchWithAuth('/ui/api/tags'),
+        fetchWithAuth('/ui/api/running-models'),
+        fetchWithAuth('/ui/api/model-mappings'),
+        fetchWithAuth('/ui/api/get-contexts')
       ])
 
       if (statusRes.ok) {
@@ -96,12 +97,12 @@ export default function Home() {
 
       if (hasRunningModels && hasMissingContexts) {
         try {
-          const syncResponse = await fetch('/ui/api/sync-contexts')
+          const syncResponse = await fetchWithAuth('/ui/api/sync-contexts')
           if (syncResponse.ok) {
             const syncData = await syncResponse.json()
             console.log(`Synced context sizes for ${syncData.synced_count} models`)
             // Re-fetch contexts after sync
-            const contextsRes2 = await fetch('/ui/api/get-contexts')
+            const contextsRes2 = await fetchWithAuth('/ui/api/get-contexts')
             if (contextsRes2.ok) {
               const data = await contextsRes2.json()
               setModelContexts(data.contexts || {})
@@ -135,7 +136,7 @@ export default function Home() {
       const instances = runningModels[modelName] || []
 
       for (const instanceName of instances) {
-        const response = await fetch('/ui/api/generate', {
+        const response = await fetchWithAuth('/ui/api/generate', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -230,7 +231,7 @@ export default function Home() {
               payload.options = { num_ctx: parseInt(contextLength) }
             }
 
-            const response = await fetch('/ui/api/generate', {
+            const response = await fetchWithAuth('/ui/api/generate', {
               method: 'POST',
               headers: {
                 'Content-Type': 'application/json',

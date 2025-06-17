@@ -379,6 +379,71 @@ local function get_cpu_routing_mode()
     return env_vars:get("CPU_ROUTING_MODE") or "prefer_gpu"
 end
 
+-- Cache for instance availability status
+local instance_availability_cache = {
+    data = {},
+    timestamp = 0,
+    ttl = 10  -- Cache TTL in seconds
+}
+
+-- Check if an instance is available/online
+local function is_instance_available(instance_name)
+    -- Check cache first
+    local current_time = ngx.time()
+    if current_time - instance_availability_cache.timestamp < instance_availability_cache.ttl then
+        local cached_status = instance_availability_cache.data[instance_name]
+        if cached_status ~= nil then
+            return cached_status
+        end
+    end
+    
+    -- Not in cache or cache expired, check availability
+    local http = require "resty.http"
+    local httpc = http.new()
+    httpc:set_timeout(2000)  -- 2 second timeout
+    
+    local res, err = httpc:request_uri("http://" .. instance_name .. ":11434/api/version", {
+        method = "GET"
+    })
+    
+    local is_available = false
+    if res and res.status == 200 then
+        is_available = true
+    else
+        ngx.log(ngx.WARN, "Instance " .. instance_name .. " is not available: " .. (err or "HTTP " .. (res and res.status or "unknown")))
+    end
+    
+    -- Update cache
+    if current_time - instance_availability_cache.timestamp >= instance_availability_cache.ttl then
+        -- Reset cache if expired
+        instance_availability_cache.data = {}
+        instance_availability_cache.timestamp = current_time
+    end
+    instance_availability_cache.data[instance_name] = is_available
+    
+    return is_available
+end
+
+-- Get available instances by type
+local function get_available_instances_by_type(instances)
+    local available_gpu = {}
+    local available_cpu = {}
+    
+    for _, info in ipairs(instances) do
+        if is_instance_available(info.instance) then
+            if info.type == "gpu" then
+                table.insert(available_gpu, info)
+            elseif info.type == "cpu" then
+                table.insert(available_cpu, info)
+            end
+        else
+            ngx.log(ngx.INFO, "Skipping unavailable instance: " .. info.instance .. " (type: " .. info.type .. ")")
+        end
+    end
+    
+    return available_gpu, available_cpu
+end
+
 -- Find least loaded instance and assign model to it
 function _M.assign_model_to_least_loaded_instance(model_name)
     if not model_name then
@@ -387,11 +452,9 @@ function _M.assign_model_to_least_loaded_instance(model_name)
     
     -- Get current model counts per instance
     local instance_count = get_instance_count()
-    local instance_info = {}
-    local gpu_instances = {}
-    local cpu_instances = {}
+    local all_instances = {}
     
-    -- Collect instance information and categorize by type
+    -- Collect instance information
     for i=1,instance_count do
         local instance_name = "polyllama" .. i
         local instance_type = get_instance_type(instance_name)
@@ -400,13 +463,7 @@ function _M.assign_model_to_least_loaded_instance(model_name)
             count = 0,
             type = instance_type
         }
-        instance_info[i] = info
-        
-        if instance_type == "gpu" then
-            table.insert(gpu_instances, info)
-        elseif instance_type == "cpu" then
-            table.insert(cpu_instances, info)
-        end
+        table.insert(all_instances, info)
     end
     
     -- Count models on each instance
@@ -416,46 +473,62 @@ function _M.assign_model_to_least_loaded_instance(model_name)
         if not string.match(key, "^loading:") and not string.match(key, "^ctx:") then
             local instance = _M.get_safe_instance_mapping(key)
             if instance then
-                local instance_num = tonumber(string.match(instance, "polyllama(%d+)"))
-                if instance_num and instance_info[instance_num] then
-                    instance_info[instance_num].count = instance_info[instance_num].count + 1
+                -- Find and update count for this instance
+                for _, info in ipairs(all_instances) do
+                    if info.instance == instance then
+                        info.count = info.count + 1
+                        break
+                    end
                 end
             end
         end
     end
     
+    -- Get available instances by type
+    local available_gpu, available_cpu = get_available_instances_by_type(all_instances)
+    
     -- Get CPU routing mode
     local cpu_routing_mode = get_cpu_routing_mode()
-    ngx.log(ngx.DEBUG, "CPU routing mode: " .. cpu_routing_mode .. ", GPU instances: " .. #gpu_instances .. ", CPU instances: " .. #cpu_instances)
+    ngx.log(ngx.INFO, "CPU routing mode: " .. cpu_routing_mode .. 
+            ", Available GPU instances: " .. #available_gpu .. 
+            ", Available CPU instances: " .. #available_cpu)
     
-    -- Determine which instances to consider based on routing mode
+    -- Determine which instances to consider based on routing mode and availability
     local candidates = {}
     
     if cpu_routing_mode == "prefer_gpu" then
         -- Prefer GPU instances if available
-        if #gpu_instances > 0 then
-            candidates = gpu_instances
-            ngx.log(ngx.DEBUG, "Using GPU instances for model assignment (prefer_gpu mode)")
-        elseif #cpu_instances > 0 then
-            candidates = cpu_instances
-            ngx.log(ngx.INFO, "No GPU instances available, falling back to CPU instances")
+        if #available_gpu > 0 then
+            candidates = available_gpu
+            ngx.log(ngx.INFO, "Routing to available GPU instances (prefer_gpu mode)")
+        elseif #available_cpu > 0 then
+            candidates = available_cpu
+            ngx.log(ngx.WARN, "No available GPU instances, falling back to CPU instances")
         else
-            candidates = instance_info
-            ngx.log(ngx.WARN, "No typed instances found, using all instances")
+            ngx.log(ngx.ERR, "No available instances (GPU or CPU) for model assignment!")
+            return nil
         end
     elseif cpu_routing_mode == "balanced" then
-        -- Consider all instances equally
-        for _, info in ipairs(instance_info) do
+        -- Consider all available instances equally
+        for _, info in ipairs(available_gpu) do
             table.insert(candidates, info)
         end
-        ngx.log(ngx.DEBUG, "Using all instances for model assignment (balanced mode)")
+        for _, info in ipairs(available_cpu) do
+            table.insert(candidates, info)
+        end
+        if #candidates > 0 then
+            ngx.log(ngx.INFO, "Using all available instances for model assignment (balanced mode)")
+        else
+            ngx.log(ngx.ERR, "No available instances for model assignment in balanced mode!")
+            return nil
+        end
     elseif cpu_routing_mode == "gpu_only" then
         -- Only use GPU instances
-        if #gpu_instances > 0 then
-            candidates = gpu_instances
-            ngx.log(ngx.DEBUG, "Using GPU instances only (gpu_only mode)")
+        if #available_gpu > 0 then
+            candidates = available_gpu
+            ngx.log(ngx.INFO, "Using GPU instances only (gpu_only mode)")
         else
-            ngx.log(ngx.ERR, "No GPU instances available in gpu_only mode!")
+            ngx.log(ngx.ERR, "No available GPU instances in gpu_only mode!")
             return nil
         end
     end
@@ -473,7 +546,8 @@ function _M.assign_model_to_least_loaded_instance(model_name)
     -- Store the new mapping
     _M.set_model_mapping(model_name, least_loaded, false)
     ngx.log(ngx.INFO, "Assigned model " .. model_name .. " to " .. least_loaded .. 
-            " (type: " .. instance_type .. ", has " .. candidates[1].count .. " models)")
+            " (type: " .. instance_type .. ", has " .. candidates[1].count .. " models, " ..
+            #candidates .. " available " .. instance_type .. " instance(s))")
   
     return least_loaded
 end

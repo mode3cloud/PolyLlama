@@ -18,6 +18,8 @@ PolyLlama is a dynamic multi-instance Ollama orchestration system that automatic
   - Least-loaded instance assignment for new models
   - Model state tracking via shared memory (`model_mappings`)
   - Dynamic upstream generation based on instance count
+  - Instance availability checking before routing
+  - CPU routing modes: `prefer_gpu` (default), `balanced`, `gpu_only`
 - **Instance Naming**: Uses `polyllama1`, `polyllama2`, etc. (not `ollama1`)
 
 ### CRITICAL: UI Routing Architecture

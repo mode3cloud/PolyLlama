@@ -1,0 +1,17 @@
+{
+  "plugins": [
+    "import"
+  ],
+  "rules": {
+    "import/no-cycle": [
+      2,
+      {
+        "maxDepth": 1
+      }
+    ]
+  },
+  "extends": [
+    "next/core-web-vitals",
+    "next/typescript"
+  ]
+}

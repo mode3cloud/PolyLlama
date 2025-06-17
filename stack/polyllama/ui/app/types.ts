@@ -109,6 +109,8 @@ export interface PullStatus {
   completed_at?: number;
   stage: string;
   error?: string;
+  completed?: number; // bytes downloaded
+  total?: number; // total bytes to download
 }
 
 export interface PullResponse {

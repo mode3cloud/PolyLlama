@@ -1266,7 +1266,7 @@ function _M.parse_ollama_search_html(html)
     return models
 end
 
--- Pull a model from Ollama registry
+-- Pull a model from Ollama registry with streaming progress
 function _M.pull_model(model_name, tag, target_instance)
     local http = require "resty.http"
     local cjson = require "cjson"
@@ -1315,23 +1315,15 @@ function _M.pull_model(model_name, tag, target_instance)
     local status_key = "pull_status:" .. pull_id
     ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600) -- 1 hour TTL
     
-    -- Create HTTP client
-    local httpc = http.new()
-    httpc:set_timeout(300000) -- 5 minute timeout for pulls
+    -- Start background pull with streaming
+    local ok, err = ngx.timer.at(0, function()
+        _M.execute_streaming_pull(pull_id, full_model_name, target_instance)
+    end)
     
-    -- Make pull request to the target instance
-    local res, err = httpc:request_uri("http://" .. target_instance .. ":11434/api/pull", {
-        method = "POST",
-        body = cjson.encode({ name = full_model_name }),
-        headers = {
-            ["Content-Type"] = "application/json"
-        }
-    })
-    
-    if not res or res.status ~= 200 then
+    if not ok then
         -- Update pull status to failed
         pull_status.status = "failed"
-        pull_status.error = err or ("HTTP " .. (res and res.status or "unknown"))
+        pull_status.error = "Failed to start background pull: " .. (err or "unknown")
         pull_status.completed_at = ngx.time()
         ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600)
         
@@ -1345,14 +1337,6 @@ function _M.pull_model(model_name, tag, target_instance)
         }
     end
     
-    -- Update pull status to in progress
-    pull_status.status = "in_progress"
-    pull_status.stage = "Downloading"
-    ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600)
-    
-    -- For streaming responses, we'll track progress in a separate timer
-    -- Since this is a synchronous function, we'll return immediately and let background monitoring handle progress
-    
     return {
         success = true,
         pull_id = pull_id,
@@ -1360,6 +1344,146 @@ function _M.pull_model(model_name, tag, target_instance)
         instance = target_instance,
         message = "Model pull started successfully"
     }
+end
+
+-- Execute streaming pull in background
+function _M.execute_streaming_pull(pull_id, model_name, target_instance)
+    local http = require "resty.http"
+    local cjson = require "cjson"
+    
+    local status_key = "pull_status:" .. pull_id
+    local httpc = http.new()
+    httpc:set_timeout(300000) -- 5 minute timeout
+    
+    -- Connect to the target instance
+    local ok, err = httpc:connect("polyllama" .. string.match(target_instance, "(%d+)"), 11434)
+    if not ok then
+        local pull_status = {
+            id = pull_id,
+            model = model_name,
+            instance = target_instance,
+            status = "failed",
+            error = "Failed to connect: " .. (err or "unknown"),
+            completed_at = ngx.time(),
+            progress = 0
+        }
+        ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600)
+        _M.unlock_model_loading(model_name)
+        return
+    end
+    
+    -- Send pull request
+    local res, err = httpc:request({
+        path = "/api/pull",
+        method = "POST",
+        body = cjson.encode({ name = model_name }),
+        headers = {
+            ["Content-Type"] = "application/json",
+            ["Host"] = target_instance
+        }
+    })
+    
+    if not res then
+        local pull_status = {
+            id = pull_id,
+            model = model_name,
+            instance = target_instance,
+            status = "failed",
+            error = "Request failed: " .. (err or "unknown"),
+            completed_at = ngx.time(),
+            progress = 0
+        }
+        ngx.shared.model_mappings:set(status_key, cjson.encode(pull_status), 3600)
+        _M.unlock_model_loading(model_name)
+        return
+    end
+    
+    -- Read streaming response
+    local reader = res.body_reader
+    local buffer = ""
+    
+    while true do
+        local chunk, err = reader(8192) -- Read in 8KB chunks
+        if err then
+            ngx.log(ngx.ERR, "Error reading stream: ", err)
+            break
+        end
+        
+        if not chunk then
+            break
+        end
+        
+        buffer = buffer .. chunk
+        
+        -- Process complete JSON lines
+        while true do
+            local newline_pos = string.find(buffer, "\n")
+            if not newline_pos then
+                break
+            end
+            
+            local line = string.sub(buffer, 1, newline_pos - 1)
+            buffer = string.sub(buffer, newline_pos + 1)
+            
+            if line ~= "" then
+                local success, data = pcall(cjson.decode, line)
+                if success and data then
+                    -- Update pull status based on stream data
+                    local current_status = ngx.shared.model_mappings:get(status_key)
+                    if current_status then
+                        local status = cjson.decode(current_status)
+                        
+                        -- Update status based on Ollama response
+                        if data.status then
+                            status.stage = data.status
+                        end
+                        
+                        if data.completed and data.total then
+                            status.completed = data.completed
+                            status.total = data.total
+                            status.progress = math.floor((data.completed / data.total) * 100)
+                        end
+                        
+                        if data.error then
+                            status.status = "failed"
+                            status.error = data.error
+                            status.completed_at = ngx.time()
+                        elseif status.stage == "success" then
+                            status.status = "completed"
+                            status.progress = 100
+                            status.completed_at = ngx.time()
+                        else
+                            status.status = "in_progress"
+                        end
+                        
+                        ngx.shared.model_mappings:set(status_key, cjson.encode(status), 3600)
+                        
+                        -- If completed or failed, release lock
+                        if status.status == "completed" or status.status == "failed" then
+                            _M.unlock_model_loading(model_name)
+                            
+                            -- If completed successfully, update model mapping
+                            if status.status == "completed" then
+                                _M.set_model_instance_mapping(model_name, target_instance)
+                            end
+                            break
+                        end
+                    end
+                end
+            end
+        end
+        
+        -- Check if we should stop processing
+        local current_status = ngx.shared.model_mappings:get(status_key)
+        if current_status then
+            local status = cjson.decode(current_status)
+            if status.status == "completed" or status.status == "failed" then
+                break
+            end
+        end
+    end
+    
+    httpc:close()
 end
 
 -- Get pull status for a specific pull operation
@@ -1424,6 +1548,7 @@ end
 function _M.get_all_pull_statuses()
     local cjson = require "cjson"
     local pull_statuses = {}
+    local current_time = ngx.time()
     
     local keys = ngx.shared.model_mappings:get_keys() or {}
     for _, key in ipairs(keys) do
@@ -1432,7 +1557,13 @@ function _M.get_all_pull_statuses()
             if status_json then
                 local success, status = pcall(cjson.decode, status_json)
                 if success and status then
-                    table.insert(pull_statuses, status)
+                    -- Clean up old completed/failed pulls (older than 5 minutes)
+                    if (status.status == "completed" or status.status == "failed") and 
+                       status.completed_at and (current_time - status.completed_at > 300) then
+                        ngx.shared.model_mappings:delete(key)
+                    else
+                        table.insert(pull_statuses, status)
+                    end
                 end
             end
         end

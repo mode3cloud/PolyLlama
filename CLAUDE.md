@@ -130,6 +130,24 @@ Models are routed using this hierarchy:
 3. **Least loaded assignment**: Assign to instance with fewest models
 4. **Loading locks**: Prevent duplicate model loading across instances
 
+### CPU Routing Behavior
+
+The system supports mixed GPU+CPU deployments with configurable routing behavior:
+
+- **Default (`prefer_gpu`)**: Routes to GPU instances when available, only uses CPU instances as fallback
+- **Balanced mode**: Treats all instances equally for load distribution
+- **GPU-only mode**: Never routes to CPU instances automatically
+
+When GPU instances are available, CPU instances are NOT automatically used unless:
+1. All GPU instances are offline/unavailable
+2. User explicitly maps a model to CPU via UI
+3. Routing mode is set to `balanced`
+
+Environment variables:
+- `POLYLLAMA_CPU_INSTANCES`: Number of CPU instances to create (default: 0)
+- `POLYLLAMA_MIXED_MODE`: Enable mixed GPU+CPU deployment (default: false)
+- `POLYLLAMA_CPU_ROUTING_MODE`: Routing preference (default: prefer_gpu)
+
 ## Key Files for Modifications
 
 ### Hardware Detection
@@ -148,6 +166,7 @@ Models are routed using this hierarchy:
 ### Testing
 - `tests/test_generation.py`: Main test scenarios (2-6 GPU groups, CPU-only)
 - `tests/test_edge_cases.py`: Edge cases (single GPU, large configs, empty groups)
+- `tests/test_cpu_routing.py`: CPU routing behavior and instance availability
 
 ## Debugging Tips
 

@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { PullStatus, PullStatusesResponse } from '../types'
-import { getApiUrl } from '../utils'
 
 interface ModelPullManagerProps {
   isVisible: boolean;
@@ -24,7 +23,7 @@ export default function ModelPullManager({
   const fetchPullStatuses = useCallback(async () => {
     try {
       setIsLoading(true)
-      const response = await fetch(getApiUrl('/api/ui/pull-statuses'))
+      const response = await fetch('/ui/api/pull-statuses')
       
       if (!response.ok) {
         throw new Error(`Failed to fetch pull statuses: ${response.statusText}`)

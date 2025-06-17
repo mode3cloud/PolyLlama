@@ -5,7 +5,6 @@ import { Instance, RunningModels } from '../types'
 import PolyLlamaInstance from './PolyLlamaInstance'
 import { GPUDeviceInfo } from './GPUDevice'
 import { useGPUMetrics } from '../hooks/useGPUMetrics'
-import { getApiUrl } from '../utils'
 
 interface FlowChartProps {
   instances: Instance[];
@@ -32,7 +31,7 @@ export default function FlowChart({ instances, instanceStatuses, runningModels, 
 
   useEffect(() => {
     // Fetch GPU configuration from backend
-    fetch(getApiUrl('/api/ui/gpu-config'))
+    fetch('/ui/api/gpu-config')
       .then(res => res.json())
       .then(data => setGpuConfig(data))
       .catch(err => console.error('Failed to fetch GPU config:', err))
@@ -44,7 +43,7 @@ export default function FlowChart({ instances, instanceStatuses, runningModels, 
     }
 
     try {
-      const response = await fetch(getApiUrl('/api/generate'), {
+      const response = await fetch('/ui/api/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

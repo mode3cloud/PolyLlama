@@ -20,6 +20,34 @@ PolyLlama is a dynamic multi-instance Ollama orchestration system that automatic
   - Dynamic upstream generation based on instance count
 - **Instance Naming**: Uses `polyllama1`, `polyllama2`, etc. (not `ollama1`)
 
+### CRITICAL: UI Routing Architecture
+The system has two distinct API paths with different purposes and access patterns:
+
+1. **`/api/*` - Ollama-Compatible API** (External Access)
+   - Direct Ollama API endpoints for external applications
+   - Protected by API key authentication (if configured)
+   - Accessed at `http://localhost:11434/api/*`
+   - Used by: External tools, CLI clients, other applications
+   - NEVER accessed directly by the Next.js UI client
+
+2. **`/ui/api/*` - Next.js Server-Side API** (UI Only)
+   - Server-side rendered API routes for the Next.js UI
+   - Protected by OAuth/JWT authentication
+   - Handles all UI client requests
+   - May proxy to Ollama API or use LiteLLM module
+   - When proxying to Ollama API, provides API key server-side
+
+**Client-Side Routing Rules:**
+- UI client code MUST only call `/api/*` routes (relative paths)
+- These resolve to Next.js API routes, NOT nginx endpoints
+- The `getApiUrl()` utility should use relative paths, not `http://localhost:11434`
+- All authentication happens server-side in Next.js
+
+**Server-Side Routing:**
+- Next.js API routes proxy to `http://router:11434/api/polyllama/*` internally
+- API key is added server-side when calling nginx endpoints
+- Uses Docker network names (e.g., `http://router:11434`, not `localhost`)
+
 ### Template System
 The system uses a custom template renderer (not Jinja2) that handles:
 - `{% for instance in ollama_instances %}` loops

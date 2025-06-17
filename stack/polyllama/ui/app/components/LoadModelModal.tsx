@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import { Instance, InstanceStatus, GPUConfig, RunningModels } from '../types'
 import InstanceLoadButton from './InstanceLoadButton'
-import { getApiUrl } from '../utils'
 
 interface LoadModelModalProps {
   isOpen: boolean;
@@ -40,7 +39,7 @@ export default function LoadModelModal({
 
   const fetchModelDetails = async () => {
     try {
-      const response = await fetch(getApiUrl('/api/ui/model-details'), {
+      const response = await fetch('/ui/api/model-details', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: modelName })

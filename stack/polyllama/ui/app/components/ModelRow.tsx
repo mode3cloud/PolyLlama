@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from 'react'
 import { Model } from '../types'
-import { getApiUrl } from '../utils'
 
 interface ModelRowProps {
   model: Model;
@@ -37,7 +36,7 @@ export default function ModelRow({
   const fetchModelDetails = async () => {
     setLoadingDetails(true)
     try {
-      const response = await fetch(getApiUrl('/api/ui/model-details'), {
+      const response = await fetch('/ui/api/model-details', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: model.name })

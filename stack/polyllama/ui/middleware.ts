@@ -16,7 +16,7 @@ export function middleware(request: NextRequest) {
   }
 
   // Check for auth token
-  const token = request.cookies.get('auth-token')?.value
+  const token = request.cookies.get('auth_token_server')?.value
 
   // For API routes, check if token exists (actual verification happens in the API routes)
   if (request.nextUrl.pathname.startsWith('/ui/api/')) {

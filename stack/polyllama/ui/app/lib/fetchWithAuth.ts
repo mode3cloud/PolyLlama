@@ -5,8 +5,14 @@ type FetchOptions = RequestInit & {
 export async function fetchWithAuth(url: string, options: FetchOptions = {}): Promise<Response> {
   const { skipAuth = false, ...fetchOptions } = options
 
+  // Ensure credentials are included for cookie-based auth
+  const requestOptions: RequestInit = {
+    ...fetchOptions,
+    credentials: 'same-origin', // Include cookies for same-origin requests
+  }
+
   // Make the request
-  const response = await fetch(url, fetchOptions)
+  const response = await fetch(url, requestOptions)
 
   // If we get a 401 and auth handling is not skipped
   if (response.status === 401 && !skipAuth) {

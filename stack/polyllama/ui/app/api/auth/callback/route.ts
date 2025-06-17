@@ -83,29 +83,30 @@ export async function GET(req: NextRequest) {
     );
 
     console.log("User authenticated:", userName);
-    const cookieStore = await cookies();
 
-    // Set access token (15 minutes)
-    cookieStore.set("auth_token_server", accessToken, {
+    // Create redirect response
+    const redirectResponse = baseDomain 
+      ? NextResponse.redirect(`${baseDomain}/ui`)
+      : NextResponse.redirect(new URL("/ui", req.url));
+    
+    // Set cookies on the redirect response
+    redirectResponse.cookies.set("auth_token_server", accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
       maxAge: 15 * 60, // 15 minutes in seconds
     });
-
-    // Set refresh token (7 days)
-    cookieStore.set("refresh_token_server", refreshToken, {
+    
+    redirectResponse.cookies.set("refresh_token_server", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
       maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
     });
-
-    // Redirect to home page after successful authentication
-    const redirectUrl = baseDomain ? `${baseDomain}/ui` : "/ui";
-    return NextResponse.redirect(new URL(redirectUrl, req.url));
+    
+    return redirectResponse;
   } catch (error: any) {
     console.error("Callback error:", error);
     console.error("Error details:", {

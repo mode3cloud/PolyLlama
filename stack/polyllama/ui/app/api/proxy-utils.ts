@@ -30,7 +30,7 @@ export async function proxyToRouter(
   
   // Add API key if configured
   if (process.env.POLYLLAMA_API_KEY) {
-    headers['api-key'] = process.env.POLYLLAMA_API_KEY
+    headers['Authorization'] = `Bearer ${process.env.POLYLLAMA_API_KEY}`
   }
   
   try {

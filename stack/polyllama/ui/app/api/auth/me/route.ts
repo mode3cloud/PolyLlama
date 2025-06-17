@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import jwt from 'jsonwebtoken'
 
 export async function GET(request: NextRequest) {
-  const token = request.cookies.get('auth-token')?.value
+  const token = request.cookies.get('auth_token_server')?.value
 
   if (!token) {
     return NextResponse.json(
@@ -24,8 +24,8 @@ export async function GET(request: NextRequest) {
     
     return NextResponse.json({
       email: decoded.email,
-      displayName: decoded.displayName,
-      userId: decoded.userId,
+      displayName: decoded.name,
+      userId: decoded.email,
     })
   } catch (error) {
     // Token is invalid or expired

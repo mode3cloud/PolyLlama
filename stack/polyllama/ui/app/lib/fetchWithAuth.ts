@@ -12,11 +12,9 @@ export async function fetchWithAuth(url: string, options: FetchOptions = {}): Pr
   if (response.status === 401 && !skipAuth) {
     // Check if we're in a browser context
     if (typeof window !== 'undefined') {
-      // Import auth context dynamically to avoid SSR issues
-      const { useAuth } = await import('../contexts/AuthContext')
-      
-      // We can't use hooks directly here, so we'll dispatch a custom event
-      window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+      // Reload the page to trigger the auth check
+      // This will show the login screen if the user is not authenticated
+      window.location.reload()
     }
   }
 

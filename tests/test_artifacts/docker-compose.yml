@@ -49,13 +49,13 @@ services:
     env_file:
       - ../../.env
     environment:
-      - CUDA_VISIBLE_DEVICES=0
+      - CUDA_VISIBLE_DEVICES=0,1,2
       - OLLAMA_SCHED_SPREAD=1
       - CUDA_DEVICE_ORDER=PCI_BUS_ID
     deploy:
       resources:
         limits:
-          memory: 32g
+          memory: 96g
         reservations:
           devices:
             - driver: nvidia
@@ -73,103 +73,7 @@ services:
     env_file:
       - ../../.env
     environment:
-      - CUDA_VISIBLE_DEVICES=1
-      - OLLAMA_SCHED_SPREAD=1
-      - CUDA_DEVICE_ORDER=PCI_BUS_ID
-    deploy:
-      resources:
-        limits:
-          memory: 32g
-        reservations:
-          devices:
-            - driver: nvidia
-              capabilities: [ gpu ]
-
-  polyllama3:
-    container_name: polyllama3
-    hostname: polyllama3
-    build:
-      dockerfile: Dockerfile
-      context: ../../stack/ollama
-    volumes:
-      - ~/.cache/huggingface/hub:/root/.cache/huggingface/hub
-      - ~/ollama:/root/.ollama
-    env_file:
-      - ../../.env
-    environment:
-      - CUDA_VISIBLE_DEVICES=2
-      - OLLAMA_SCHED_SPREAD=1
-      - CUDA_DEVICE_ORDER=PCI_BUS_ID
-    deploy:
-      resources:
-        limits:
-          memory: 32g
-        reservations:
-          devices:
-            - driver: nvidia
-              capabilities: [ gpu ]
-
-  polyllama4:
-    container_name: polyllama4
-    hostname: polyllama4
-    build:
-      dockerfile: Dockerfile
-      context: ../../stack/ollama
-    volumes:
-      - ~/.cache/huggingface/hub:/root/.cache/huggingface/hub
-      - ~/ollama:/root/.ollama
-    env_file:
-      - ../../.env
-    environment:
       - CUDA_VISIBLE_DEVICES=3
-      - OLLAMA_SCHED_SPREAD=1
-      - CUDA_DEVICE_ORDER=PCI_BUS_ID
-    deploy:
-      resources:
-        limits:
-          memory: 32g
-        reservations:
-          devices:
-            - driver: nvidia
-              capabilities: [ gpu ]
-
-  polyllama5:
-    container_name: polyllama5
-    hostname: polyllama5
-    build:
-      dockerfile: Dockerfile
-      context: ../../stack/ollama
-    volumes:
-      - ~/.cache/huggingface/hub:/root/.cache/huggingface/hub
-      - ~/ollama:/root/.ollama
-    env_file:
-      - ../../.env
-    environment:
-      - CUDA_VISIBLE_DEVICES=4
-      - OLLAMA_SCHED_SPREAD=1
-      - CUDA_DEVICE_ORDER=PCI_BUS_ID
-    deploy:
-      resources:
-        limits:
-          memory: 32g
-        reservations:
-          devices:
-            - driver: nvidia
-              capabilities: [ gpu ]
-
-  polyllama6:
-    container_name: polyllama6
-    hostname: polyllama6
-    build:
-      dockerfile: Dockerfile
-      context: ../../stack/ollama
-    volumes:
-      - ~/.cache/huggingface/hub:/root/.cache/huggingface/hub
-      - ~/ollama:/root/.ollama
-    env_file:
-      - ../../.env
-    environment:
-      - CUDA_VISIBLE_DEVICES=5
       - OLLAMA_SCHED_SPREAD=1
       - CUDA_DEVICE_ORDER=PCI_BUS_ID
     deploy:
@@ -197,15 +101,11 @@ services:
     env_file:
       - ../../.env
     environment:
-      - OLLAMA_INSTANCE_COUNT=6
+      - OLLAMA_INSTANCE_COUNT=2
       - POLYLLAMA_API_KEY=${POLYLLAMA_API_KEY:-}
     depends_on:
       - polyllama1
       - polyllama2
-      - polyllama3
-      - polyllama4
-      - polyllama5
-      - polyllama6
 
 volumes:
   openwebui_data:

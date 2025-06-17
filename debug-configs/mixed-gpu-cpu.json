@@ -1,0 +1,12 @@
+{
+  "gpu_groups": [
+    {
+      "name": "NVIDIA GeForce RTX 4090",
+      "indices": [0, 1],
+      "devices": [
+        {"index": 0, "name": "NVIDIA GeForce RTX 4090", "pci_bus": "00:01.0"},
+        {"index": 1, "name": "NVIDIA GeForce RTX 4090", "pci_bus": "00:02.0"}
+      ]
+    }
+  ]
+}

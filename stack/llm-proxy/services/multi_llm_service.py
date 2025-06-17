@@ -195,8 +195,13 @@ class MultiLLMService:
         if provider == "ollama" or provider is None:
             # Get Ollama models from PolyLlama router
             try:
+                headers = {}
+                # Add API key if configured
+                if os.getenv("POLYLLAMA_API_KEY"):
+                    headers["Authorization"] = f"Bearer {os.getenv('POLYLLAMA_API_KEY')}"
+                
                 async with httpx.AsyncClient(timeout=5.0) as client:
-                    response = await client.get("http://router:11434/api/tags")
+                    response = await client.get("http://router:11434/api/tags", headers=headers)
                     if response.status_code == 200:
                         data = response.json()
                         for model in data.get("models", []):
@@ -299,6 +304,11 @@ class MultiLLMService:
         # Set Ollama base URL
         if not os.environ.get("OLLAMA_API_BASE"):
             os.environ["OLLAMA_API_BASE"] = "http://router:11434"
+        
+        # Set Ollama API key if configured
+        polyllama_key = os.getenv("POLYLLAMA_API_KEY")
+        if polyllama_key:
+            os.environ["OLLAMA_API_KEY"] = polyllama_key
             
         logger.info(f"Environment variables set - OLLAMA_API_BASE: {os.environ.get('OLLAMA_API_BASE')}")
     

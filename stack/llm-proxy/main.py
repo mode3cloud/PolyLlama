@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(
     title="PolyLlama LLM Proxy Service",
     description="LLM interactions with provider abstraction via LiteLLM",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 # Configure CORS
@@ -49,32 +49,32 @@ app.add_middleware(
 )
 
 # Global service instances
-llm_service: MultiLLMService = None
-message_manager: MessageManager = None
-mcp_client: MCPClient = None
+llm_service: MultiLLMService
+message_manager: MessageManager
+mcp_client: MCPClient
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
     global llm_service, message_manager, mcp_client
-    
+
     logger.info("Starting PolyLlama LLM Proxy Service...")
-    
+
     # Initialize services
     message_manager = MessageManager()
     llm_service = MultiLLMService(neo4j_driver=None)  # No Neo4j for now
     llm_service.message_manager = message_manager  # Set message manager directly
     mcp_client = MCPClient(LLMProxyConfig.MCP_SERVICE_URL)
-    
+
     # Connect MCP client
     await mcp_client.connect()
-    
+
     # Store in app state for access in routes
     app.state.llm_service = llm_service
     app.state.message_manager = message_manager
     app.state.mcp_client = mcp_client
-    
+
     logger.info("PolyLlama LLM Proxy Service initialized successfully")
 
 
@@ -82,14 +82,14 @@ async def startup_event():
 async def shutdown_event():
     """Clean up services on shutdown."""
     global llm_service, message_manager, mcp_client
-    
+
     logger.info("Shutting down PolyLlama LLM Proxy Service...")
-    
+
     if llm_service:
         await llm_service.close()
     if mcp_client:
         await mcp_client.close()
-    
+
     logger.info("PolyLlama LLM Proxy Service shutdown complete")
 
 
@@ -100,7 +100,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "polyllama-llm-proxy",
-        "mcp_connected": mcp_client.is_connected() if mcp_client else False
+        "mcp_connected": mcp_client.is_connected() if mcp_client else False,
     }
 
 
@@ -113,13 +113,13 @@ app.include_router(models_router, prefix="/api/models", tags=["models"])
 def main():
     """Main entry point for the LLM Proxy service."""
     config = LLMProxyConfig()
-    
+
     uvicorn.run(
         "main:app",
         host=config.HOST,
         port=config.PORT,
         reload=config.DEBUG,
-        log_level="info"
+        log_level="info",
     )
 
 

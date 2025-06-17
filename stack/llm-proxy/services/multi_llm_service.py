@@ -138,7 +138,7 @@ class MultiLLMService:
             "stream": True,
             **filtered_kwargs,
         }
-        
+
         # Add extra headers for Ollama models to pass API key
         if self.model.startswith("ollama/") and os.getenv("POLYLLAMA_API_KEY"):
             completion_kwargs["extra_headers"] = {
@@ -248,30 +248,126 @@ class MultiLLMService:
                 logger.warning(f"Failed to get Ollama models: {e}")
 
         if provider == "openai" or provider is None:
-            # Add known OpenAI models if API key is available
-            if os.getenv("OPENAI_API_KEY"):
-                openai_models = ["gpt-4o", "gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"]
-                for model in openai_models:
-                    models.append(
-                        {"id": f"openai/{model}", "name": model, "provider": "openai"}
-                    )
+            # Add OpenAI models if API key is available
+            api_key = os.getenv("OPENAI_API_KEY")
+            if api_key:
+                try:
+                    # Fetch models from OpenAI API
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        response = await client.get(
+                            "https://api.openai.com/v1/models",
+                            headers={"Authorization": f"Bearer {api_key}"},
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            openai_models = []
+                            for model in data.get("data", []):
+                                model_id = model.get("id", "")
+                                # Filter for chat models (skip embeddings, images, audio, etc.)
+                                if model_id.startswith(
+                                    ("gpt-", "o1-", "o3-")
+                                ) and not any(
+                                    x in model_id for x in ["realtime", "audio"]
+                                ):
+                                    openai_models.append(model_id)
+
+                            # Sort models
+                            openai_models.sort()
+
+                            for model in openai_models:
+                                models.append(
+                                    {
+                                        "id": f"openai/{model}",
+                                        "name": model,
+                                        "provider": "openai",
+                                    }
+                                )
+                        else:
+                            logger.warning(
+                                f"Failed to fetch OpenAI models: {response.status_code}"
+                            )
+                            raise Exception(f"API returned {response.status_code}")
+                except Exception as e:
+                    logger.warning(f"Failed to get OpenAI models from API: {e}")
+                    # Fallback to known models
+                    fallback_models = [
+                        "gpt-4o",
+                        "gpt-4o-mini",
+                        "gpt-4-turbo",
+                        "gpt-4",
+                        "gpt-3.5-turbo",
+                        "o1-preview",
+                        "o1-mini",
+                        "o3-mini",
+                    ]
+                    for model in fallback_models:
+                        models.append(
+                            {
+                                "id": f"openai/{model}",
+                                "name": model,
+                                "provider": "openai",
+                            }
+                        )
 
         if provider == "anthropic" or provider is None:
-            # Add known Anthropic models if API key is available
-            if os.getenv("ANTHROPIC_API_KEY"):
-                anthropic_models = [
-                    "claude-3-opus-20240229",
-                    "claude-3-sonnet-20240229",
-                    "claude-3-haiku-20240307",
-                ]
-                for model in anthropic_models:
-                    models.append(
-                        {
-                            "id": f"anthropic/{model}",
-                            "name": model,
-                            "provider": "anthropic",
-                        }
-                    )
+            # Add Anthropic models if API key is available
+            api_key = os.getenv("ANTHROPIC_API_KEY")
+            if api_key:
+                try:
+                    # Fetch models from Anthropic API
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        response = await client.get(
+                            "https://api.anthropic.com/v1/models",
+                            headers={
+                                "x-api-key": api_key,
+                                "anthropic-version": "2023-06-01",
+                            },
+                        )
+                        if response.status_code == 200:
+                            data = response.json()
+                            anthropic_models = []
+                            for model in data.get("data", []):
+                                model_id = model.get("id", "")
+                                # Only include models that are actively available
+                                if model.get("status") == "active":
+                                    anthropic_models.append(model_id)
+
+                            # Sort models
+                            anthropic_models.sort(reverse=True)  # Newest first
+
+                            for model in anthropic_models:
+                                models.append(
+                                    {
+                                        "id": f"anthropic/{model}",
+                                        "name": model,
+                                        "provider": "anthropic",
+                                    }
+                                )
+                        else:
+                            logger.warning(
+                                f"Failed to fetch Anthropic models: {response.status_code}"
+                            )
+                            raise Exception(f"API returned {response.status_code}")
+                except Exception as e:
+                    logger.warning(f"Failed to get Anthropic models from API: {e}")
+                    # Fallback to known models
+                    fallback_models = [
+                        "claude-3-5-sonnet-20241022",
+                        "claude-3-5-haiku-20241022",
+                        "claude-3-opus-20240229",
+                        "claude-3-sonnet-20240229",
+                        "claude-3-haiku-20240307",
+                        "claude-2.1",
+                        "claude-instant-1.2",
+                    ]
+                    for model in fallback_models:
+                        models.append(
+                            {
+                                "id": f"anthropic/{model}",
+                                "name": model,
+                                "provider": "anthropic",
+                            }
+                        )
 
         if provider == "google" or provider is None:
             # Add known Google models if API key is available

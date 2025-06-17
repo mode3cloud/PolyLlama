@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { PullStatus, PullStatusesResponse } from '../types'
+import { fetchWithAuth } from '../lib/fetchWithAuth'
 
 interface ModelPullManagerProps {
   isVisible: boolean;
@@ -23,7 +24,7 @@ export default function ModelPullManager({
   const fetchPullStatuses = useCallback(async () => {
     try {
       setIsLoading(true)
-      const response = await fetch('/ui/api/pull-statuses')
+      const response = await fetchWithAuth('/ui/api/pull-statuses')
       
       if (!response.ok) {
         throw new Error(`Failed to fetch pull statuses: ${response.statusText}`)
@@ -31,7 +32,7 @@ export default function ModelPullManager({
 
       const data: PullStatusesResponse = await response.json()
       
-      if (data.success) {
+      if (data.success && Array.isArray(data.pull_statuses)) {
         setPullStatuses(data.pull_statuses)
         
         // Check for completed pulls and notify parent
@@ -40,6 +41,9 @@ export default function ModelPullManager({
             onPullCompleted(status.model)
           }
         })
+      } else {
+        console.error('Invalid pull statuses response:', data)
+        setPullStatuses([])
       }
     } catch (error) {
       console.error('Error fetching pull statuses:', error)
@@ -76,6 +80,14 @@ export default function ModelPullManager({
       return `${minutes}m ${seconds}s`
     }
     return `${seconds}s`
+  }
+
+  // Format bytes to human readable format
+  const formatBytes = (bytes?: number) => {
+    if (!bytes || bytes === 0) return '0 B'
+    const sizes = ['B', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(1024))
+    return `${(bytes / Math.pow(1024, i)).toFixed(1)} ${sizes[i]}`
   }
 
   // Get status color
@@ -160,7 +172,16 @@ export default function ModelPullManager({
                     <span>Initializing download...</span>
                   )}
                   {pullStatus.status === 'in_progress' && (
-                    <span>Downloading • {formatElapsedTime(pullStatus.started_at)} elapsed</span>
+                    <div className="flex flex-col gap-1">
+                      <span>
+                        {pullStatus.completed && pullStatus.total ? (
+                          <>Downloading • {formatBytes(pullStatus.completed)} / {formatBytes(pullStatus.total)}</>
+                        ) : (
+                          <>Downloading • {pullStatus.stage}</>
+                        )}
+                      </span>
+                      <span>{formatElapsedTime(pullStatus.started_at)} elapsed</span>
+                    </div>
                   )}
                   {pullStatus.status === 'completed' && (
                     <span className="text-green-600">

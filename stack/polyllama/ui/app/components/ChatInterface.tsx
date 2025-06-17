@@ -2,12 +2,12 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { ChatMessage, ChatModel, StreamChunk } from '../types'
+import { fetchWithAuth } from '../lib/fetchWithAuth'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 
-const LLM_PROXY_URL = process.env.NODE_ENV === 'production'
-  ? 'http://llm-proxy:11435'
-  : 'http://localhost:11435'
-
-console.log('LLM Proxy URL:', LLM_PROXY_URL, 'Environment:', process.env.NODE_ENV)
+// Use relative URLs to hit our Next.js API routes
+const API_BASE_URL = '/ui/api/chat'
 
 interface ChatInterfaceProps {
   onRefresh: () => void
@@ -22,11 +22,12 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
   const [sessionId] = useState(() => `session-${Date.now()}`)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null)
 
   // Fetch available models
   const fetchModels = useCallback(async () => {
     try {
-      const response = await fetch(`${LLM_PROXY_URL}/api/models`)
+      const response = await fetchWithAuth(`${API_BASE_URL}/models`)
       if (response.ok) {
         const data = await response.json()
         setModels(data.models || [])
@@ -66,7 +67,7 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
     abortControllerRef.current = new AbortController()
 
     try {
-      const response = await fetch(`${LLM_PROXY_URL}/api/chat/completions`, {
+      const response = await fetchWithAuth(`${API_BASE_URL}/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -287,15 +288,211 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
                   : 'bg-white border border-gray-200 text-gray-900'
                   }`}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 whitespace-pre-wrap">{message.content}</div>
+                <div className="relative group">
+                  <div className="flex-1">
+                    {message.role === 'user' ? (
+                      <div className="whitespace-pre-wrap">{message.content}</div>
+                    ) : (
+                      <div>
+                        {(() => {
+                          // Check if content contains think blocks (complete or incomplete)
+                          const completeThinkRegex = /<think>([\s\S]*?)<\/think>/g
+                          const incompleteThinkRegex = /<think>([\s\S]*?)$/
+                          const parts: Array<{type: 'content' | 'think', text: string, incomplete?: boolean}> = []
+                          let lastIndex = 0
+                          let match
+                          
+                          // First, find all complete think blocks
+                          while ((match = completeThinkRegex.exec(message.content)) !== null) {
+                            // Add content before think block
+                            if (match.index > lastIndex) {
+                              parts.push({
+                                type: 'content',
+                                text: message.content.slice(lastIndex, match.index)
+                              })
+                            }
+                            
+                            // Add complete think block
+                            parts.push({
+                              type: 'think',
+                              text: match[1].trim()
+                            })
+                            
+                            lastIndex = match.index + match[0].length
+                          }
+                          
+                          // Check for incomplete think block at the end
+                          const remainingContent = message.content.slice(lastIndex)
+                          const incompleteMatch = incompleteThinkRegex.exec(remainingContent)
+                          
+                          if (incompleteMatch) {
+                            // Add content before the incomplete think block
+                            if (incompleteMatch.index > 0) {
+                              parts.push({
+                                type: 'content',
+                                text: remainingContent.slice(0, incompleteMatch.index)
+                              })
+                            }
+                            
+                            // Add incomplete think block (being streamed)
+                            parts.push({
+                              type: 'think',
+                              text: incompleteMatch[1].trim(),
+                              incomplete: true
+                            })
+                          } else if (remainingContent) {
+                            // No incomplete think block, just regular content
+                            parts.push({
+                              type: 'content',
+                              text: remainingContent
+                            })
+                          }
+                          
+                          // If no parts found, treat entire content as regular
+                          if (parts.length === 0) {
+                            parts.push({
+                              type: 'content',
+                              text: message.content
+                            })
+                          }
+                          
+                          return parts.map((part, index) => {
+                            if (part.type === 'think') {
+                              return (
+                                <div key={index} className="my-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+                                  <div className="flex items-center gap-2 mb-2 text-purple-700">
+                                    <span className="text-sm font-semibold">💭 Thinking Process</span>
+                                    {part.incomplete && (
+                                      <span className="text-xs text-purple-600 animate-pulse">● Streaming...</span>
+                                    )}
+                                  </div>
+                                  <div className="text-sm text-purple-900 whitespace-pre-wrap">
+                                    {part.text}
+                                  </div>
+                                </div>
+                              )
+                            }
+                            
+                            return (
+                              <div key={index} className="prose prose-sm max-w-none prose-gray [&>*]:text-gray-900">
+                                <ReactMarkdown
+                                  remarkPlugins={[remarkGfm]}
+                                  components={{
+                          pre: ({ children }) => {
+                            const [copied, setCopied] = useState(false)
+                            
+                            const extractText = (node: any): string => {
+                              if (typeof node === 'string') return node
+                              if (!node) return ''
+                              if (node.props?.children) {
+                                if (Array.isArray(node.props.children)) {
+                                  return node.props.children.map(extractText).join('')
+                                }
+                                return extractText(node.props.children)
+                              }
+                              return ''
+                            }
+                            
+                            const handleCopy = () => {
+                              const codeText = extractText(children)
+                              navigator.clipboard.writeText(codeText)
+                              setCopied(true)
+                              setTimeout(() => setCopied(false), 2000)
+                            }
+                            
+                            return (
+                              <div className="relative group my-2">
+                                <button
+                                  onClick={handleCopy}
+                                  className="absolute top-2 right-2 px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                                  title="Copy code"
+                                >
+                                  {copied ? '✓ Copied' : '📋 Copy'}
+                                </button>
+                                <pre className="bg-gray-900 text-gray-100 rounded-lg p-4 overflow-x-auto border border-gray-700">
+                                  {children}
+                                </pre>
+                              </div>
+                            )
+                          },
+                          code: ({ className, children, ...props }) => {
+                            const match = /language-(\w+)/.exec(className || '')
+                            const isInline = !match
+                            return isInline ? (
+                              <code className="bg-gray-100 text-gray-800 rounded px-1.5 py-0.5 text-sm font-mono" {...props}>
+                                {children}
+                              </code>
+                            ) : (
+                              <code className="text-gray-100 text-sm font-mono block" {...props}>
+                                {children}
+                              </code>
+                            )
+                          },
+                          a: ({ href, children }) => (
+                            <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">
+                              {children}
+                            </a>
+                          ),
+                          ul: ({ children }) => (
+                            <ul className="list-disc list-inside space-y-1 my-2">{children}</ul>
+                          ),
+                          ol: ({ children }) => (
+                            <ol className="list-decimal list-inside space-y-1 my-2">{children}</ol>
+                          ),
+                          blockquote: ({ children }) => (
+                            <blockquote className="border-l-4 border-gray-300 pl-4 italic my-2 text-gray-700">{children}</blockquote>
+                          ),
+                          h1: ({ children }) => (
+                            <h1 className="text-2xl font-bold mt-4 mb-2">{children}</h1>
+                          ),
+                          h2: ({ children }) => (
+                            <h2 className="text-xl font-bold mt-3 mb-2">{children}</h2>
+                          ),
+                          h3: ({ children }) => (
+                            <h3 className="text-lg font-bold mt-2 mb-1">{children}</h3>
+                          ),
+                          p: ({ children }) => (
+                            <p className="my-2">{children}</p>
+                          ),
+                          table: ({ children }) => (
+                            <div className="overflow-x-auto my-2">
+                              <table className="min-w-full border-collapse border border-gray-300">
+                                {children}
+                              </table>
+                            </div>
+                          ),
+                          th: ({ children }) => (
+                            <th className="border border-gray-300 px-4 py-2 bg-gray-100 font-semibold text-left">
+                              {children}
+                            </th>
+                          ),
+                          td: ({ children }) => (
+                            <td className="border border-gray-300 px-4 py-2">
+                              {children}
+                            </td>
+                          ),
+                                }}
+                                >
+                                  {part.text}
+                                </ReactMarkdown>
+                              </div>
+                            )
+                          })
+                        })()}
+                      </div>
+                    )}
+                  </div>
                   {message.role === 'assistant' && (
                     <button
-                      onClick={() => copyMessage(message.content)}
-                      className="text-gray-400 hover:text-gray-600 p-1 rounded"
+                      onClick={() => {
+                        copyMessage(message.content)
+                        setCopiedMessageId(index)
+                        setTimeout(() => setCopiedMessageId(null), 2000)
+                      }}
+                      className="absolute top-2 right-2 px-2 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-300 rounded opacity-0 group-hover:opacity-100 transition-opacity"
                       title="Copy message"
                     >
-                      📋
+                      {copiedMessageId === index ? '✓ Copied' : '📋 Copy'}
                     </button>
                   )}
                 </div>

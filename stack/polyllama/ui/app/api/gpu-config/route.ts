@@ -2,5 +2,5 @@ import { NextRequest } from 'next/server'
 import { proxyToRouter } from '../proxy-utils'
 
 export async function GET(request: NextRequest) {
-  return proxyToRouter('/api/polyllama/gpu-config'), { request })
+  return proxyToRouter('/api/polyllama/gpu-config', { request })
 }

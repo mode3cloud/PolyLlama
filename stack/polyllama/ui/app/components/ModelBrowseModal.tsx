@@ -113,7 +113,13 @@ export default function ModelBrowseModal({
       const data: PullResponse = await response.json()
 
       if (!data.success) {
-        throw new Error(data.error || 'Failed to start model pull')
+        // Check if it's already being pulled
+        if (data.error && data.error.includes('already being pulled')) {
+          console.log('Model is already being pulled, continuing...')
+          // Don't throw an error, just log it
+        } else {
+          throw new Error(data.error || 'Failed to start model pull')
+        }
       }
 
       if (data.pull_id) {
@@ -245,7 +251,7 @@ export default function ModelBrowseModal({
                     <h4 className="text-sm font-medium text-gray-700">Available Tags:</h4>
                     <div className="grid grid-cols-1 gap-2">
                       {/* Missing Tags (can be downloaded) */}
-                      {model.missing_tags && model.missing_tags.map((tag) => {
+                      {model.missing_tags && Array.isArray(model.missing_tags) && model.missing_tags.map((tag) => {
                         const fullModelName = `${model.name}:${tag.name}`
                         const isPulling = pullingModels.has(fullModelName)
                         
@@ -295,7 +301,7 @@ export default function ModelBrowseModal({
                       })}
 
                       {/* Available Tags (already downloaded) */}
-                      {model.available_tags && model.available_tags.map((tag) => (
+                      {model.available_tags && Array.isArray(model.available_tags) && model.available_tags.map((tag) => (
                         <div key={tag.name} className="flex items-center justify-between p-2 bg-green-50 border border-green-200 rounded">
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-green-900">{model.name}:{tag.name}</span>

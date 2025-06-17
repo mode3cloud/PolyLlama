@@ -2,5 +2,5 @@ import { NextRequest } from 'next/server'
 import { proxyToRouter } from '../proxy-utils'
 
 export async function GET(request: NextRequest) {
-  return proxyToRouter('/api/polyllama/pull-statuses'), { request })
+  return proxyToRouter('/api/polyllama/pull-statuses', { request })
 }

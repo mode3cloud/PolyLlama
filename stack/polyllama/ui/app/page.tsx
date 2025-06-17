@@ -1,12 +1,18 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Header from './components/Header'
 import SystemOverview from './components/SystemOverview'
 import ModelManagement from './components/ModelManagement'
 import LoadModelModal from './components/LoadModelModal'
+import AuthWrapper from './components/AuthWrapper'
 import { Instance, Model, RunningModels, InstanceStatus, GPUConfig } from './types'
 import { fetchWithAuth } from './lib/fetchWithAuth'
+
+// Backoff configuration
+const INITIAL_INTERVAL = 5000 // 5 seconds
+const MAX_INTERVAL = 30 * 60 * 1000 // 30 minutes
+const BACKOFF_MULTIPLIER = 2
 
 export default function Home() {
   // State
@@ -19,6 +25,11 @@ export default function Home() {
   const [loading, setLoading] = useState(true)
   const [loadModalOpen, setLoadModalOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState<string>('')
+  
+  // Backoff state
+  const [backoffInterval, setBackoffInterval] = useState(INITIAL_INTERVAL)
+  const [lastFetchFailed, setLastFetchFailed] = useState(false)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
   // Initialize instances
   const initializeInstances = useCallback(async () => {
@@ -42,14 +53,26 @@ export default function Home() {
   // Fetch all data
   const refreshData = useCallback(async () => {
     try {
-      const [statusRes, gpuConfigRes, modelsRes, runningRes, mappingsRes, contextsRes] = await Promise.all([
+      // Only fetch GPU metrics, instance status, and GPU config for backoff
+      const criticalPromises = [
         fetchWithAuth('/ui/api/instance-status'),
         fetchWithAuth('/ui/api/gpu-config'),
+        fetchWithAuth('/ui/api/gpu-metrics')
+      ]
+      
+      // Always fetch these regardless of critical API status
+      const nonCriticalPromises = [
         fetchWithAuth('/ui/api/tags'),
         fetchWithAuth('/ui/api/running-models'),
         fetchWithAuth('/ui/api/model-mappings'),
         fetchWithAuth('/ui/api/get-contexts')
-      ])
+      ]
+
+      const [statusRes, gpuConfigRes, gpuMetricsRes] = await Promise.all(criticalPromises)
+      const [modelsRes, runningRes, mappingsRes, contextsRes] = await Promise.all(nonCriticalPromises)
+
+      // Check if any critical endpoints failed
+      const criticalFailed = !statusRes.ok || !gpuConfigRes.ok || !gpuMetricsRes.ok
 
       if (statusRes.ok) {
         const data = await statusRes.json()
@@ -114,11 +137,33 @@ export default function Home() {
       }
 
       setLoading(false)
+      
+      // Update backoff state based on critical endpoints
+      if (criticalFailed && !lastFetchFailed) {
+        // First failure - set initial backoff
+        setLastFetchFailed(true)
+        setBackoffInterval(prev => Math.min(prev * BACKOFF_MULTIPLIER, MAX_INTERVAL))
+      } else if (!criticalFailed && lastFetchFailed) {
+        // Recovery - reset backoff
+        setLastFetchFailed(false)
+        setBackoffInterval(INITIAL_INTERVAL)
+      } else if (criticalFailed && lastFetchFailed) {
+        // Continued failure - increase backoff
+        setBackoffInterval(prev => Math.min(prev * BACKOFF_MULTIPLIER, MAX_INTERVAL))
+      }
     } catch (error) {
       console.error('Error refreshing data:', error)
       setLoading(false)
+      
+      // Network error - apply backoff
+      if (!lastFetchFailed) {
+        setLastFetchFailed(true)
+        setBackoffInterval(prev => Math.min(prev * BACKOFF_MULTIPLIER, MAX_INTERVAL))
+      } else {
+        setBackoffInterval(prev => Math.min(prev * BACKOFF_MULTIPLIER, MAX_INTERVAL))
+      }
     }
-  }, [])
+  }, [lastFetchFailed])
 
   // Load model handler
   const handleLoadModel = useCallback((modelName: string) => {
@@ -166,18 +211,37 @@ export default function Home() {
     initializeInstances()
   }, [initializeInstances])
 
-  // Initial data fetch
+  // Initial data fetch with backoff
   useEffect(() => {
     if (instances.length > 0) {
       refreshData()
-      // Auto-refresh every 5 seconds
-      const interval = setInterval(refreshData, 5000)
-      return () => clearInterval(interval)
     }
   }, [instances, refreshData])
 
-  if (loading) {
-    return (
+  // Setup interval with backoff
+  useEffect(() => {
+    if (instances.length > 0) {
+      // Clear existing interval
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+      }
+
+      // Set new interval with current backoff duration
+      intervalRef.current = setInterval(refreshData, backoffInterval)
+      
+      console.log(`Refresh interval set to ${backoffInterval / 1000} seconds`)
+
+      return () => {
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current)
+        }
+      }
+    }
+  }, [instances, backoffInterval, refreshData])
+
+  return (
+    <AuthWrapper>
+      {loading ? (
       <div className="min-h-screen flex flex-col">
         <div className="fixed top-0 left-0 right-0 z-50">
           <Header onRefresh={refreshData} />
@@ -186,10 +250,7 @@ export default function Home() {
           <div className="text-center p-8 text-gray-500">Loading...</div>
         </main>
       </div>
-    )
-  }
-
-  return (
+      ) : (
     <div className="min-h-screen flex flex-col">
       <div className="fixed top-0 left-0 right-0 z-50">
         <Header onRefresh={refreshData} />
@@ -270,5 +331,7 @@ export default function Home() {
         }}
       />
     </div>
+      )}
+    </AuthWrapper>
   )
 }

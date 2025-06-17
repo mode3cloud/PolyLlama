@@ -3,6 +3,7 @@ Docker Compose file generator for PolyLlama
 """
 
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Dict, List
@@ -63,30 +64,48 @@ class ComposeGenerator:
         Returns:
             List of instance configurations for template
         """
-        if not gpu_groups:
-            # CPU-only configuration
-            return [{
-                "number": 1,
-                "gpu_indices": None,
-                "memory_limit": 16,
-                "gpu_name": "CPU-only",
-                "gpu_count": 0,
-            }]
-
         instances = []
-        for i, group in enumerate(gpu_groups, 1):
+        instance_number = 1
+        
+        # Check if we should create CPU instances
+        cpu_instance_count = int(os.environ.get("POLYLLAMA_CPU_INSTANCES", "0"))
+        mixed_mode = os.environ.get("POLYLLAMA_MIXED_MODE", "false").lower() == "true"
+        
+        if not gpu_groups:
+            # CPU-only configuration - create at least one CPU instance
+            cpu_instance_count = max(1, cpu_instance_count)
+            
+        # Create GPU instances first
+        for i, group in enumerate(gpu_groups):
             # Calculate memory limit based on GPU count
             gpu_count = len(group["indices"])
             memory_limit = max(16, gpu_count * 32)  # 32GB per GPU as default
 
             instances.append({
-                "number": i,
+                "number": instance_number,
                 "gpu_indices": ",".join(map(str, group["indices"])),
                 "memory_limit": memory_limit,
                 "gpu_name": group["name"],
                 "gpu_count": gpu_count,
-                "gpu_group_index": i - 1,  # 0-based index for matching with gpu_groups
+                "gpu_group_index": i,  # 0-based index for matching with gpu_groups
             })
+            instance_number += 1
+            
+        # Add CPU instances if requested or in mixed mode
+        if cpu_instance_count > 0 or (mixed_mode and gpu_groups):
+            # In mixed mode with GPUs, ensure at least 1 CPU instance
+            if mixed_mode and gpu_groups and cpu_instance_count == 0:
+                cpu_instance_count = 1
+                
+            for i in range(cpu_instance_count):
+                instances.append({
+                    "number": instance_number,
+                    "gpu_indices": None,
+                    "memory_limit": 16,  # Default 16GB for CPU instances
+                    "gpu_name": "CPU-only",
+                    "gpu_count": 0,
+                })
+                instance_number += 1
 
         return instances
 

@@ -95,6 +95,7 @@ services:
       - ../../.env
     environment:
       - OLLAMA_INSTANCE_COUNT={{ instance_count }}
+      - POLYLLAMA_API_KEY=${POLYLLAMA_API_KEY:-}
     depends_on:
 {% for instance in ollama_instances %}
       - polyllama{{ instance.number }}

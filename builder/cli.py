@@ -193,6 +193,17 @@ class PolyLlamaCLI:
         print(f"  GPU groups: {len(config['gpu_groups'])}")
         print(f"  Ollama instances: {config['instance_count']}")
         print(f"  Generated file: {self.compose_file}")
+        
+        # Show CPU routing configuration
+        cpu_routing_mode = os.environ.get("POLYLLAMA_CPU_ROUTING_MODE", "prefer_gpu")
+        cpu_instances = int(os.environ.get("POLYLLAMA_CPU_INSTANCES", "0"))
+        mixed_mode = os.environ.get("POLYLLAMA_MIXED_MODE", "false").lower() == "true"
+        
+        print("")
+        print("🔧 Routing Configuration:")
+        print(f"  CPU routing mode: {cpu_routing_mode}")
+        print(f"  CPU instances: {cpu_instances}")
+        print(f"  Mixed mode: {mixed_mode}")
 
         # Stop any existing services
         print("🛑 Stopping any existing services...")

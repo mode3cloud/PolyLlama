@@ -366,6 +366,19 @@ local function get_instance_count()
     return tonumber(env_vars:get("OLLAMA_INSTANCE_COUNT") or "2")
 end
 
+-- Get instance type (gpu/cpu) from shared memory
+local function get_instance_type(instance_name)
+    local env_vars = ngx.shared.env_vars
+    local instance_type = env_vars:get("instance_type:" .. instance_name)
+    return instance_type or "unknown"
+end
+
+-- Get CPU routing mode from shared memory
+local function get_cpu_routing_mode()
+    local env_vars = ngx.shared.env_vars
+    return env_vars:get("CPU_ROUTING_MODE") or "prefer_gpu"
+end
+
 -- Find least loaded instance and assign model to it
 function _M.assign_model_to_least_loaded_instance(model_name)
     if not model_name then
@@ -374,33 +387,93 @@ function _M.assign_model_to_least_loaded_instance(model_name)
     
     -- Get current model counts per instance
     local instance_count = get_instance_count()
-    local instance_counts = {}
+    local instance_info = {}
+    local gpu_instances = {}
+    local cpu_instances = {}
+    
+    -- Collect instance information and categorize by type
     for i=1,instance_count do
-        instance_counts[i] = {instance = "polyllama" .. i, count = 0}
+        local instance_name = "polyllama" .. i
+        local instance_type = get_instance_type(instance_name)
+        local info = {
+            instance = instance_name,
+            count = 0,
+            type = instance_type
+        }
+        instance_info[i] = info
+        
+        if instance_type == "gpu" then
+            table.insert(gpu_instances, info)
+        elseif instance_type == "cpu" then
+            table.insert(cpu_instances, info)
+        end
     end
     
     -- Count models on each instance
     local keys = ngx.shared.model_mappings:get_keys() or {}
     for _, key in ipairs(keys) do
-        -- Skip lock keys
-        if not string.match(key, "^loading:") then
+        -- Skip lock keys and context keys
+        if not string.match(key, "^loading:") and not string.match(key, "^ctx:") then
             local instance = _M.get_safe_instance_mapping(key)
             if instance then
-                local instance_num = tonumber(string.match(instance, "ollama(%d+)"))
-                if instance_num and instance_counts[instance_num] then
-                    instance_counts[instance_num].count = instance_counts[instance_num].count + 1
+                local instance_num = tonumber(string.match(instance, "polyllama(%d+)"))
+                if instance_num and instance_info[instance_num] then
+                    instance_info[instance_num].count = instance_info[instance_num].count + 1
                 end
             end
         end
     end
     
-    -- Find instance with least models
-    table.sort(instance_counts, function(a, b) return a.count < b.count end)
-    local least_loaded = instance_counts[1].instance
+    -- Get CPU routing mode
+    local cpu_routing_mode = get_cpu_routing_mode()
+    ngx.log(ngx.DEBUG, "CPU routing mode: " .. cpu_routing_mode .. ", GPU instances: " .. #gpu_instances .. ", CPU instances: " .. #cpu_instances)
+    
+    -- Determine which instances to consider based on routing mode
+    local candidates = {}
+    
+    if cpu_routing_mode == "prefer_gpu" then
+        -- Prefer GPU instances if available
+        if #gpu_instances > 0 then
+            candidates = gpu_instances
+            ngx.log(ngx.DEBUG, "Using GPU instances for model assignment (prefer_gpu mode)")
+        elseif #cpu_instances > 0 then
+            candidates = cpu_instances
+            ngx.log(ngx.INFO, "No GPU instances available, falling back to CPU instances")
+        else
+            candidates = instance_info
+            ngx.log(ngx.WARN, "No typed instances found, using all instances")
+        end
+    elseif cpu_routing_mode == "balanced" then
+        -- Consider all instances equally
+        for _, info in ipairs(instance_info) do
+            table.insert(candidates, info)
+        end
+        ngx.log(ngx.DEBUG, "Using all instances for model assignment (balanced mode)")
+    elseif cpu_routing_mode == "gpu_only" then
+        -- Only use GPU instances
+        if #gpu_instances > 0 then
+            candidates = gpu_instances
+            ngx.log(ngx.DEBUG, "Using GPU instances only (gpu_only mode)")
+        else
+            ngx.log(ngx.ERR, "No GPU instances available in gpu_only mode!")
+            return nil
+        end
+    end
+    
+    -- Find instance with least models among candidates
+    if #candidates == 0 then
+        ngx.log(ngx.ERR, "No candidate instances available for model assignment")
+        return nil
+    end
+    
+    table.sort(candidates, function(a, b) return a.count < b.count end)
+    local least_loaded = candidates[1].instance
+    local instance_type = candidates[1].type
     
     -- Store the new mapping
     _M.set_model_mapping(model_name, least_loaded, false)
-    ngx.log(ngx.INFO, "Assigned model " .. model_name .. " to " .. least_loaded .. " (has " .. instance_counts[1].count .. " models)")
+    ngx.log(ngx.INFO, "Assigned model " .. model_name .. " to " .. least_loaded .. 
+            " (type: " .. instance_type .. ", has " .. candidates[1].count .. " models)")
   
     return least_loaded
 end

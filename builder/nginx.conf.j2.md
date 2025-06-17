@@ -1,6 +1,53 @@
 # Nginx Endpoints Configuration Table
 
-## Core Ollama API Endpoints
+## Authentication
+
+PolyLlama implements API key authentication for all API endpoints:
+
+### Implementation Details
+
+1. **All API Endpoints** (`/api/*` including `/api/polyllama/*`):
+   - Protected by API key authentication
+   - Uses `Authorization: Bearer <API_KEY>` header format
+   - Environment variable `POLYLLAMA_API_KEY` stores the required key
+   - When no key is set, authentication is disabled (open access)
+   - Authentication check implemented via Lua `check_api_auth()` function
+   - Includes both Ollama-compatible endpoints and PolyLlama management endpoints
+
+2. **UI Access** (`/ui/*`):
+   - Proxied to Next.js application on port 3000
+   - Authentication handled by Next.js (OAuth/JWT)
+   - Next.js server-side API routes add API key when calling nginx
+   - API keys never exposed to browser/client-side code
+
+### Authentication Flow
+
+1. **External API Requests**:
+   - Client includes API key in Authorization header: `Authorization: Bearer your-api-key`
+   - Nginx validates the key in `access_by_lua_block` or `rewrite_by_lua_block`
+   - Invalid/missing keys return 401 Unauthorized with JSON error response
+   - Valid requests are proxied with model-aware routing
+
+2. **UI Server-Side Requests**:
+   - Next.js API routes add API key when calling nginx endpoints
+   - API key stored server-side in environment variables
+   - Client-side code never sees or handles API keys
+
+### Configuration
+
+To enable API key authentication:
+
+```bash
+# Set the API key in your .env file or environment
+export POLYLLAMA_API_KEY="your-secure-api-key"
+
+# Launch PolyLlama
+./polyllama.sh
+```
+
+When `POLYLLAMA_API_KEY` is not set or empty, authentication is disabled and all `/api/*` endpoints are open.
+
+## Core Ollama API Endpoints (PolyLlama overrides with smart routing logic)
 
 | Endpoint          | Method | Purpose               | Routing Logic                                           | Special Features                                   |
 | ----------------- | ------ | --------------------- | ------------------------------------------------------- | -------------------------------------------------- |
@@ -44,12 +91,6 @@
 | `/api/polyllama/clean-mappings`   | POST   | Clean stale mappings    | Remove mappings for non-running models    |
 | `/api/polyllama/duplicate-models` | GET    | Detect duplicate models | Find models running on multiple instances |
 
-## Legacy/Debug Endpoints
-
-| Endpoint                    | Method | Purpose             | Status                 |
-| --------------------------- | ------ | ------------------- | ---------------------- |
-| `/api/status/{instance_id}` | GET    | Per-instance status | Backward compatibility |
-| `/api/model-mappings`       | GET    | Debug mappings      | Backward compatibility |
 
 ## UI and Static Content
 

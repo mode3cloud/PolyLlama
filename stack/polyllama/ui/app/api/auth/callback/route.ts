@@ -1,96 +1,139 @@
-import { NextRequest, NextResponse } from 'next/server'
-import jwt from 'jsonwebtoken'
+import { ConfidentialClientApplication } from "@azure/msal-node";
+import { NextRequest, NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { createTokenPair } from "../../../lib/auth/jwt";
+import { getRedirectUri } from "../../../lib/auth/config";
 
-export async function GET(request: NextRequest) {
-  const searchParams = request.nextUrl.searchParams
-  const code = searchParams.get('code')
-  const state = searchParams.get('state')
+export async function GET(req: NextRequest) {
+  if (
+    process.env.AZURE_AD_CLIENT_ID === undefined ||
+    process.env.AZURE_AD_TENANT_ID === undefined ||
+    process.env.AZURE_AD_CLIENT_SECRET === undefined
+  ) {
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 },
+    );
+  }
 
+  const state = req.nextUrl.searchParams.get("state");
+  const code = req.nextUrl.searchParams.get("code");
+  const baseDomain = state ? decodeURIComponent(state) : undefined;
+
+  // Debug logging
+  console.log("Auth callback received:", {
+    state,
+    code: code ? "present" : "missing",
+    redirectUri: getRedirectUri(baseDomain),
+    searchParams: req.nextUrl.searchParams.toString(),
+  });
+
+  // Validate code parameter
   if (!code) {
-    return NextResponse.redirect(new URL('/?error=auth_failed', request.url))
+    console.error("Missing authorization code in callback");
+    return NextResponse.json(
+      { error: "Bad Request", message: "Missing authorization code" },
+      { status: 400 },
+    );
   }
 
-  const tenantId = process.env.AZURE_AD_TENANT_ID
-  const clientId = process.env.AZURE_AD_CLIENT_ID
-  const clientSecret = process.env.AZURE_AD_CLIENT_SECRET
-  const redirectUri = `${process.env.POLYLLAMA_UI_BASE_URL || 'http://localhost:3000'}/ui/api/auth/callback`
+  const msalConfig = {
+    auth: {
+      clientId: process.env.AZURE_AD_CLIENT_ID,
+      authority: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID}`,
+      clientSecret: process.env.AZURE_AD_CLIENT_SECRET,
+    },
+  };
 
-  if (!tenantId || !clientId || !clientSecret) {
-    return NextResponse.redirect(new URL('/?error=server_config', request.url))
-  }
+  const pca = new ConfidentialClientApplication(msalConfig);
+  const tokenRequest = {
+    code,
+    scopes: ["user.read"],
+    redirectUri: getRedirectUri(baseDomain),
+  };
 
   try {
-    // Exchange code for token
-    const tokenUrl = `https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`
-    const tokenResponse = await fetch(tokenUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: new URLSearchParams({
-        client_id: clientId,
-        client_secret: clientSecret,
-        code: code,
-        redirect_uri: redirectUri,
-        grant_type: 'authorization_code',
-      }),
-    })
+    const response = await pca.acquireTokenByCode(tokenRequest);
+    const userName = response.account!.username;
 
-    if (!tokenResponse.ok) {
-      console.error('Token exchange failed:', await tokenResponse.text())
-      return NextResponse.redirect(new URL('/?error=token_exchange_failed', request.url))
+    if (!userName) {
+      console.error("No username found in auth response");
+      return NextResponse.json(
+        { error: "Internal Server Error" },
+        { status: 500 },
+      );
     }
 
-    const tokenData = await tokenResponse.json()
-    const idToken = tokenData.id_token
+    const allowedUsers =
+      process.env.AZURE_AD_ALLOWED_USERS?.toLowerCase().split(";") ?? [];
+    const allowedDomains =
+      process.env.AZURE_AD_ALLOWED_DOMAINS?.toLowerCase().split(";") ?? [];
+    const userDomain = userName.toLowerCase().split("@")[1];
 
-    // Decode the ID token to get user info
-    const decodedToken = jwt.decode(idToken) as any
-
-    // Check if user is allowed
-    const allowedUsers = process.env.AZURE_AD_ALLOWED_USERS?.split(',').map(u => u.trim()) || []
-    const allowedDomains = process.env.AZURE_AD_ALLOWED_DOMAINS?.split(',').map(d => d.trim()) || []
-
-    const userEmail = decodedToken.email || decodedToken.preferred_username
-    const userDomain = userEmail?.split('@')[1]
-
-    const isAllowed = 
-      allowedUsers.length === 0 && allowedDomains.length === 0 ||
-      allowedUsers.includes(userEmail) ||
-      (userDomain && allowedDomains.includes(userDomain))
-
-    if (!isAllowed) {
-      return NextResponse.redirect(new URL('/?error=unauthorized', request.url))
+    if (
+      !allowedUsers.includes(userName.toLowerCase()) &&
+      !allowedDomains.includes(userDomain)
+    ) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    // Create our own JWT for session management
-    const jwtSecret = process.env.JWT_SECRET
-    if (!jwtSecret) {
-      return NextResponse.redirect(new URL('/?error=jwt_config', request.url))
-    }
+    const { accessToken, refreshToken } = await createTokenPair(
+      userName,
+      response.account!.name ?? "Unnamed User",
+    );
 
-    const sessionToken = jwt.sign(
-      {
-        email: userEmail,
-        displayName: decodedToken.name,
-        userId: decodedToken.oid,
-      },
-      jwtSecret,
-      { expiresIn: '24h' }
-    )
+    console.log("User authenticated:", userName);
+    const cookieStore = await cookies();
 
-    // Set cookie and redirect to home
-    const response = NextResponse.redirect(new URL('/', request.url))
-    response.cookies.set('auth-token', sessionToken, {
+    // Set access token (15 minutes)
+    cookieStore.set("auth_token_server", accessToken, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 60 * 60 * 24, // 24 hours
-    })
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 15 * 60, // 15 minutes in seconds
+    });
 
-    return response
-  } catch (error) {
-    console.error('Auth callback error:', error)
-    return NextResponse.redirect(new URL('/?error=auth_error', request.url))
+    // Set refresh token (7 days)
+    cookieStore.set("refresh_token_server", refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/",
+      maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
+    });
+
+    // Redirect to home page after successful authentication
+    const redirectUrl = baseDomain ? `${baseDomain}/ui` : "/ui";
+    return NextResponse.redirect(new URL(redirectUrl, req.url));
+  } catch (error: any) {
+    console.error("Callback error:", error);
+    console.error("Error details:", {
+      errorCode: error.errorCode,
+      errorMessage: error.errorMessage,
+      correlationId: error.correlationId,
+      stack: error.stack,
+    });
+
+    // Provide more specific error responses
+    if (error.errorCode === "request_cannot_be_made") {
+      return NextResponse.json(
+        {
+          error: "Authentication Failed",
+          message: "Invalid or missing authorization code",
+          details: error.errorMessage
+        },
+        { status: 400 },
+      );
+    }
+
+    return NextResponse.json(
+      {
+        error: "Internal Server Error",
+        message: error.errorMessage || "Authentication failed",
+        errorCode: error.errorCode
+      },
+      { status: 500 },
+    );
   }
 }

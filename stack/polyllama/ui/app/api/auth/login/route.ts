@@ -1,29 +1,48 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { ConfidentialClientApplication } from "@azure/msal-node";
+import { NextRequest, NextResponse } from "next/server";
+import { getRedirectUri } from "../../../lib/auth/config";
 
-export async function GET(request: NextRequest) {
-  const tenantId = process.env.AZURE_AD_TENANT_ID
-  const clientId = process.env.AZURE_AD_CLIENT_ID
-  const redirectUri = `${process.env.POLYLLAMA_UI_BASE_URL || 'http://localhost:3000'}/ui/api/auth/callback`
-  
-  if (!tenantId || !clientId) {
+export async function GET(req: NextRequest) {
+  const baseDomain = req.nextUrl.searchParams.get("baseDomain");
+
+  const redirectUri = getRedirectUri(baseDomain);
+
+  if (
+    process.env.AZURE_AD_CLIENT_ID === undefined ||
+    process.env.AZURE_AD_TENANT_ID === undefined ||
+    process.env.AZURE_AD_CLIENT_SECRET === undefined ||
+    !redirectUri
+  ) {
     return NextResponse.json(
-      { error: 'Azure AD configuration missing' },
-      { status: 500 }
-    )
+      { error: "Internal Server Error" },
+      { status: 500 },
+    );
   }
 
-  // Azure AD OAuth2 authorization URL
-  const authUrl = new URL(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/authorize`)
-  authUrl.searchParams.append('client_id', clientId)
-  authUrl.searchParams.append('response_type', 'code')
-  authUrl.searchParams.append('redirect_uri', redirectUri)
-  authUrl.searchParams.append('response_mode', 'query')
-  authUrl.searchParams.append('scope', 'openid profile email')
-  authUrl.searchParams.append('state', generateState())
+  const msalConfig = {
+    auth: {
+      clientId: process.env.AZURE_AD_CLIENT_ID,
+      authority: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID}`,
+      clientSecret: process.env.AZURE_AD_CLIENT_SECRET,
+    },
+  };
 
-  return NextResponse.redirect(authUrl.toString())
-}
+  const pca = new ConfidentialClientApplication(msalConfig);
 
-function generateState(): string {
-  return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15)
+  const authCodeUrlParameters = {
+    scopes: ["user.read"],
+    redirectUri: redirectUri,
+    state: encodeURIComponent(baseDomain!), // Pass returnUrl in state
+  };
+
+  try {
+    const response = await pca.getAuthCodeUrl(authCodeUrlParameters);
+    return NextResponse.redirect(response);
+  } catch (error) {
+    console.error("Login error:", error);
+    return NextResponse.json(
+      { error: "Internal Server Error" },
+      { status: 500 },
+    );
+  }
 }

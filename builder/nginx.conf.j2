@@ -203,7 +203,7 @@ server {
     # Custom UI endpoints
     
     # Custom endpoint for instance status
-    location /api/ui/instance-status {
+    location /api/polyllama/instance-status {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -608,7 +608,7 @@ server {
     
     
     # Custom endpoint for UI to get stored context lengths
-    location /api/ui/get-contexts {
+    location /api/polyllama/get-contexts {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -635,7 +635,7 @@ server {
     }
     
     # Custom endpoint for UI to store context length for loaded models
-    location /api/ui/store-context {
+    location /api/polyllama/store-context {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -686,7 +686,7 @@ server {
     }
 
     # Custom endpoint for UI to get instance count
-    location /api/ui/instance-count {
+    location /api/polyllama/instance-count {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -701,7 +701,7 @@ server {
     }
     
     # Custom endpoint for UI to get GPU configuration
-    location /api/ui/gpu-config {
+    location /api/polyllama/gpu-config {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -737,7 +737,7 @@ server {
     }
     
     # Custom endpoint for UI to get GPU and CPU metrics
-    location /api/ui/gpu-metrics {
+    location /api/polyllama/gpu-metrics {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -814,7 +814,7 @@ server {
     }
 
     # Custom endpoint for UI to get running models
-    location /api/ui/running-models {
+    location /api/polyllama/running-models {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -839,7 +839,7 @@ server {
     }
     
     # Custom endpoint for UI to get model details
-    location /api/ui/model-details {
+    location /api/polyllama/model-details {
         default_type application/json;
         
         content_by_lua_block {
@@ -1012,7 +1012,7 @@ server {
     }
 
     # Custom endpoint for UI to get model mappings
-    location /api/ui/model-mappings {
+    location /api/polyllama/model-mappings {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1045,7 +1045,7 @@ server {
     }
     
     # Endpoint to clean up mappings for non-running models
-    location /api/ui/clean-mappings {
+    location /api/polyllama/clean-mappings {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1064,7 +1064,7 @@ server {
     }
     
     # Endpoint to detect duplicate model instances
-    location /api/ui/duplicate-models {
+    location /api/polyllama/duplicate-models {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1086,7 +1086,7 @@ server {
     }
     
     # Endpoint to sync context sizes from running models
-    location /api/ui/sync-contexts {
+    location /api/polyllama/sync-contexts {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1153,7 +1153,7 @@ server {
     }
     
     # Custom endpoint for UI to search models from ollama.com
-    location /api/ui/search-models {
+    location /api/polyllama/search-models {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1173,7 +1173,7 @@ server {
     }
     
     # Custom endpoint for UI to pull models
-    location /api/ui/pull-model {
+    location /api/polyllama/pull-model {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1215,7 +1215,7 @@ server {
     }
     
     # Custom endpoint for UI to get pull status
-    location /api/ui/pull-status {
+    location /api/polyllama/pull-status {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"
@@ -1246,7 +1246,7 @@ server {
     }
     
     # Custom endpoint for UI to get all pull statuses
-    location /api/ui/pull-statuses {
+    location /api/polyllama/pull-statuses {
         default_type application/json;
         content_by_lua_block {
             local cjson = require "cjson"

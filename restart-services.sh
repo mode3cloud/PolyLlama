@@ -21,9 +21,9 @@ fi
 echo "⏹️  Stopping llm-proxy and router services..."
 docker-compose -f "$SCRIPT_DIR/builder/built/docker-compose.yml" stop llm-proxy router
 
-# Start the services again
-echo "▶️  Starting llm-proxy and router services..."
-docker-compose -f "$SCRIPT_DIR/builder/built/docker-compose.yml" up -d llm-proxy router
+# Rebuild and start the services
+echo "🔨 Rebuilding and starting llm-proxy and router services..."
+docker-compose -f "$SCRIPT_DIR/builder/built/docker-compose.yml" up -d --build llm-proxy router
 
 # Wait a moment for services to start
 sleep 2

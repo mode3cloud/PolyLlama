@@ -5,10 +5,10 @@ Handles chat session persistence and retrieval.
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,12 @@ class SessionResponse(BaseModel):
     id: str
     created_at: str
     messages: List[Dict[str, Any]]
-    metadata: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class UpdateSessionRequest(BaseModel):
+    """Request model for updating session messages."""
+    messages: List[Dict[str, Any]]
 
 
 @sessions_router.get("", response_model=SessionListResponse)
@@ -58,7 +63,7 @@ async def list_sessions(request: Request):
         raise HTTPException(status_code=500, detail=f"Failed to list sessions: {str(e)}")
 
 
-@sessions_router.get("/{session_id}", response_model=SessionResponse)
+@sessions_router.get("/{session_id}", response_model=SessionResponse, response_model_exclude_unset=False, response_model_exclude_defaults=False)
 async def get_session(session_id: str, request: Request):
     """Get a specific chat session."""
     try:
@@ -69,11 +74,17 @@ async def get_session(session_id: str, request: Request):
         
         session_data = await message_manager.get_session_messages(session_id)
         
+        logger.info(f"Session data for {session_id}: {session_data.keys()}")
+        logger.info(f"Metadata: {session_data.get('metadata', {})}")
+        
+        # Ensure metadata is always present
+        metadata = session_data.get("metadata", {})
+        
         return SessionResponse(
             id=session_data["id"],
             created_at=session_data["created_at"],
             messages=session_data["messages"],
-            metadata=session_data.get("metadata", {})
+            metadata=metadata
         )
         
     except Exception as e:
@@ -102,3 +113,22 @@ async def delete_session(session_id: str, request: Request):
     except Exception as e:
         logger.error(f"Error deleting session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to delete session: {str(e)}")
+
+
+@sessions_router.put("/{session_id}")
+async def update_session(session_id: str, update_request: UpdateSessionRequest, request: Request):
+    """Update messages for a chat session."""
+    try:
+        message_manager = request.app.state.message_manager
+        
+        if not message_manager:
+            raise HTTPException(status_code=404, detail="Message manager not found")
+        
+        # Update the session messages
+        await message_manager.update_session_messages(session_id, update_request.messages)
+        
+        return {"message": "Session updated successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error updating session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update session: {str(e)}")

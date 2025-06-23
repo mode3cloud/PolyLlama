@@ -41,12 +41,6 @@ export default function SessionSidebar({ currentSessionId, onSessionSelect, onNe
   useEffect(() => {
     fetchSessions()
   }, [currentSessionId, refreshTrigger])
-  
-  // Refresh sessions periodically to catch new ones
-  useEffect(() => {
-    const interval = setInterval(fetchSessions, 5000)
-    return () => clearInterval(interval)
-  }, [])
 
   const deleteSession = async (sessionId: string) => {
     if (isDeleting || !confirm('Are you sure you want to delete this session?')) return
@@ -58,9 +52,28 @@ export default function SessionSidebar({ currentSessionId, onSessionSelect, onNe
       })
       
       if (response.ok) {
-        setSessions(sessions.filter(s => s.id !== sessionId))
+        const remainingSessions = sessions.filter(s => s.id !== sessionId)
+        setSessions(remainingSessions)
+        
         if (sessionId === currentSessionId) {
-          onNewSession()
+          // Find the next session to select
+          const currentIndex = sessions.findIndex(s => s.id === sessionId)
+          let nextSession = null
+          
+          // Try to select the next session in the list
+          if (currentIndex < sessions.length - 1) {
+            nextSession = sessions[currentIndex + 1]
+          } else if (currentIndex > 0) {
+            // If we're at the end, select the previous session
+            nextSession = sessions[currentIndex - 1]
+          }
+          
+          if (nextSession && remainingSessions.some(s => s.id === nextSession.id)) {
+            onSessionSelect(nextSession.id)
+          } else {
+            // No other sessions, create a new one
+            onNewSession()
+          }
         }
       }
     } catch (error) {
@@ -145,23 +158,21 @@ export default function SessionSidebar({ currentSessionId, onSessionSelect, onNe
                   </div>
                 </button>
                 
-                {session.id !== currentSessionId && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      deleteSession(session.id)
-                    }}
-                    disabled={isDeleting === session.id}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-gray-700 rounded"
-                    title="Delete session"
-                  >
-                    {isDeleting === session.id ? (
-                      <span className="text-gray-400">...</span>
-                    ) : (
-                      <span className="text-red-400">🗑</span>
-                    )}
-                  </button>
-                )}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    deleteSession(session.id)
+                  }}
+                  disabled={isDeleting === session.id}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-gray-700 rounded"
+                  title="Delete session"
+                >
+                  {isDeleting === session.id ? (
+                    <span className="text-gray-400">...</span>
+                  ) : (
+                    <span className="text-red-400">🗑</span>
+                  )}
+                </button>
               </div>
             ))}
           </div>

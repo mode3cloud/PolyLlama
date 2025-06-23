@@ -3,7 +3,7 @@ import { verifyAuth } from '../../../auth-utils'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { sessionId: string } }
+  { params }: { params: Promise<{ sessionId: string }> }
 ) {
   // Verify authentication
   const auth = verifyAuth(request)
@@ -15,7 +15,7 @@ export async function GET(
   }
 
   try {
-    const { sessionId } = params
+    const { sessionId } = await params
 
     // Get session messages from LLM proxy
     const response = await fetch(`http://llm-proxy:11435/api/sessions/${sessionId}`, {
@@ -46,7 +46,7 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { sessionId: string } }
+  { params }: { params: Promise<{ sessionId: string }> }
 ) {
   // Verify authentication
   const auth = verifyAuth(request)
@@ -58,7 +58,7 @@ export async function PUT(
   }
 
   try {
-    const { sessionId } = params
+    const { sessionId } = await params
     const body = await request.json()
 
     // Update session messages in LLM proxy

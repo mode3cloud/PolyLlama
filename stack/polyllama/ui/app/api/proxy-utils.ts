@@ -5,7 +5,7 @@ export async function proxyToRouter(
   endpoint: string,
   options: {
     method?: string
-    body?: any
+    body?: unknown
     headers?: Record<string, string>
     request?: NextRequest
   } = {}

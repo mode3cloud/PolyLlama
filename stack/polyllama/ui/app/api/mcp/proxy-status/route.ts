@@ -11,7 +11,7 @@ export async function GET(request: NextRequest) {
     const response = await proxyToLLM('/api/mcp/status', { 
       request,
       headers: {
-        'signal': controller.signal as any
+        'signal': controller.signal as unknown as string
       }
     })
     clearTimeout(timeoutId)

@@ -1,6 +1,5 @@
 import { ConfidentialClientApplication } from "@azure/msal-node";
 import { NextRequest, NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { createTokenPair } from "../../../lib/auth/jwt";
 import { getRedirectUri } from "../../../lib/auth/config";
 
@@ -107,22 +106,24 @@ export async function GET(req: NextRequest) {
     });
 
     return redirectResponse;
-  } catch (error: any) {
+  } catch (error) {
     console.error("Callback error:", error);
+    
+    const errorObj = error as { errorCode?: string; errorMessage?: string; correlationId?: string; stack?: string };
     console.error("Error details:", {
-      errorCode: error.errorCode,
-      errorMessage: error.errorMessage,
-      correlationId: error.correlationId,
-      stack: error.stack,
+      errorCode: errorObj.errorCode,
+      errorMessage: errorObj.errorMessage,
+      correlationId: errorObj.correlationId,
+      stack: errorObj.stack,
     });
 
     // Provide more specific error responses
-    if (error.errorCode === "request_cannot_be_made") {
+    if (errorObj.errorCode === "request_cannot_be_made") {
       return NextResponse.json(
         {
           error: "Authentication Failed",
           message: "Invalid or missing authorization code",
-          details: error.errorMessage
+          details: errorObj.errorMessage
         },
         { status: 400 },
       );
@@ -131,8 +132,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         error: "Internal Server Error",
-        message: error.errorMessage || "Authentication failed",
-        errorCode: error.errorCode
+        message: errorObj.errorMessage || "Authentication failed",
+        errorCode: errorObj.errorCode
       },
       { status: 500 },
     );

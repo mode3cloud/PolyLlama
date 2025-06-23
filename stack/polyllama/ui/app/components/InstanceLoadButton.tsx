@@ -1,6 +1,5 @@
 'use client'
 
-import { useState } from 'react'
 import { useGPUMetrics } from '../hooks/useGPUMetrics'
 
 interface InstanceMetrics {
@@ -112,7 +111,7 @@ export default function InstanceLoadButton({
       {/* Show individual GPU memory bars for GPU instances */}
       {metrics && metrics.type === 'gpu' && metrics.devices && metrics.devices.length > 0 ? (
         <div className="mb-3 space-y-2">
-          {metrics.devices.map((device, index) => {
+          {metrics.devices.map((device) => {
             const deviceFree = device.memory_total - device.memory_used
             const usagePercent = (device.memory_used / device.memory_total) * 100
             

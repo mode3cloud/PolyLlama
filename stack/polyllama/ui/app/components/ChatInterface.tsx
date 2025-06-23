@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
-import { ChatMessage, ChatModel } from '../types'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { ChatMessage, ChatModel, ChatImage } from '../types'
 import { fetchWithAuth } from '../lib/fetchWithAuth'
 import { streamChat, syncSessionMessages, exportChatToMarkdown } from '../lib/chatUtils'
 import SessionSidebar from './SessionSidebar'
@@ -11,9 +11,6 @@ import MessageDisplay from './MessageDisplay'
 
 // Use relative URLs to hit our Next.js API routes
 const API_BASE_URL = '/ui/api/chat'
-
-interface ChatInterfaceProps {
-}
 
 export default function ChatInterface() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -47,7 +44,7 @@ export default function ChatInterface() {
     } catch (error) {
       console.error('Failed to fetch models:', error)
     }
-  }, [pendingModelSelection])
+  }, [pendingModelSelection, selectedModel])
 
   // Load session messages
   const loadSession = useCallback(async (sessionId: string) => {
@@ -58,8 +55,8 @@ export default function ChatInterface() {
         const data = await response.json()
         // Filter to only show user and assistant messages in the UI
         const sessionMessages = data.messages
-          .filter((msg: any) => msg.role === 'user' || msg.role === 'assistant')
-          .map((msg: any) => ({
+          .filter((msg: { role: string }) => msg.role === 'user' || msg.role === 'assistant')
+          .map((msg: { role: string; content: string; timestamp: string }) => ({
             role: msg.role,
             content: msg.content,
             timestamp: msg.timestamp
@@ -130,13 +127,14 @@ export default function ChatInterface() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  const sendMessage = async () => {
-    if (!input.trim() || isLoading || !selectedModel) return
+  const sendMessage = async (images?: ChatImage[]) => {
+    if ((!input.trim() && !images?.length) || isLoading || !selectedModel) return
 
     const userMessage: ChatMessage = {
       role: 'user',
       content: input.trim(),
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      images: images
     }
 
     setMessages(prev => [...prev, userMessage])
@@ -151,7 +149,7 @@ export default function ChatInterface() {
       setTimeout(() => setRefreshTrigger(Date.now()), 500)
     }
 
-    let assistantMessage: ChatMessage = {
+    const assistantMessage: ChatMessage = {
       role: 'assistant',
       content: '',
       timestamp: new Date().toISOString()
@@ -186,14 +184,14 @@ export default function ChatInterface() {
           // Stream completed
         }
       })
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') {
         console.log('Request aborted')
       } else {
         console.error('Chat error:', error)
         const errorMessage: ChatMessage = {
           role: 'assistant',
-          content: `*Error: ${error.message}*`,
+          content: `*Error: ${(error as Error).message}*`,
           timestamp: new Date().toISOString()
         }
         setMessages(prev => [...prev, errorMessage])
@@ -259,7 +257,7 @@ export default function ChatInterface() {
       setTimeout(() => setRefreshTrigger(Date.now()), 500)
     }
 
-    let assistantMessage: ChatMessage = {
+    const assistantMessage: ChatMessage = {
       role: 'assistant',
       content: '',
       timestamp: new Date().toISOString()
@@ -294,14 +292,14 @@ export default function ChatInterface() {
           // Stream completed
         }
       })
-    } catch (error: any) {
-      if (error.name === 'AbortError') {
+    } catch (error) {
+      if ((error as Error).name === 'AbortError') {
         console.log('Request aborted')
       } else {
         console.error('Chat error:', error)
         const errorMessage: ChatMessage = {
           role: 'assistant',
-          content: `*Error: ${error.message}*`,
+          content: `*Error: ${(error as Error).message}*`,
           timestamp: new Date().toISOString()
         }
         setMessages(prev => [...prev, errorMessage])
@@ -321,6 +319,13 @@ export default function ChatInterface() {
     setCopiedMessageId(index)
     setTimeout(() => setCopiedMessageId(null), 2000)
   }
+
+  // Compute supportsVision based on current selectedModel
+  const supportsVision = useMemo(() => {
+    if (!selectedModel || models.length === 0) return false
+    const model = models.find(m => m.id === selectedModel)
+    return model?.supports_vision || false
+  }, [selectedModel, models])
 
   return (
     <div className="flex h-full">
@@ -384,6 +389,7 @@ export default function ChatInterface() {
           input={input}
           isLoading={isLoading}
           selectedModel={selectedModel}
+          supportsVision={supportsVision}
           onInputChange={setInput}
           onSendMessage={sendMessage}
           onStopGeneration={stopGeneration}

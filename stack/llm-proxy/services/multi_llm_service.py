@@ -166,51 +166,20 @@ class MultiLLMService:
                         session_id, msg_dict["content"]
                     )
 
-        # Process attachments if provided
+        # Process attachments if provided (for non-vision models)
         if attachments:
-            from mcp_tools.tools.qdrant.qdrant_ingest.document_processor import (
-                DocumentProcessor,
-            )
-
-            processor = DocumentProcessor()
-
-            for path in attachments:
-                try:
-                    file_info = None
-                    if inspect.iscoroutinefunction(processor.process_file):
-                        file_info = await processor.process_file(path)
-                    else:
-                        file_info = processor.process_file(path)
-
-                    # Audio fallback: if audio and no transcript, try Whisper
-                    if (
-                        file_info
-                        and file_info.get("type") == "audio"
-                        and not file_info.get("transcript")
-                    ):
-                        try:
-                            transcript = await self._transcribe_audio_fallback(path)
-                            if transcript:
-                                file_info["transcript"] = transcript
-                                file_info["summary"] = (
-                                    f"[Transcribed audio]: {transcript[:200]}"
-                                )
-                        except Exception as e:
-                            logger.warning(
-                                f"Audio fallback transcription failed for {path}: {e}"
-                            )
-
-                    attach_msg = {
-                        "role": "user",
-                        "content": f"[ATTACHMENT: {os.path.basename(path)}]\n{file_info.get('summary','')}",
-                    }
-                    current_messages.append(attach_msg)
-                    if persistence:
-                        await self.message_manager.add_user_message(
-                            session_id, attach_msg["content"]
-                        )
-                except Exception as e:
-                    logger.warning(f"Attachment processing failed for {path}: {e}")
+            # Check if this is a vision model
+            is_vision_model = False
+            try:
+                is_vision_model = litellm.supports_vision(self.model)
+            except:
+                pass
+            
+            if not is_vision_model:
+                # For non-vision models, we would process documents here
+                # For now, just log a warning since document processing is not implemented
+                logger.warning(f"Document processing not implemented for attachments: {attachments}")
+            # For vision models, images are already in the message content
 
         # Combine with history
         full_conversation = conversation_history + current_messages

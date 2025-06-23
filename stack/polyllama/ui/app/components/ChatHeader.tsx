@@ -69,7 +69,7 @@ export default function ChatHeader({
               <optgroup key={provider} label={`${getProviderIcon(provider)} ${provider.charAt(0).toUpperCase() + provider.slice(1)}`}>
                 {providerModels.map(model => (
                   <option key={model.id} value={model.id}>
-                    {model.name}
+                    {model.name}{model.supports_vision ? ' 👁️' : ''}
                   </option>
                 ))}
               </optgroup>
@@ -79,6 +79,7 @@ export default function ChatHeader({
           {selectedModel && (
             <span className="text-sm text-gray-600">
               Provider: {models.find(m => m.id === selectedModel)?.provider || 'Unknown'}
+              {models.find(m => m.id === selectedModel)?.supports_vision && ' 👁️'}
             </span>
           )}
         </div>

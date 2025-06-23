@@ -20,14 +20,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const decoded = jwt.verify(token, jwtSecret) as any
+    const decoded = jwt.verify(token, jwtSecret) as { email: string; name: string }
     
     return NextResponse.json({
       email: decoded.email,
       displayName: decoded.name,
       userId: decoded.email,
     })
-  } catch (error) {
+  } catch {
     // Token is invalid or expired
     return NextResponse.json(
       { error: 'Invalid token' },

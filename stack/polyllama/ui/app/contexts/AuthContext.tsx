@@ -5,7 +5,7 @@ import { createContext, useContext, useState, useEffect, ReactNode } from 'react
 interface AuthContextType {
   isAuthenticated: boolean
   isLoading: boolean
-  user: any | null
+  user: { email: string; displayName: string; userId: string } | null
   login: () => void
   logout: () => void
   checkAuth: () => Promise<void>
@@ -16,7 +16,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [isAuthenticated, setIsAuthenticated] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [user, setUser] = useState<any | null>(null)
+  const [user, setUser] = useState<{ email: string; displayName: string; userId: string } | null>(null)
 
   const checkAuth = async () => {
     try {

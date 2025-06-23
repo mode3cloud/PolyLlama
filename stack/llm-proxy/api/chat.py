@@ -6,15 +6,52 @@ Handles chat completions and streaming.
 
 import json
 import logging
+import base64
+import tempfile
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import litellm
 
 logger = logging.getLogger(__name__)
 
 chat_router = APIRouter()
+
+
+def process_base64_attachments(attachments: List[str]) -> List[str]:
+    """Convert base64 data URLs to temporary file paths."""
+    file_paths = []
+    
+    for attachment in attachments:
+        if attachment.startswith('data:'):
+            # Extract MIME type and base64 data
+            header, data = attachment.split(',', 1)
+            mime_type = header.split(':')[1].split(';')[0]
+            
+            # Determine file extension
+            ext = '.bin'
+            if 'image/jpeg' in mime_type or 'image/jpg' in mime_type:
+                ext = '.jpg'
+            elif 'image/png' in mime_type:
+                ext = '.png'
+            elif 'image/gif' in mime_type:
+                ext = '.gif'
+            elif 'image/webp' in mime_type:
+                ext = '.webp'
+            
+            # Create temporary file
+            with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp_file:
+                # Decode and write base64 data
+                tmp_file.write(base64.b64decode(data))
+                file_paths.append(tmp_file.name)
+        else:
+            # Assume it's already a file path
+            file_paths.append(attachment)
+    
+    return file_paths
 
 
 @chat_router.get("/test")
@@ -57,6 +94,7 @@ class ChatMessage(BaseModel):
     """Chat message model."""
     role: str
     content: str
+    attachments: Optional[List[str]] = None  # Base64 encoded images or file paths
 
 
 class ChatCompletionRequest(BaseModel):
@@ -86,9 +124,59 @@ async def chat_completion(request: ChatCompletionRequest, req: Request):
             logger.warning("No model specified in request, using default model")
         
         logger.info(f"Processing chat completion request with model: {llm_service.model}")
+        logger.debug(f"Request has {len(request.messages)} messages")
+        
+        # Check if model supports vision
+        model_name = request.model or llm_service.model
+        supports_vision = False
+        try:
+            supports_vision = litellm.supports_vision(model_name)
+        except:
+            # Fallback for models not in litellm's database
+            # Check common vision model patterns
+            vision_patterns = ['vision', 'gpt-4o', 'gpt-4v', 'claude-3', 'gemini-pro-vision', 'llava', 'bakllava']
+            model_lower = model_name.lower()
+            supports_vision = any(pattern in model_lower for pattern in vision_patterns)
+        
+        logger.info(f"Model {model_name} supports vision: {supports_vision}")
         
         # Convert pydantic messages to dict format
-        messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+        messages = []
+        attachments = []
+        
+        for msg in request.messages:
+            if msg.role == "user" and msg.attachments and supports_vision:
+                # For vision models, format content as array
+                content = []
+                if msg.content:
+                    content.append({
+                        "type": "text", 
+                        "text": msg.content
+                    })
+                
+                for attachment in msg.attachments:
+                    content.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": attachment
+                        }
+                    })
+                
+                message_dict = {"role": msg.role, "content": content}
+                messages.append(message_dict)
+            else:
+                # Standard message format
+                message_dict = {"role": msg.role, "content": msg.content}
+                messages.append(message_dict)
+                
+                # For non-vision models with attachments, add a note about the image
+                if msg.role == "user" and msg.attachments and not supports_vision:
+                    # Add a text description that an image was attached
+                    image_count = len(msg.attachments)
+                    image_note = f"\n\n[Note: {image_count} image{'s' if image_count > 1 else ''} attached but this model doesn't support vision]"
+                    message_dict["content"] += image_note
+        
+        # We don't process attachments anymore since document processing isn't implemented
         
         # Prepare system prompt
         system_prompt = request.system_prompt or "You are a helpful AI assistant."

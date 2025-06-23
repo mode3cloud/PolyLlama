@@ -51,6 +51,13 @@ export interface ChatMessage {
   timestamp?: string;
   tool_name?: string;
   tool_call_id?: string;
+  images?: ChatImage[];
+}
+
+export interface ChatImage {
+  url: string;  // Base64 data URL or regular URL
+  name?: string;
+  type?: string;  // MIME type
 }
 
 export interface ChatModel {
@@ -58,6 +65,7 @@ export interface ChatModel {
   name: string;
   provider: string;
   size?: number;
+  supports_vision?: boolean;
 }
 
 export interface ChatSession {

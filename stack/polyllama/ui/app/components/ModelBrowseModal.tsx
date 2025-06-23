@@ -210,7 +210,7 @@ export default function ModelBrowseModal({
 
           {!isSearching && !searchError && hasSearched && searchResults.length === 0 && (
             <div className="text-center p-8 text-gray-500">
-              No models found for "{searchQuery}"
+              No models found for &quot;{searchQuery}&quot;
             </div>
           )}
 

@@ -1,9 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { ConfidentialClientApplication } from "@azure/msal-node";
 import { cookies } from "next/headers";
 import { getRedirectUri } from "../../../lib/auth/config";
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   // We don't need redirectUri for logout, but keeping the check for consistency
   const redirectUri = getRedirectUri(null);
 

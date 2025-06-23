@@ -30,13 +30,6 @@ export default function LoadModelModal({
   const [loadingInstances, setLoadingInstances] = useState<Set<string>>(new Set())
   const [loadingErrors, setLoadingErrors] = useState<Record<string, string>>({})
 
-  useEffect(() => {
-    if (isOpen && modelName) {
-      // Fetch model details to get default context
-      fetchModelDetails()
-    }
-  }, [isOpen, modelName])
-
   const fetchModelDetails = async () => {
     try {
       const response = await fetch('/ui/api/model-details', {
@@ -61,6 +54,14 @@ export default function LoadModelModal({
       console.error('Error fetching model details:', error)
     }
   }
+
+  useEffect(() => {
+    if (isOpen && modelName) {
+      // Fetch model details to get default context
+      fetchModelDetails()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, modelName])
 
   const handleInstanceLoad = async (instanceName: string) => {
     setLoadingInstances(prev => new Set([...prev, instanceName]))

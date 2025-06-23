@@ -1,7 +1,12 @@
 import { NextRequest } from 'next/server'
 import jwt from 'jsonwebtoken'
 
-export function verifyAuth(request: NextRequest): { valid: boolean; user?: any } {
+interface AuthUser {
+  email: string;
+  name: string;
+}
+
+export function verifyAuth(request: NextRequest): { valid: boolean; user?: AuthUser } {
   const token = request.cookies.get('auth_token_server')?.value
 
   if (!token) {
@@ -16,7 +21,7 @@ export function verifyAuth(request: NextRequest): { valid: boolean; user?: any }
   }
 
   try {
-    const decoded = jwt.verify(token, jwtSecret) as any
+    const decoded = jwt.verify(token, jwtSecret) as AuthUser
     return { valid: true, user: decoded }
   } catch (error) {
     console.error('Auth verification failed: JWT verification error', error)

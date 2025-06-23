@@ -26,27 +26,31 @@ export default function MessageDisplay({
 }: MessageDisplayProps) {
   const [copiedCode, setCopiedCode] = useState<{ [key: string]: boolean }>({})
 
-  const extractText = (node: any): string => {
+  const extractText = (node: React.ReactNode): string => {
     if (typeof node === 'string') return node
     if (!node) return ''
-    if (node.props?.children) {
-      if (Array.isArray(node.props.children)) {
-        return node.props.children.map(extractText).join('')
+    if (typeof node === 'object' && 'props' in node) {
+      const nodeWithProps = node as { props: { children?: React.ReactNode } }
+      if (nodeWithProps.props?.children) {
+        if (Array.isArray(nodeWithProps.props.children)) {
+          return nodeWithProps.props.children.map(extractText).join('')
+        }
+        return extractText(nodeWithProps.props.children)
       }
-      return extractText(node.props.children)
     }
     return ''
   }
 
-  const handleCodeCopy = (key: string, children: any) => {
+  const handleCodeCopy = (key: string, children: React.ReactNode) => {
     const codeText = extractText(children)
     navigator.clipboard.writeText(codeText)
     setCopiedCode({ ...copiedCode, [key]: true })
     setTimeout(() => setCopiedCode({ ...copiedCode, [key]: false }), 2000)
   }
 
-  const markdownComponents = {
-    pre: ({ children }: any) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const markdownComponents: any = {
+    pre: ({ children }: { children: React.ReactNode }) => {
       const key = `pre-${index}-${Date.now()}`
       const copied = copiedCode[key] || false
 
@@ -73,7 +77,7 @@ export default function MessageDisplay({
         </div>
       )
     },
-    code: ({ className, children, ...props }: any) => {
+    code: ({ className, children, ...props }: { className?: string; children: React.ReactNode }) => {
       const match = /language-(\w+)/.exec(className || '')
       const isInline = !match
       return isInline ? (
@@ -86,45 +90,45 @@ export default function MessageDisplay({
         </code>
       )
     },
-    a: ({ href, children }: any) => (
+    a: ({ href, children }: { href?: string; children: React.ReactNode }) => (
       <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:text-blue-800 underline">
         {children}
       </a>
     ),
-    ul: ({ children }: any) => (
+    ul: ({ children }: { children: React.ReactNode }) => (
       <ul className="list-disc list-inside space-y-1 my-2">{children}</ul>
     ),
-    ol: ({ children }: any) => (
+    ol: ({ children }: { children: React.ReactNode }) => (
       <ol className="list-decimal list-inside space-y-1 my-2">{children}</ol>
     ),
-    blockquote: ({ children }: any) => (
+    blockquote: ({ children }: { children: React.ReactNode }) => (
       <blockquote className="border-l-4 border-gray-300 pl-4 italic my-2 text-gray-700">{children}</blockquote>
     ),
-    h1: ({ children }: any) => (
+    h1: ({ children }: { children: React.ReactNode }) => (
       <h1 className="text-2xl font-bold mt-4 mb-2">{children}</h1>
     ),
-    h2: ({ children }: any) => (
+    h2: ({ children }: { children: React.ReactNode }) => (
       <h2 className="text-xl font-bold mt-3 mb-2">{children}</h2>
     ),
-    h3: ({ children }: any) => (
+    h3: ({ children }: { children: React.ReactNode }) => (
       <h3 className="text-lg font-bold mt-2 mb-1">{children}</h3>
     ),
-    p: ({ children }: any) => (
+    p: ({ children }: { children: React.ReactNode }) => (
       <p className="my-2">{children}</p>
     ),
-    table: ({ children }: any) => (
+    table: ({ children }: { children: React.ReactNode }) => (
       <div className="overflow-x-auto my-2">
         <table className="min-w-full border-collapse border border-gray-300">
           {children}
         </table>
       </div>
     ),
-    th: ({ children }: any) => (
+    th: ({ children }: { children: React.ReactNode }) => (
       <th className="border border-gray-300 px-4 py-2 bg-gray-100 font-semibold text-left">
         {children}
       </th>
     ),
-    td: ({ children }: any) => (
+    td: ({ children }: { children: React.ReactNode }) => (
       <td className="border border-gray-300 px-4 py-2">
         {children}
       </td>
@@ -253,7 +257,24 @@ export default function MessageDisplay({
         >
           <div className="flex-1">
             {message.role === 'user' ? (
-              <div className="whitespace-pre-wrap">{message.content}</div>
+              <div>
+                <div className="whitespace-pre-wrap">{message.content}</div>
+                {message.images && message.images.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {message.images.map((image, imgIndex) => (
+                      <div key={imgIndex} className="relative">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={image.url}
+                          alt={image.name || `Image ${imgIndex + 1}`}
+                          className="max-h-64 max-w-full rounded border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
+                          onClick={() => window.open(image.url, '_blank')}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : (
               <div>
                 {parseMessageContent().map((part, partIndex) => {
@@ -310,7 +331,7 @@ export default function MessageDisplay({
           </div>
         </div>
         {/* Action buttons positioned below the message box */}
-        <div className={`absolute -bottom-6 ${message.role === 'user' ? 'left-0' : 'right-0'} flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity`}>
+        <div className={`absolute -bottom-6 ${message.role === 'user' ? 'right-0' : 'right-0'} flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity`}>
           {/* Copy button for assistant messages */}
           {message.role === 'assistant' && (
             <button

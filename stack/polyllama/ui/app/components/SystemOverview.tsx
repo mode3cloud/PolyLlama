@@ -5,7 +5,7 @@ import FlowChart from './FlowChart'
 
 interface SystemOverviewProps {
   instances: Instance[];
-  instanceStatuses: Record<string, any>;
+  instanceStatuses: Record<string, { status: string; name: string }>;
   runningModels: RunningModels;
   modelContexts: Record<string, number>;
   onRefresh: () => void;

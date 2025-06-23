@@ -24,14 +24,21 @@ export default function ModelRow({
   onLoad,
   onUnload
 }: ModelRowProps) {
-  const [details, setDetails] = useState<any>(null)
-  const [loadingDetails, setLoadingDetails] = useState(false)
-
-  useEffect(() => {
-    if (isExpanded && !details && !loadingDetails) {
-      fetchModelDetails()
+  interface ModelDetails {
+    model_info?: Record<string, unknown>
+    details?: {
+      format?: string
+      family?: string
+      parameter_size?: string
+      quantization_level?: string
     }
-  }, [isExpanded])
+    template?: string
+    system?: string
+    parameters?: string
+  }
+  
+  const [details, setDetails] = useState<ModelDetails | null>(null)
+  const [loadingDetails, setLoadingDetails] = useState(false)
 
   const fetchModelDetails = async () => {
     setLoadingDetails(true)
@@ -52,6 +59,13 @@ export default function ModelRow({
       setLoadingDetails(false)
     }
   }
+
+  useEffect(() => {
+    if (isExpanded && !details && !loadingDetails) {
+      fetchModelDetails()
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isExpanded, details, loadingDetails])
 
   const formatSize = (bytes: number) => {
     if (!bytes) return '0 B'
@@ -114,7 +128,7 @@ export default function ModelRow({
                 <div className="p-4 text-center text-gray-500">Loading model details...</div>
               ) : details ? (
                 <div className="px-6">
-                  {details.model_info && (
+                  {details.model_info ? (
                     <div className="mb-6">
                       <h4 className="text-sm font-semibold text-gray-700 mb-2">Model Information</h4>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
@@ -140,23 +154,23 @@ export default function ModelRow({
                         )}
                       </div>
                     </div>
-                  )}
+                  ) : null}
 
-                  {details.template && (
+                  {details.template ? (
                     <div className="mb-6">
                       <h4 className="text-sm font-semibold text-gray-700 mb-2">Template</h4>
                       <pre className="bg-gray-50 p-4 rounded text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap break-words max-w-full max-h-[200px] overflow-y-auto">{details.template}</pre>
                     </div>
-                  )}
+                  ) : null}
 
-                  {details.system && (
+                  {details.system ? (
                     <div className="mb-6 max-w-full">
                       <h4 className="text-sm font-semibold text-gray-700 mb-2">System Prompt</h4>
                       <pre className="bg-gray-50 p-4 rounded text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap break-words max-w-full max-h-[200px] overflow-y-auto">{details.system}</pre>
                     </div>
-                  )}
+                  ) : null}
 
-                  {details.parameters && (
+                  {details.parameters ? (
                     <div className="mb-0">
                       <h4 className="text-sm font-semibold text-gray-700 mb-2">Parameters</h4>
                       <pre className="bg-gray-50 p-4 rounded text-xs leading-relaxed overflow-x-auto whitespace-pre-wrap break-words max-w-full max-h-[200px] overflow-y-auto">{
@@ -165,7 +179,7 @@ export default function ModelRow({
                           : JSON.stringify(details.parameters, null, 2)
                       }</pre>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               ) : (
                 <div className="p-4 text-center text-danger">Failed to load model details</div>

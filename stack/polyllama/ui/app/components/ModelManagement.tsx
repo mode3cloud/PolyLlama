@@ -63,14 +63,14 @@ export default function ModelManagement({
   }, [])
 
   // Handle pull started from browse modal
-  const handlePullStarted = useCallback((pullId: string, model: string, tag: string) => {
+  const handlePullStarted = useCallback((pullId: string) => {
     setActivePullIds(prev => [...prev, pullId])
     setPullManagerVisible(true)
     // TODO: Add toast notification for pull started
   }, [])
 
   // Handle pull completed
-  const handlePullCompleted = useCallback((model: string) => {
+  const handlePullCompleted = useCallback(() => {
     // Refresh data to show new model
     onRefresh()
     // TODO: Add toast notification for pull completed

@@ -103,7 +103,7 @@ export default function Home() {
       }
 
       if (mappingsRes.ok) {
-        const data = await mappingsRes.json()
+        await mappingsRes.json()
       }
 
       let currentContexts: Record<string, number> = {}
@@ -287,7 +287,7 @@ export default function Home() {
         onConfirm={async (modelName, instanceName, contextLength) => {
           // Handle model loading
           try {
-            const payload: any = { model: modelName, prompt: "", stream: false }
+            const payload: { model: string; prompt: string; stream: boolean; options?: { num_ctx: number } } = { model: modelName, prompt: "", stream: false }
             if (contextLength) {
               payload.options = { num_ctx: parseInt(contextLength) }
             }

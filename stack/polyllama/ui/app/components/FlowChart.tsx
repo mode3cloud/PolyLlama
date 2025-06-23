@@ -6,9 +6,28 @@ import PolyLlamaInstance from './PolyLlamaInstance'
 import { GPUDeviceInfo } from './GPUDevice'
 import { useGPUMetrics } from '../hooks/useGPUMetrics'
 
+// Import types from PolyLlamaInstance
+interface CPUMetricsData {
+  memory_used: number
+  memory_total: number
+  temperature?: number
+  is_cpu_instance: boolean
+  timestamp: number
+}
+
+interface GPUMetrics {
+  index: number
+  memory_used: number
+  memory_total: number
+  gpu_utilization: number
+  temperature: number
+  power_draw: number
+  timestamp: number
+}
+
 interface FlowChartProps {
   instances: Instance[];
-  instanceStatuses: Record<string, any>;
+  instanceStatuses: Record<string, { status: string; name: string }>;
   runningModels: RunningModels;
   modelContexts: Record<string, number>;
   onRefresh: () => void;
@@ -27,7 +46,7 @@ interface GPUConfig {
 
 export default function FlowChart({ instances, instanceStatuses, runningModels, modelContexts, onRefresh }: FlowChartProps) {
   const [gpuConfig, setGpuConfig] = useState<GPUConfig | null>(null)
-  const { metrics } = useGPUMetrics() as { metrics: Record<string, any>; loading: boolean; error: string | null }
+  const { metrics } = useGPUMetrics() as { metrics: Record<string, { type: string; cpu_metrics?: unknown; devices?: unknown }>; loading: boolean; error: string | null }
 
   useEffect(() => {
     // Fetch GPU configuration from backend
@@ -96,8 +115,8 @@ export default function FlowChart({ instances, instanceStatuses, runningModels, 
             
             // Get metrics for this instance
             const instanceMetrics = metrics[instance.name]
-            const cpuMetrics = instanceMetrics?.type === 'cpu' ? instanceMetrics.cpu_metrics : undefined
-            const gpuMetrics = instanceMetrics?.type === 'gpu' ? instanceMetrics.devices : undefined
+            const cpuMetrics = instanceMetrics?.type === 'cpu' ? instanceMetrics.cpu_metrics as CPUMetricsData : undefined
+            const gpuMetrics = instanceMetrics?.type === 'gpu' ? instanceMetrics.devices as GPUMetrics[] : undefined
 
             return (
               <PolyLlamaInstance

@@ -17,7 +17,7 @@ export default function ChatPage() {
         <Header onRefresh={handleRefresh} />
       </div>
       <div className="flex-1 overflow-hidden">
-        <ChatInterface key={refreshKey} onRefresh={handleRefresh} />
+        <ChatInterface key={refreshKey} />
       </div>
     </div>
   )

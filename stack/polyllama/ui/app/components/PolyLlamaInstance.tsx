@@ -24,7 +24,7 @@ interface GPUMetrics {
 
 interface PolyLlamaInstanceProps {
   instance: Instance;
-  status: any;
+  status: { status: string; name: string };
   runningModels: RunningModels;
   modelContexts: Record<string, number>;
   gpuGroupName?: string;

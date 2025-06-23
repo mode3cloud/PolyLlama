@@ -24,13 +24,34 @@ export async function streamChat({
   onError,
   onDone
 }: StreamChatOptions) {
+  // Convert messages to include attachments for images
+  const processedMessages = messages.map(msg => {
+    const processedMsg: {
+      role: string;
+      content: string;
+      timestamp: string;
+      attachments?: string[];
+    } = {
+      role: msg.role,
+      content: msg.content,
+      timestamp: msg.timestamp || new Date().toISOString()
+    }
+    
+    // Add attachments if message has images
+    if (msg.images && msg.images.length > 0) {
+      processedMsg.attachments = msg.images.map(img => img.url)
+    }
+    
+    return processedMsg
+  })
+
   const response = await fetchWithAuth(`${API_BASE_URL}/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      messages,
+      messages: processedMessages,
       model,
       session_id: sessionId,
       stream: true,
@@ -101,7 +122,8 @@ export async function syncSessionMessages(sessionId: string, messages: ChatMessa
         messages: messages.map(msg => ({
           role: msg.role,
           content: msg.content,
-          timestamp: msg.timestamp
+          timestamp: msg.timestamp || new Date().toISOString(),
+          images: msg.images
         }))
       })
     })

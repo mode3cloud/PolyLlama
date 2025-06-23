@@ -22,7 +22,7 @@ from api.models import models_router
 from services.multi_llm_service import MultiLLMService
 from services.message_manager import MessageManager
 from services.mcp_client import MCPClient
-from services.audio_service import AudioService
+from services.audio_service_api import AudioServiceAPI
 from config import LLMProxyConfig
 
 # Configure logging
@@ -53,7 +53,7 @@ app.add_middleware(
 llm_service: MultiLLMService
 message_manager: MessageManager
 mcp_client: MCPClient
-audio_service: AudioService
+audio_service: AudioServiceAPI
 
 
 @app.on_event("startup")
@@ -68,11 +68,11 @@ async def startup_event():
     llm_service = MultiLLMService(neo4j_driver=None)  # No Neo4j for now
     llm_service.message_manager = message_manager  # Set message manager directly
     mcp_client = MCPClient(LLMProxyConfig.MCP_SERVICE_URL)
-    
+
     # Initialize audio service
-    audio_service = AudioService(
-        model_path=LLMProxyConfig.AUDIO_MODEL_PATH,
-        voices_path=LLMProxyConfig.AUDIO_VOICES_PATH
+    audio_service = AudioServiceAPI(
+        api_base=LLMProxyConfig.KOKORO_API_BASE,
+        timeout=LLMProxyConfig.KOKORO_API_TIMEOUT,
     )
     await audio_service.initialize()
 

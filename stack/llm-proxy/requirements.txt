@@ -5,7 +5,3 @@ litellm==1.61.15
 httpx==0.25.2
 python-multipart==0.0.18
 neo4j==5.14.0
-kokoro-onnx==0.4.9
-onnxruntime==1.20.1
-sounddevice==0.4.6
-numpy>=2.0.2

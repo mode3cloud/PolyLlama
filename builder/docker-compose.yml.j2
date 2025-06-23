@@ -20,6 +20,24 @@ services:
       - olah_data_repos:/app/repos
       - olah_data_mirrors:/app/mirrors
 
+  kokoro-tts:
+    image: ghcr.io/remsky/kokoro-fastapi-gpu:latest
+    container_name: kokoro-tts
+    hostname: kokoro-tts
+    ports:
+      - "8880:8880"
+    # environment:
+    #   - MODEL_DIR=/app/models
+    volumes:
+      - kokoro_models:/app/models
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              capabilities: [ gpu ]
+              count: 1
+
   llm-proxy:
     build:
       context: ../../stack/llm-proxy
@@ -34,8 +52,10 @@ services:
       - OLLAMA_API_BASE=http://router:11434
       - LLM_PROXY_HOST=0.0.0.0
       - LLM_PROXY_PORT=11435
+      - KOKORO_API_BASE=http://kokoro-tts:8880
     depends_on:
       - router
+      - kokoro-tts
   
 {% for instance in ollama_instances %}
   polyllama{{ instance.number }}:
@@ -105,3 +125,4 @@ volumes:
   openwebui_data:
   olah_data_repos:
   olah_data_mirrors:
+  kokoro_models:

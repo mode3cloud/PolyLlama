@@ -56,6 +56,7 @@ class LLMProxyConfig:
     MULTI_LLM_CACHE_SIZE: int = int(os.getenv("MULTI_LLM_CACHE_SIZE", "1000"))
 
     # Audio Service Configuration
+    AUDIO_ENABLED: bool = os.getenv("AUDIO_ENABLED", "true").lower() == "true"
     AUDIO_MODEL_PATH: str = os.getenv(
         "AUDIO_MODEL_PATH", "/app/models/kokoro-v1.0.onnx"
     )
@@ -66,6 +67,10 @@ class LLMProxyConfig:
     AUDIO_DEFAULT_SPEED: float = float(os.getenv("AUDIO_DEFAULT_SPEED", "1.25"))
     AUDIO_DEFAULT_LANG: str = os.getenv("AUDIO_DEFAULT_LANG", "en-us")
     AUDIO_USE_GPU: bool = os.getenv("AUDIO_USE_GPU", "false").lower() == "true"
+    
+    # Kokoro API configuration
+    KOKORO_API_BASE: str = os.getenv("KOKORO_API_BASE", "http://kokoro-tts:8000")
+    KOKORO_API_TIMEOUT: int = int(os.getenv("KOKORO_API_TIMEOUT", "30"))
 
     @classmethod
     def get_neo4j_config(cls) -> dict:

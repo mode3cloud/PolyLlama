@@ -438,14 +438,14 @@ async def _stream_chat_completion_with_audio(
                         yield text
                 
                 # Generate audio for streaming text
-                async for samples, sample_rate, text_chunk in audio_service.generate_audio_for_streaming_text(
+                async for audio_data, sample_rate, text_chunk in audio_service.generate_audio_for_streaming_text(
                     text_generator(),
                     voice=voice,
                     speed=speed,
                     lang=lang
                 ):
                     # Convert audio to base64
-                    audio_base64 = audio_service.audio_to_base64(samples, sample_rate)
+                    audio_base64 = audio_service.audio_to_base64(audio_data)
                     
                     # Create audio event
                     audio_data = json.dumps({

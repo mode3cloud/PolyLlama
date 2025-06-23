@@ -9,13 +9,30 @@ import json
 import time
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional, AsyncGenerator
+from typing import Any, Dict, List, Optional, AsyncGenerator, Protocol, TypedDict
 from functools import wraps
 
 import litellm
 import httpx
+import inspect
 
 logger = logging.getLogger(__name__)
+
+
+# Type definitions
+class Tool(TypedDict):
+    """Tool specification for function calling."""
+
+    type: str
+    function: Dict[str, Any]
+
+
+class ToolManagerProtocol(Protocol):
+    """Protocol for tool managers."""
+
+    async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
+        """Execute a tool with given arguments."""
+        ...
 
 
 class MultiLLMService:
@@ -68,27 +85,33 @@ class MultiLLMService:
 
     async def chat_completion(
         self,
-        messages: List[Dict[str, Any]],
+        messages: List[litellm.Message],
         *,
         session_id: Optional[str] = None,
         persistence: bool = False,
         system_prompt: Optional[str] = None,
+        tools_prompt: Optional[str] = None,
+        tools: Optional[List[Tool]] = None,
         temperature: float = 0.7,
         max_tokens: int = 8192,
-        tool_manager: Optional[Any] = None,
+        tool_manager: Optional["ToolManagerProtocol"] = None,
+        attachments: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
-        Stream chat completion using LiteLLM.
+        Stream chat completion using LiteLLM with tool calling and attachment support.
 
         Args:
-            messages: List of message dictionaries
+            messages: List of litellm.Message objects or dictionaries
             session_id: Session ID for persistence
             persistence: Whether to persist messages
             system_prompt: System prompt to prepend
+            tools_prompt: Additional prompt for tools
+            tools: List of available tools
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate
             tool_manager: Tool manager for function calling
+            attachments: List of file paths to process
             **kwargs: Additional arguments passed to LiteLLM
 
         Yields:
@@ -99,62 +122,136 @@ class MultiLLMService:
         if persistence and not self.message_manager:
             raise ValueError("MessageManager required when persistence=True")
 
-        # Prepare messages
-        current_messages = []
-
-        # Add system prompt if provided
-        if system_prompt:
-            current_messages.append({"role": "system", "content": system_prompt})
-            if persistence:
-                await self.message_manager.add_system_message(session_id, system_prompt)
-
-        # Add conversation history if persistence enabled
+        # Message History Handling
         if persistence and session_id:
             session_data = await self.message_manager.get_session_messages(session_id)
             conversation_history = session_data.get("messages", [])
-            # Filter out system messages to avoid duplication
-            conversation_history = [
-                m for m in conversation_history if m.get("role") != "system"
-            ]
-            current_messages.extend(conversation_history)
+        else:
+            conversation_history = []
 
-        # Add new messages
+        # Prepare messages
+        current_messages = []
+
+        # Augment system prompt with tools if provided
+        sys_prompt = self._augment_system_prompt(
+            system_prompt or "", tools_prompt, tools
+        )
+
+        # Add system prompt if provided and not already in history
+        if sys_prompt and (
+            not conversation_history or conversation_history[0].get("role") != "system"
+        ):
+            current_messages.append({"role": "system", "content": sys_prompt})
+            if persistence:
+                await self.message_manager.add_system_message(session_id, sys_prompt)
+
+        # Process new messages with type conversion
         for msg in messages:
-            current_messages.append(msg)
-            if persistence and msg.get("role") == "user":
-                await self.message_manager.add_user_message(
-                    session_id, msg.get("content", "")
-                )
+            # Convert litellm.Message objects to dict format
+            if hasattr(msg, "role") and hasattr(msg, "content"):
+                msg_dict = {"role": msg.role, "content": msg.content}
+            elif isinstance(msg, dict):
+                msg_dict = msg
+            else:
+                raise TypeError(f"Unexpected message type: {type(msg)}")
+
+            if msg_dict["role"] == "user":
+                current_messages.append(msg_dict)
+                if persistence:
+                    await self.message_manager.add_user_message(
+                        session_id, msg_dict["content"]
+                    )
+
+        # Process attachments if provided
+        if attachments:
+            from mcp_tools.tools.qdrant.qdrant_ingest.document_processor import (
+                DocumentProcessor,
+            )
+
+            processor = DocumentProcessor()
+
+            for path in attachments:
+                try:
+                    file_info = None
+                    if inspect.iscoroutinefunction(processor.process_file):
+                        file_info = await processor.process_file(path)
+                    else:
+                        file_info = processor.process_file(path)
+
+                    # Audio fallback: if audio and no transcript, try Whisper
+                    if (
+                        file_info
+                        and file_info.get("type") == "audio"
+                        and not file_info.get("transcript")
+                    ):
+                        try:
+                            transcript = await self._transcribe_audio_fallback(path)
+                            if transcript:
+                                file_info["transcript"] = transcript
+                                file_info["summary"] = (
+                                    f"[Transcribed audio]: {transcript[:200]}"
+                                )
+                        except Exception as e:
+                            logger.warning(
+                                f"Audio fallback transcription failed for {path}: {e}"
+                            )
+
+                    attach_msg = {
+                        "role": "user",
+                        "content": f"[ATTACHMENT: {os.path.basename(path)}]\n{file_info.get('summary','')}",
+                    }
+                    current_messages.append(attach_msg)
+                    if persistence:
+                        await self.message_manager.add_user_message(
+                            session_id, attach_msg["content"]
+                        )
+                except Exception as e:
+                    logger.warning(f"Attachment processing failed for {path}: {e}")
+
+        # Combine with history
+        full_conversation = conversation_history + current_messages
+
+        # Format tools for LiteLLM if provided
+        tools_spec = self._format_tools(tools) if tools else None
 
         # Filter supported parameters for this model
         filtered_kwargs = self._filter_supported_kwargs(self.model, kwargs)
 
-        # Prepare completion arguments
-        completion_kwargs = {
-            "model": self.model,
-            "messages": current_messages,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "stream": True,
-            **filtered_kwargs,
-        }
-
-        # Add extra headers for Ollama models to pass API key
-        if self.model.startswith("ollama/") and os.getenv("POLYLLAMA_API_KEY"):
-            completion_kwargs["extra_headers"] = {
-                "Authorization": f"Bearer {os.getenv('POLYLLAMA_API_KEY')}"
-            }
-
-        assistant_content = []
-
+        # Streaming LLM Call with Integrated Tool Orchestration
         async with self.semaphore:
-            try:
-                logger.info(f"Starting chat completion with model: {self.model}")
-                logger.debug(f"Messages: {current_messages}")
-                logger.debug(f"Completion kwargs: {completion_kwargs}")
+            logger.debug("Semaphore acquired")
+            assistant_buffer = []
+            iteration = 0
+            max_iterations = 10
+            current_msgs = full_conversation.copy()
+            should_continue = True
 
-                # Make LiteLLM call
+            while iteration < max_iterations and should_continue:
+                iteration += 1
+                logger.info(f"Starting iteration {iteration} with model: {self.model}")
+
+                # Prepare completion arguments
+                completion_kwargs = {
+                    "model": self.model,
+                    "messages": current_msgs,
+                    "tools": tools_spec,
+                    "temperature": temperature,
+                    "max_tokens": max_tokens,
+                    "stream": True,
+                    **filtered_kwargs,
+                }
+
+                # Add Bearer Authorization header for Ollama models to pass API key
+                if self.model.startswith("ollama/") and os.getenv("POLYLLAMA_API_KEY"):
+                    completion_kwargs["extra_headers"] = {
+                        "Authorization": f"Bearer {os.getenv('POLYLLAMA_API_KEY')}"
+                    }
+
                 try:
+                    logger.debug(f"Messages: {current_msgs}")
+                    logger.debug(f"Completion kwargs: {completion_kwargs}")
+
+                    # Make LiteLLM call
                     response = await litellm.acompletion(**completion_kwargs)
 
                     if response is None:
@@ -172,10 +269,16 @@ class MultiLLMService:
                     logger.error(
                         f"Error calling litellm.acompletion: {e}", exc_info=True
                     )
+                    yield {"type": "error", "error": str(e)}
                     raise
 
-                # Stream response
+                # Initialize tool call buffers
+                tool_buffers = {}
+                active_tool_ids = set()
+                last_tool_id = None
                 chunk_count = 0
+
+                # Stream response
                 async for chunk in response:
                     chunk_count += 1
                     logger.debug(f"Received chunk {chunk_count}: {chunk}")
@@ -183,35 +286,179 @@ class MultiLLMService:
                     if hasattr(chunk, "choices") and chunk.choices:
                         delta = chunk.choices[0].delta
 
-                        # Handle content streaming
-                        if hasattr(delta, "content") and delta.content:
-                            content = delta.content
-                            assistant_content.append(content)
-                            yield {"type": "content", "content": content}
-
-                        # Handle finish reason
+                        # Check for finish_reason
+                        finish_reason = None
                         if (
                             hasattr(chunk.choices[0], "finish_reason")
                             and chunk.choices[0].finish_reason
                         ):
                             finish_reason = chunk.choices[0].finish_reason
-                            if finish_reason == "stop":
-                                break
 
-                logger.info(f"Received {chunk_count} chunks from LiteLLM")
+                        # Handle content streaming
+                        if getattr(delta, "content", None):
+                            content = delta.content
+                            assistant_buffer.append(content)
+                            yield {"type": "content", "content": content}
 
-                # Persist final assistant message
-                final_content = "".join(assistant_content)
-                if persistence and final_content:
-                    await self.message_manager.add_assistant_message(
-                        session_id, final_content
-                    )
+                        # Handle tool-call streaming (buffered)
+                        if getattr(delta, "tool_calls", None) and tool_manager:
+                            for tc in delta.tool_calls:
+                                tc_id = getattr(tc, "id", None)
+                                tc_name = (
+                                    getattr(tc.function, "name", None)
+                                    if hasattr(tc, "function")
+                                    else None
+                                )
+                                tc_args = (
+                                    getattr(tc.function, "arguments", None)
+                                    if hasattr(tc, "function")
+                                    else None
+                                )
 
-                yield {"type": "complete", "content": final_content}
+                                # New tool call (has both id and name)
+                                if tc_id and tc_name:
+                                    tool_buffers[tc_id] = {"name": tc_name, "args": ""}
+                                    last_tool_id = tc_id
+                                    active_tool_ids.add(tc_id)
+                                    logger.debug(f"New tool call: {tc_id} - {tc_name}")
 
-            except Exception as e:
-                logger.error(f"Error in chat completion: {e}", exc_info=True)
-                yield {"type": "error", "error": str(e)}
+                                # Arguments for specific tool (has id but no name)
+                                elif tc_id and tc_id in tool_buffers and tc_args:
+                                    tool_buffers[tc_id]["args"] += tc_args
+
+                                # Continuation of existing tool (only arguments, no id/name)
+                                elif (
+                                    tc_args
+                                    and last_tool_id
+                                    and last_tool_id in tool_buffers
+                                ):
+                                    tool_buffers[last_tool_id]["args"] += tc_args
+
+                                # Fallback: append to most recent tool if we have args but no clear target
+                                elif tc_args and last_tool_id:
+                                    if last_tool_id not in tool_buffers:
+                                        tool_buffers[last_tool_id] = {
+                                            "name": "unknown",
+                                            "args": "",
+                                        }
+                                        active_tool_ids.add(last_tool_id)
+                                    tool_buffers[last_tool_id]["args"] += tc_args
+
+                    # Process completed tool calls on finish_reason
+                    if (
+                        hasattr(chunk, "choices")
+                        and chunk.choices
+                        and chunk.choices[0].finish_reason in ("tool_calls", "stop")
+                    ):
+                        logger.info(f"Finish reason: {chunk.choices[0].finish_reason}")
+
+                        # Check if there are any active tool calls to process
+                        tool_calls_processed = False
+                        for tool_id in list(active_tool_ids):
+                            buf = tool_buffers.pop(tool_id, None)
+                            if buf:
+                                tool_calls_processed = True
+                                try:
+                                    args = json.loads(buf["args"] or "{}")
+                                    logger.info(
+                                        f"Executing tool: {buf['name']} with args: {args}"
+                                    )
+
+                                    # Add assistant tool call message
+                                    tool_call_msg = {
+                                        "role": "assistant",
+                                        "tool_calls": [
+                                            {
+                                                "id": tool_id,
+                                                "type": "function",
+                                                "function": {
+                                                    "name": buf["name"],
+                                                    "arguments": json.dumps(args),
+                                                },
+                                            }
+                                        ],
+                                    }
+                                    current_msgs.append(tool_call_msg)
+
+                                    # Execute tool and add to conversation
+                                    result = await tool_manager.execute_tool(
+                                        buf["name"], args
+                                    )
+                                    tool_result_msg = {
+                                        "role": "tool",
+                                        "name": buf["name"],
+                                        "content": result,
+                                        "tool_call_id": tool_id,
+                                    }
+                                    current_msgs.append(tool_result_msg)
+
+                                    # Persist tool message if enabled
+                                    if persistence:
+                                        await self.message_manager.add_tool_message(
+                                            session_id, result, buf["name"], tool_id
+                                        )
+
+                                    yield {
+                                        "type": "tool_result",
+                                        "name": buf["name"],
+                                        "result": result,
+                                    }
+                                except json.JSONDecodeError as e:
+                                    logger.error(f"Failed to parse tool arguments: {e}")
+                                    error_msg = {
+                                        "role": "tool",
+                                        "content": f"Error parsing arguments: {str(e)}",
+                                        "tool_call_id": tool_id,
+                                    }
+                                    current_msgs.append(error_msg)
+                                    yield {"type": "tool_error", "error": str(e)}
+                                except Exception as err:
+                                    logger.error(
+                                        f"Tool execution error: {err}", exc_info=True
+                                    )
+                                    error_msg = {
+                                        "role": "tool",
+                                        "content": f"Error: {str(err)}",
+                                        "tool_call_id": tool_id,
+                                    }
+                                    current_msgs.append(error_msg)
+                                    yield {"type": "tool_error", "error": str(err)}
+
+                                active_tool_ids.remove(tool_id)
+
+                        # Decide whether to continue or break based on whether tool calls were processed
+                        if (
+                            tool_calls_processed
+                            or chunk.choices[0].finish_reason == "tool_calls"
+                        ):
+                            # Either we processed tool calls or the finish reason explicitly indicates tool calls
+                            logger.info(
+                                "Tool calls processed, continuing to next iteration"
+                            )
+                            break
+                        else:
+                            # finish_reason is "stop" and no tool calls were processed - exit the while loop
+                            logger.info("Conversation complete, no more tool calls")
+                            should_continue = False
+                            break
+                else:
+                    # No more chunks, break loop
+                    logger.info("Stream ended, no more chunks")
+                    should_continue = False
+                    break
+
+                logger.info(f"Received {chunk_count} chunks in iteration {iteration}")
+
+            # Persist final assistant message
+            final_content = "".join(assistant_buffer)
+            if persistence and final_content:
+                await self.message_manager.add_assistant_message(
+                    session_id, final_content
+                )
+
+            yield {"type": "complete", "content": final_content}
+
+        logger.debug("Semaphore released")
 
     async def get_available_models(
         self, provider: Optional[str] = None
@@ -442,3 +689,74 @@ class MultiLLMService:
     async def close(self):
         """Clean up resources."""
         pass
+
+    def _augment_system_prompt(
+        self,
+        system_prompt: str,
+        tools_prompt: Optional[str],
+        tools: Optional[List[Tool]],
+    ) -> str:
+        """Augment system prompt with tool information if tools are provided."""
+        prompt_parts = []
+
+        if system_prompt:
+            prompt_parts.append(system_prompt)
+
+        if tools_prompt:
+            prompt_parts.append(tools_prompt)
+        elif tools:
+            # Auto-generate tools prompt if tools provided but no custom prompt
+            tool_names = [t["function"]["name"] for t in tools]
+            prompt_parts.append(
+                f"You have access to the following tools: {', '.join(tool_names)}. "
+                "Use them when appropriate to help answer the user's questions."
+            )
+
+        return "\n\n".join(prompt_parts)
+
+    def _format_tools(self, tools: List[Tool]) -> List[Dict[str, Any]]:
+        """Format tools for LiteLLM function calling format."""
+        # LiteLLM expects tools in OpenAI format
+        formatted_tools = []
+        for tool in tools:
+            if isinstance(tool, dict) and "function" in tool:
+                formatted_tools.append(tool)
+            else:
+                logger.warning(f"Invalid tool format: {tool}")
+        return formatted_tools
+
+    async def _transcribe_audio_fallback(self, audio_path: str) -> Optional[str]:
+        """Fallback audio transcription using Whisper via OpenAI API."""
+        try:
+            # Check if OpenAI API key is available
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                logger.warning("No OpenAI API key for audio transcription fallback")
+                return None
+
+            # Use OpenAI Whisper API for transcription
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                with open(audio_path, "rb") as audio_file:
+                    files = {"file": (os.path.basename(audio_path), audio_file)}
+                    data = {"model": "whisper-1"}
+                    headers = {"Authorization": f"Bearer {api_key}"}
+
+                    response = await client.post(
+                        "https://api.openai.com/v1/audio/transcriptions",
+                        files=files,
+                        data=data,
+                        headers=headers,
+                    )
+
+                    if response.status_code == 200:
+                        result = response.json()
+                        return result.get("text", "")
+                    else:
+                        logger.error(
+                            f"Whisper API error: {response.status_code} - {response.text}"
+                        )
+                        return None
+
+        except Exception as e:
+            logger.error(f"Audio transcription fallback failed: {e}")
+            return None

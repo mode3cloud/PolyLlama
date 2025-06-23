@@ -47,26 +47,36 @@ init_worker_by_lua_block {
             return true
         end
         
-        -- Get Authorization header
-        local auth_header = ngx.req.get_headers()["Authorization"]
-        if not auth_header then
+        local headers = ngx.req.get_headers()
+        local provided_key = nil
+        
+        -- Check api-key header
+        if headers["api-key"] then
+            provided_key = headers["api-key"]
+        -- Check x-api-key header
+        elseif headers["x-api-key"] then
+            provided_key = headers["x-api-key"]
+        -- Check Authorization header
+        elseif headers["Authorization"] then
+            -- Extract bearer token
+            local token = string.match(headers["Authorization"], "Bearer%s+(.+)")
+            if token then
+                provided_key = token
+            else
+                ngx.status = 401
+                ngx.header["Content-Type"] = "application/json"
+                ngx.say(cjson.encode({error = "Invalid Authorization header format. Expected: Bearer <token>"}))
+                return ngx.exit(401)
+            end
+        else
             ngx.status = 401
             ngx.header["Content-Type"] = "application/json"
-            ngx.say(cjson.encode({error = "Missing Authorization header"}))
+            ngx.say(cjson.encode({error = "Missing authentication header. Expected one of: api-key, x-api-key, or Authorization: Bearer <token>"}))
             return ngx.exit(401)
         end
         
-        -- Extract bearer token
-        local token = string.match(auth_header, "Bearer%s+(.+)")
-        if not token then
-            ngx.status = 401
-            ngx.header["Content-Type"] = "application/json"
-            ngx.say(cjson.encode({error = "Invalid Authorization header format. Expected: Bearer <token>"}))
-            return ngx.exit(401)
-        end
-        
-        -- Validate token
-        if token ~= required_key then
+        -- Validate the provided key
+        if provided_key ~= required_key then
             ngx.status = 401
             ngx.header["Content-Type"] = "application/json"
             ngx.say(cjson.encode({error = "Invalid API key"}))

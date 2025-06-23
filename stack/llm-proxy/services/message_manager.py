@@ -27,9 +27,15 @@ class MessageManager:
             self.sessions[session_id] = {
                 "id": session_id,
                 "created_at": datetime.now().isoformat(),
-                "messages": []
+                "messages": [],
+                "metadata": {}
             }
         return self.sessions[session_id]
+    
+    async def update_session_metadata(self, session_id: str, metadata: Dict[str, Any]) -> None:
+        """Update session metadata."""
+        session = await self.get_session_messages(session_id)
+        session["metadata"].update(metadata)
     
     async def add_system_message(self, session_id: str, content: str) -> None:
         """Add a system message to the session."""

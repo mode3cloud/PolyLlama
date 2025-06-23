@@ -85,19 +85,19 @@ export async function GET(req: NextRequest) {
     console.log("User authenticated:", userName);
 
     // Create redirect response
-    const redirectResponse = baseDomain 
+    const redirectResponse = baseDomain
       ? NextResponse.redirect(`${baseDomain}/ui`)
       : NextResponse.redirect(new URL("/ui", req.url));
-    
+
     // Set cookies on the redirect response
     redirectResponse.cookies.set("auth_token_server", accessToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: 15 * 60, // 15 minutes in seconds
+      maxAge: 1 * 60 * 60, // 1 hour in seconds
     });
-    
+
     redirectResponse.cookies.set("refresh_token_server", refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
@@ -105,7 +105,7 @@ export async function GET(req: NextRequest) {
       path: "/",
       maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
     });
-    
+
     return redirectResponse;
   } catch (error: any) {
     console.error("Callback error:", error);

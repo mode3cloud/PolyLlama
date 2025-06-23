@@ -5,6 +5,7 @@ import { ChatMessage, ChatModel, StreamChunk } from '../types'
 import { fetchWithAuth } from '../lib/fetchWithAuth'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import SessionSidebar from './SessionSidebar'
 
 // Use relative URLs to hit our Next.js API routes
 const API_BASE_URL = '/ui/api/chat'
@@ -19,7 +20,9 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
   const [isLoading, setIsLoading] = useState(false)
   const [models, setModels] = useState<ChatModel[]>([])
   const [selectedModel, setSelectedModel] = useState<string>('')
-  const [sessionId] = useState(() => `session-${Date.now()}`)
+  const [sessionId, setSessionId] = useState(() => `session-${Date.now()}`)
+  const [showSidebar, setShowSidebar] = useState(true)
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null)
@@ -41,6 +44,57 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
       console.error('Failed to fetch models:', error)
     }
   }, [selectedModel])
+
+  // Load session messages
+  const loadSession = useCallback(async (sessionId: string) => {
+    try {
+      const response = await fetchWithAuth(`${API_BASE_URL}/sessions/${sessionId}`)
+      if (response.ok) {
+        const data = await response.json()
+        const sessionMessages = data.messages.map((msg: any) => ({
+          role: msg.role,
+          content: msg.content,
+          timestamp: msg.timestamp
+        }))
+        setMessages(sessionMessages)
+        
+        // Restore model selection if available in metadata
+        if (data.metadata?.model && models.length > 0) {
+          const modelExists = models.some(m => m.id === data.metadata.model)
+          if (modelExists) {
+            setSelectedModel(data.metadata.model)
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load session:', error)
+    }
+  }, [models])
+
+  // Handle session selection
+  const handleSessionSelect = useCallback((newSessionId: string) => {
+    if (newSessionId === sessionId) return
+    
+    // Stop any ongoing generation
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    
+    setSessionId(newSessionId)
+    loadSession(newSessionId)
+  }, [sessionId, loadSession])
+
+  // Handle new session
+  const handleNewSession = useCallback(() => {
+    // Stop any ongoing generation
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    
+    const newSessionId = `session-${Date.now()}`
+    setSessionId(newSessionId)
+    setMessages([])
+  }, [])
 
   useEffect(() => {
     fetchModels()
@@ -81,6 +135,11 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
         }),
         signal: abortControllerRef.current.signal
       })
+      
+      // Trigger sidebar refresh after first message
+      if (messages.length === 0) {
+        setTimeout(() => setRefreshTrigger(Date.now()), 500)
+      }
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`)
@@ -172,7 +231,9 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
   }
 
   const clearChat = () => {
-    setMessages([])
+    if (confirm('Are you sure you want to clear the current chat? This will start a new session.')) {
+      handleNewSession()
+    }
   }
 
   const copyMessage = (content: string) => {
@@ -212,11 +273,31 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
   }
 
   return (
-    <div className="flex flex-col h-full bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 p-4 flex-shrink-0">
-        <div className="flex items-center justify-between max-w-4xl mx-auto">
+    <div className="flex h-full">
+      {/* Session Sidebar */}
+      {showSidebar && (
+        <SessionSidebar
+          currentSessionId={sessionId}
+          onSessionSelect={handleSessionSelect}
+          onNewSession={handleNewSession}
+          refreshTrigger={refreshTrigger}
+        />
+      )}
+      
+      {/* Main Chat Area */}
+      <div className="flex flex-col flex-1 bg-gray-50">
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 p-4 flex-shrink-0">
+          <div className="flex items-center justify-between max-w-4xl mx-auto">
           <div className="flex items-center gap-4">
+            <button
+              onClick={() => setShowSidebar(!showSidebar)}
+              className="px-3 py-2 text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors"
+              title={showSidebar ? 'Hide sidebar' : 'Show sidebar'}
+            >
+              {showSidebar ? '◀' : '▶'}
+            </button>
+            
             <select
               value={selectedModel}
               onChange={(e) => setSelectedModel(e.target.value)}
@@ -534,6 +615,7 @@ export default function ChatInterface({ onRefresh }: ChatInterfaceProps) {
             )}
           </div>
         </div>
+      </div>
       </div>
     </div>
   )

@@ -126,6 +126,10 @@ class MultiLLMService:
         if persistence and session_id:
             session_data = await self.message_manager.get_session_messages(session_id)
             conversation_history = session_data.get("messages", [])
+            # Update session metadata with current model
+            await self.message_manager.update_session_metadata(
+                session_id, {"model": self.model}
+            )
         else:
             conversation_history = []
 

@@ -32,6 +32,7 @@ class SessionResponse(BaseModel):
     id: str
     created_at: str
     messages: List[Dict[str, Any]]
+    metadata: Dict[str, Any] = {}
 
 
 @sessions_router.get("", response_model=SessionListResponse)
@@ -71,7 +72,8 @@ async def get_session(session_id: str, request: Request):
         return SessionResponse(
             id=session_data["id"],
             created_at=session_data["created_at"],
-            messages=session_data["messages"]
+            messages=session_data["messages"],
+            metadata=session_data.get("metadata", {})
         )
         
     except Exception as e:

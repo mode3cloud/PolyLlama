@@ -4,6 +4,7 @@ import { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { ChatMessage } from '../types'
+import ImagePreview from './ImagePreview'
 
 interface MessageDisplayProps {
   message: ChatMessage
@@ -25,6 +26,7 @@ export default function MessageDisplay({
   isLoading
 }: MessageDisplayProps) {
   const [copiedCode, setCopiedCode] = useState<{ [key: string]: boolean }>({})
+  const [previewImage, setPreviewImage] = useState<{ url: string; name?: string } | null>(null)
 
   const extractText = (node: React.ReactNode): string => {
     if (typeof node === 'string') return node
@@ -276,7 +278,7 @@ export default function MessageDisplay({
                             src={image.url}
                             alt={image.name || `Image ${imgIndex + 1}`}
                             className="max-h-64 max-w-full rounded border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
-                            onClick={() => window.open(image.url, '_blank')}
+                            onClick={() => setPreviewImage({ url: image.url, name: image.name })}
                           />
                         </div>
                       )
@@ -387,6 +389,14 @@ export default function MessageDisplay({
           </button>
         </div>
       </div>
+      
+      {/* Image Preview Modal */}
+      <ImagePreview
+        imageUrl={previewImage?.url || ''}
+        imageName={previewImage?.name}
+        isOpen={!!previewImage}
+        onClose={() => setPreviewImage(null)}
+      />
     </div>
   )
 }

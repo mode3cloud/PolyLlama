@@ -55,6 +55,18 @@ class LLMProxyConfig:
     )
     MULTI_LLM_CACHE_SIZE: int = int(os.getenv("MULTI_LLM_CACHE_SIZE", "1000"))
 
+    # Audio Service Configuration
+    AUDIO_MODEL_PATH: str = os.getenv(
+        "AUDIO_MODEL_PATH", "/app/models/kokoro-v1.0.onnx"
+    )
+    AUDIO_VOICES_PATH: str = os.getenv(
+        "AUDIO_VOICES_PATH", "/app/models/voices-v1.0.bin"
+    )
+    AUDIO_DEFAULT_VOICE: str = os.getenv("AUDIO_DEFAULT_VOICE", "af_bella")
+    AUDIO_DEFAULT_SPEED: float = float(os.getenv("AUDIO_DEFAULT_SPEED", "1.25"))
+    AUDIO_DEFAULT_LANG: str = os.getenv("AUDIO_DEFAULT_LANG", "en-us")
+    AUDIO_USE_GPU: bool = os.getenv("AUDIO_USE_GPU", "false").lower() == "true"
+
     @classmethod
     def get_neo4j_config(cls) -> dict:
         """Get Neo4j connection configuration."""

@@ -8,11 +8,13 @@ interface ChatHeaderProps {
   isLoading: boolean
   showSidebar: boolean
   temperature: number
+  audioEnabled: boolean
   onModelChange: (model: string) => void
   onToggleSidebar: () => void
   onClearChat: () => void
   onExportChat: () => void
   onTemperatureChange: (temp: number) => void
+  onToggleAudio: () => void
   hasMessages: boolean
 }
 
@@ -22,11 +24,13 @@ export default function ChatHeader({
   isLoading,
   showSidebar,
   temperature,
+  audioEnabled,
   onModelChange,
   onToggleSidebar,
   onClearChat,
   onExportChat,
   onTemperatureChange,
+  onToggleAudio,
   hasMessages
 }: ChatHeaderProps) {
   const getProviderIcon = (provider: string) => {
@@ -106,6 +110,18 @@ export default function ChatHeader({
           </div>
 
           <div className="border-l border-gray-300 h-6 mx-1" />
+
+          <button
+            onClick={onToggleAudio}
+            className={`px-3 py-2 text-sm rounded-lg transition-colors ${
+              audioEnabled 
+                ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' 
+                : 'text-gray-600 hover:text-gray-900 hover:bg-gray-100'
+            }`}
+            title={audioEnabled ? 'Disable audio responses' : 'Enable audio responses'}
+          >
+            {audioEnabled ? '🔊' : '🔇'} Audio
+          </button>
 
           <button
             onClick={onClearChat}

@@ -3,7 +3,8 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { ChatMessage, ChatModel, ChatImage } from '../types'
 import { fetchWithAuth } from '../lib/fetchWithAuth'
-import { streamChat, syncSessionMessages, exportChatToMarkdown } from '../lib/chatUtils'
+import { streamChat, streamChatWithAudio, syncSessionMessages, exportChatToMarkdown } from '../lib/chatUtils'
+import { useAudioPlayer } from '../hooks/useAudioPlayer'
 import SessionSidebar from './SessionSidebar'
 import ChatHeader from './ChatHeader'
 import ChatInput from './ChatInput'
@@ -27,6 +28,8 @@ export default function ChatInterface() {
   const abortControllerRef = useRef<AbortController | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null)
   const [temperature, setTemperature] = useState(0.2)
+  const [audioEnabled, setAudioEnabled] = useState(false)
+  const { playAudio, stopAudio, isPlaying: isAudioPlaying } = useAudioPlayer()
 
   // Fetch available models
   const fetchModels = useCallback(async () => {
@@ -190,32 +193,67 @@ export default function ChatInterface() {
     setMessages(prev => [...prev, assistantMessage])
 
     try {
-      await streamChat({
-        messages: [...messages, userMessage],
-        model: selectedModel,
-        sessionId: sessionId,
-        temperature: temperature,
-        signal: abortControllerRef.current.signal,
-        onChunk: (content) => {
-          assistantMessage.content += content
-          setMessages(prev =>
-            prev.map((msg, idx) =>
-              idx === prev.length - 1 ? { ...assistantMessage } : msg
+      if (audioEnabled) {
+        // Use audio streaming
+        await streamChatWithAudio({
+          messages: [...messages, userMessage],
+          model: selectedModel,
+          sessionId: sessionId,
+          temperature: temperature,
+          signal: abortControllerRef.current.signal,
+          onChunk: (content) => {
+            assistantMessage.content += content
+            setMessages(prev =>
+              prev.map((msg, idx) =>
+                idx === prev.length - 1 ? { ...assistantMessage } : msg
+              )
             )
-          )
-        },
-        onError: (error) => {
-          assistantMessage.content += `\n\n*Error: ${error}*`
-          setMessages(prev =>
-            prev.map((msg, idx) =>
-              idx === prev.length - 1 ? { ...assistantMessage } : msg
+          },
+          onError: (error) => {
+            assistantMessage.content += `\n\n*Error: ${error}*`
+            setMessages(prev =>
+              prev.map((msg, idx) =>
+                idx === prev.length - 1 ? { ...assistantMessage } : msg
+              )
             )
-          )
-        },
-        onDone: () => {
-          // Stream completed
-        }
-      })
+          },
+          onDone: () => {
+            // Stream completed
+          },
+          onAudio: (audioData) => {
+            // Play audio chunk
+            playAudio(audioData.audio, audioData.sample_rate)
+          }
+        })
+      } else {
+        // Use regular text streaming
+        await streamChat({
+          messages: [...messages, userMessage],
+          model: selectedModel,
+          sessionId: sessionId,
+          temperature: temperature,
+          signal: abortControllerRef.current.signal,
+          onChunk: (content) => {
+            assistantMessage.content += content
+            setMessages(prev =>
+              prev.map((msg, idx) =>
+                idx === prev.length - 1 ? { ...assistantMessage } : msg
+              )
+            )
+          },
+          onError: (error) => {
+            assistantMessage.content += `\n\n*Error: ${error}*`
+            setMessages(prev =>
+              prev.map((msg, idx) =>
+                idx === prev.length - 1 ? { ...assistantMessage } : msg
+              )
+            )
+          },
+          onDone: () => {
+            // Stream completed
+          }
+        })
+      }
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         console.log('Request aborted')
@@ -237,6 +275,9 @@ export default function ChatInterface() {
   const stopGeneration = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
+    }
+    if (audioEnabled) {
+      stopAudio()
     }
   }
 
@@ -299,32 +340,67 @@ export default function ChatInterface() {
     setMessages(prev => [...prev, assistantMessage])
 
     try {
-      await streamChat({
-        messages: [...truncatedMessages, userMessage],
-        model: selectedModel,
-        sessionId: sessionId,
-        temperature: temperature,
-        signal: abortControllerRef.current.signal,
-        onChunk: (content) => {
-          assistantMessage.content += content
-          setMessages(prev =>
-            prev.map((msg, idx) =>
-              idx === prev.length - 1 ? { ...assistantMessage } : msg
+      if (audioEnabled) {
+        // Use audio streaming
+        await streamChatWithAudio({
+          messages: [...truncatedMessages, userMessage],
+          model: selectedModel,
+          sessionId: sessionId,
+          temperature: temperature,
+          signal: abortControllerRef.current.signal,
+          onChunk: (content) => {
+            assistantMessage.content += content
+            setMessages(prev =>
+              prev.map((msg, idx) =>
+                idx === prev.length - 1 ? { ...assistantMessage } : msg
+              )
             )
-          )
-        },
-        onError: (error) => {
-          assistantMessage.content += `\n\n*Error: ${error}*`
-          setMessages(prev =>
-            prev.map((msg, idx) =>
-              idx === prev.length - 1 ? { ...assistantMessage } : msg
+          },
+          onError: (error) => {
+            assistantMessage.content += `\n\n*Error: ${error}*`
+            setMessages(prev =>
+              prev.map((msg, idx) =>
+                idx === prev.length - 1 ? { ...assistantMessage } : msg
+              )
             )
-          )
-        },
-        onDone: () => {
-          // Stream completed
-        }
-      })
+          },
+          onDone: () => {
+            // Stream completed
+          },
+          onAudio: (audioData) => {
+            // Play audio chunk
+            playAudio(audioData.audio, audioData.sample_rate)
+          }
+        })
+      } else {
+        // Use regular text streaming
+        await streamChat({
+          messages: [...truncatedMessages, userMessage],
+          model: selectedModel,
+          sessionId: sessionId,
+          temperature: temperature,
+          signal: abortControllerRef.current.signal,
+          onChunk: (content) => {
+            assistantMessage.content += content
+            setMessages(prev =>
+              prev.map((msg, idx) =>
+                idx === prev.length - 1 ? { ...assistantMessage } : msg
+              )
+            )
+          },
+          onError: (error) => {
+            assistantMessage.content += `\n\n*Error: ${error}*`
+            setMessages(prev =>
+              prev.map((msg, idx) =>
+                idx === prev.length - 1 ? { ...assistantMessage } : msg
+              )
+            )
+          },
+          onDone: () => {
+            // Stream completed
+          }
+        })
+      }
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
         console.log('Request aborted')
@@ -380,11 +456,13 @@ export default function ChatInterface() {
           isLoading={isLoading}
           showSidebar={showSidebar}
           temperature={temperature}
+          audioEnabled={audioEnabled}
           onModelChange={setSelectedModel}
           onToggleSidebar={() => setShowSidebar(!showSidebar)}
           onClearChat={clearChat}
           onExportChat={exportChat}
           onTemperatureChange={setTemperature}
+          onToggleAudio={() => setAudioEnabled(!audioEnabled)}
           hasMessages={messages.length > 0}
         />
 
@@ -423,6 +501,8 @@ export default function ChatInterface() {
           isLoading={isLoading}
           selectedModel={selectedModel}
           supportsVision={supportsVision}
+          isAudioPlaying={isAudioPlaying}
+          audioEnabled={audioEnabled}
           onInputChange={setInput}
           onSendMessage={sendMessage}
           onStopGeneration={stopGeneration}

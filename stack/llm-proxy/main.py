@@ -22,6 +22,7 @@ from api.models import models_router
 from services.multi_llm_service import MultiLLMService
 from services.message_manager import MessageManager
 from services.mcp_client import MCPClient
+from services.audio_service import AudioService
 from config import LLMProxyConfig
 
 # Configure logging
@@ -52,12 +53,13 @@ app.add_middleware(
 llm_service: MultiLLMService
 message_manager: MessageManager
 mcp_client: MCPClient
+audio_service: AudioService
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
-    global llm_service, message_manager, mcp_client
+    global llm_service, message_manager, mcp_client, audio_service
 
     logger.info("Starting PolyLlama LLM Proxy Service...")
 
@@ -66,6 +68,13 @@ async def startup_event():
     llm_service = MultiLLMService(neo4j_driver=None)  # No Neo4j for now
     llm_service.message_manager = message_manager  # Set message manager directly
     mcp_client = MCPClient(LLMProxyConfig.MCP_SERVICE_URL)
+    
+    # Initialize audio service
+    audio_service = AudioService(
+        model_path=LLMProxyConfig.AUDIO_MODEL_PATH,
+        voices_path=LLMProxyConfig.AUDIO_VOICES_PATH
+    )
+    await audio_service.initialize()
 
     # Connect MCP client
     await mcp_client.connect()
@@ -74,6 +83,7 @@ async def startup_event():
     app.state.llm_service = llm_service
     app.state.message_manager = message_manager
     app.state.mcp_client = mcp_client
+    app.state.audio_service = audio_service
 
     logger.info("PolyLlama LLM Proxy Service initialized successfully")
 
@@ -81,7 +91,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up services on shutdown."""
-    global llm_service, message_manager, mcp_client
+    global llm_service, message_manager, mcp_client, audio_service
 
     logger.info("Shutting down PolyLlama LLM Proxy Service...")
 
@@ -89,6 +99,8 @@ async def shutdown_event():
         await llm_service.close()
     if mcp_client:
         await mcp_client.close()
+    if audio_service:
+        await audio_service.close()
 
     logger.info("PolyLlama LLM Proxy Service shutdown complete")
 

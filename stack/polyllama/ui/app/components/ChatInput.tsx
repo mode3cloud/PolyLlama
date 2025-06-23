@@ -8,6 +8,8 @@ interface ChatInputProps {
   isLoading: boolean
   selectedModel: string
   supportsVision: boolean
+  isAudioPlaying?: boolean
+  audioEnabled?: boolean
   onInputChange: (value: string) => void
   onSendMessage: (images?: ChatImage[]) => void
   onStopGeneration: () => void
@@ -18,6 +20,8 @@ export default function ChatInput({
   isLoading,
   selectedModel,
   supportsVision,
+  isAudioPlaying,
+  audioEnabled,
   onInputChange,
   onSendMessage,
   onStopGeneration
@@ -95,6 +99,20 @@ export default function ChatInput({
   return (
     <div className="bg-white border-t border-gray-200 p-4 flex-shrink-0">
       <div className="max-w-4xl mx-auto">
+        {/* Audio status indicator */}
+        {audioEnabled && isAudioPlaying && (
+          <div className="mb-2 flex items-center justify-center">
+            <div className="flex items-center gap-2 text-sm text-blue-600">
+              <div className="flex items-center gap-1">
+                <div className="w-1 h-3 bg-blue-600 rounded-full animate-pulse"></div>
+                <div className="w-1 h-4 bg-blue-600 rounded-full animate-pulse animation-delay-100"></div>
+                <div className="w-1 h-3 bg-blue-600 rounded-full animate-pulse animation-delay-200"></div>
+              </div>
+              <span>Playing audio response...</span>
+            </div>
+          </div>
+        )}
+        
         {/* Image preview area */}
         {attachedImages.length > 0 && (
           <div className="mb-3 flex flex-wrap gap-2">

@@ -14,6 +14,13 @@ interface StreamChatOptions {
   onDone: () => void
 }
 
+interface StreamChatAudioOptions extends StreamChatOptions {
+  voice?: string
+  speechSpeed?: number
+  speechLang?: string
+  onAudio?: (audioData: { audio: string; sample_rate: number; text: string; format: string }) => void
+}
+
 export async function streamChat({
   messages,
   model,
@@ -102,6 +109,120 @@ export async function streamChat({
             }
           } catch (parseError) {
             console.error('Failed to parse chunk:', data, parseError)
+          }
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
+export async function streamChatWithAudio({
+  messages,
+  model,
+  sessionId,
+  temperature,
+  signal,
+  onChunk,
+  onError,
+  onDone,
+  voice,
+  speechSpeed,
+  speechLang,
+  onAudio
+}: StreamChatAudioOptions) {
+  // Convert messages to include attachments for images
+  const processedMessages = messages.map(msg => {
+    const processedMsg: {
+      role: string;
+      content: string;
+      timestamp: string;
+      attachments?: string[];
+    } = {
+      role: msg.role,
+      content: msg.content,
+      timestamp: msg.timestamp || new Date().toISOString()
+    }
+    
+    // Add attachments if message has images
+    if (msg.images && msg.images.length > 0) {
+      processedMsg.attachments = msg.images.map(img => img.url)
+    }
+    
+    return processedMsg
+  })
+
+  const response = await fetchWithAuth(`${API_BASE_URL}/completions_audio`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      messages: processedMessages,
+      model,
+      session_id: sessionId,
+      stream: true,
+      temperature,
+      voice,
+      speech_speed: speechSpeed,
+      speech_lang: speechLang
+    }),
+    signal
+  })
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+  }
+
+  const reader = response.body?.getReader()
+  if (!reader) {
+    throw new Error('No response body')
+  }
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const data = line.slice(6).trim()
+          if (data === '') continue
+
+          try {
+            const event = JSON.parse(data)
+
+            if (event.type === 'text') {
+              // Handle text chunks same as before
+              const chunk = event.data
+              if (chunk.type === 'content' && chunk.content) {
+                onChunk(chunk.content)
+              } else if (chunk.type === 'error') {
+                console.error('Stream error:', chunk.error)
+                onError(chunk.error || 'Unknown error')
+              }
+            } else if (event.type === 'audio' && event.data && onAudio) {
+              // Handle audio chunks
+              onAudio(event.data)
+            } else if (event.type === 'error') {
+              console.error('Stream error:', event.error)
+              onError(event.error || 'Unknown error')
+            } else if (event.type === 'done') {
+              onDone()
+              return
+            } else if (event.type === 'connected') {
+              // Connection established
+            }
+          } catch (parseError) {
+            console.error('Failed to parse event:', data, parseError)
           }
         }
       }

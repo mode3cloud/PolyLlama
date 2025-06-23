@@ -196,8 +196,10 @@ class PolyLlamaCLI:
         
         # Show CPU routing configuration
         cpu_routing_mode = os.environ.get("POLYLLAMA_CPU_ROUTING_MODE", "prefer_gpu")
-        cpu_instances = int(os.environ.get("POLYLLAMA_CPU_INSTANCES", "0"))
-        mixed_mode = os.environ.get("POLYLLAMA_MIXED_MODE", "false").lower() == "true"
+        cpu_instances_env = os.environ.get("POLYLLAMA_CPU_INSTANCES", "0")
+        cpu_instances = int(cpu_instances_env) if cpu_instances_env else 0
+        mixed_mode_env = os.environ.get("POLYLLAMA_MIXED_MODE", "false")
+        mixed_mode = mixed_mode_env.lower() == "true" if mixed_mode_env else False
         
         print("")
         print("🔧 Routing Configuration:")

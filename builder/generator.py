@@ -68,8 +68,10 @@ class ComposeGenerator:
         instance_number = 1
         
         # Check if we should create CPU instances
-        cpu_instance_count = int(os.environ.get("POLYLLAMA_CPU_INSTANCES", "0"))
-        mixed_mode = os.environ.get("POLYLLAMA_MIXED_MODE", "false").lower() == "true"
+        cpu_instances_env = os.environ.get("POLYLLAMA_CPU_INSTANCES", "0")
+        cpu_instance_count = int(cpu_instances_env) if cpu_instances_env else 0
+        mixed_mode_env = os.environ.get("POLYLLAMA_MIXED_MODE", "false")
+        mixed_mode = mixed_mode_env.lower() == "true" if mixed_mode_env else False
         
         if not gpu_groups:
             # CPU-only configuration - create at least one CPU instance

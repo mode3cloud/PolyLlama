@@ -56,11 +56,43 @@ export default function ChatInterface() {
         // Filter to only show user and assistant messages in the UI
         const sessionMessages = data.messages
           .filter((msg: { role: string }) => msg.role === 'user' || msg.role === 'assistant')
-          .map((msg: { role: string; content: string; timestamp: string }) => ({
-            role: msg.role,
-            content: msg.content,
-            timestamp: msg.timestamp
-          }))
+          .map((msg: { role: string; content: unknown; timestamp: string; images?: unknown[] }) => {
+            // Handle content that might be an array with image objects
+            let messageContent = msg.content
+            let images = msg.images
+
+            // If content is an array, extract text and images
+            if (Array.isArray(msg.content)) {
+              const textContent = msg.content.find((item: { type: string; text?: string }) => item.type === 'text') as { text?: string } | undefined
+              const imageContent = msg.content.filter((item: { type: string }) => item.type === 'image_url')
+              
+              messageContent = textContent?.text || ''
+              
+              // Convert image_url format to our ChatImage format
+              if (imageContent.length > 0 && !images) {
+                images = imageContent.map((img: { image_url?: { url?: string; detail?: string } | string }) => {
+                  const imageUrl = img.image_url
+                  if (typeof imageUrl === 'string') {
+                    return { url: imageUrl }
+                  }
+                  return {
+                    url: imageUrl?.url || '',
+                    name: imageUrl?.detail || undefined
+                  }
+                })
+              }
+            } else if (typeof msg.content !== 'string') {
+              // If content is not a string and not an array, convert to string
+              messageContent = String(msg.content || '')
+            }
+
+            return {
+              role: msg.role,
+              content: messageContent,
+              timestamp: msg.timestamp,
+              images: images
+            }
+          })
         setMessages(sessionMessages)
 
         // Store model selection for restoration when models are loaded
@@ -238,11 +270,12 @@ export default function ChatInterface() {
     // Sync truncated messages with backend before resending
     await syncSessionMessages(sessionId, truncatedMessages)
 
-    // Resend the message
+    // Resend the message with images if present
     const userMessage: ChatMessage = {
       role: 'user',
       content: message.content,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      images: message.images
     }
 
     setMessages(prev => [...prev, userMessage])
@@ -371,7 +404,7 @@ export default function ChatInterface() {
 
             {!isLoadingSession && messages.map((message, index) => (
               <MessageDisplay
-                key={index}
+                key={`${message.timestamp}-${index}-${message.role}`}
                 message={message}
                 index={index}
                 onCopy={copyMessageWithFeedback}

@@ -51,7 +51,7 @@ export default function MessageDisplay({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const markdownComponents: any = {
     pre: ({ children }: { children: React.ReactNode }) => {
-      const key = `pre-${index}-${Date.now()}`
+      const key = `pre-${index}-${message.timestamp}`
       const copied = copiedCode[key] || false
 
       return (
@@ -136,6 +136,9 @@ export default function MessageDisplay({
   }
 
   const parseMessageContent = () => {
+    // Ensure content is a string
+    const contentStr = String(message.content || '')
+    
     // Check if content contains think/thought/output blocks (complete or incomplete)
     const completeThinkRegex = /<(think|thought)>([\s\S]*?)<\/(think|thought)>/gi
     const incompleteThinkRegex = /<(think|thought)>([\s\S]*?)$/i
@@ -150,7 +153,7 @@ export default function MessageDisplay({
 
     // Find all think/thought blocks
     completeThinkRegex.lastIndex = 0
-    while ((match = completeThinkRegex.exec(message.content)) !== null) {
+    while ((match = completeThinkRegex.exec(contentStr)) !== null) {
       allMatches.push({
         type: 'think',
         index: match.index,
@@ -161,7 +164,7 @@ export default function MessageDisplay({
 
     // Find all output blocks
     completeOutputRegex.lastIndex = 0
-    while ((match = completeOutputRegex.exec(message.content)) !== null) {
+    while ((match = completeOutputRegex.exec(contentStr)) !== null) {
       allMatches.push({
         type: 'output',
         index: match.index,
@@ -179,7 +182,7 @@ export default function MessageDisplay({
       if (matchItem.index > lastIndex) {
         parts.push({
           type: 'content',
-          text: message.content.slice(lastIndex, matchItem.index)
+          text: contentStr.slice(lastIndex, matchItem.index)
         })
       }
 
@@ -193,7 +196,7 @@ export default function MessageDisplay({
     }
 
     // Check for incomplete blocks at the end
-    const remainingContent = message.content.slice(lastIndex)
+    const remainingContent = contentStr.slice(lastIndex)
     const incompleteThinkMatch = incompleteThinkRegex.exec(remainingContent)
     const incompleteOutputMatch = incompleteOutputRegex.exec(remainingContent)
 
@@ -239,7 +242,7 @@ export default function MessageDisplay({
     if (parts.length === 0) {
       parts.push({
         type: 'content',
-        text: message.content
+        text: contentStr
       })
     }
 
@@ -258,20 +261,26 @@ export default function MessageDisplay({
           <div className="flex-1">
             {message.role === 'user' ? (
               <div>
-                <div className="whitespace-pre-wrap">{message.content}</div>
+                <div className="whitespace-pre-wrap">{String(message.content || '')}</div>
                 {message.images && message.images.length > 0 && (
                   <div className="mt-3 flex flex-wrap gap-2">
-                    {message.images.map((image, imgIndex) => (
-                      <div key={imgIndex} className="relative">
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={image.url}
-                          alt={image.name || `Image ${imgIndex + 1}`}
-                          className="max-h-64 max-w-full rounded border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
-                          onClick={() => window.open(image.url, '_blank')}
-                        />
-                      </div>
-                    ))}
+                    {message.images.map((image, imgIndex) => {
+                      // Ensure image has valid structure
+                      if (!image || typeof image !== 'object' || !image.url) {
+                        return null
+                      }
+                      return (
+                        <div key={imgIndex} className="relative">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={image.url}
+                            alt={image.name || `Image ${imgIndex + 1}`}
+                            className="max-h-64 max-w-full rounded border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
+                            onClick={() => window.open(image.url, '_blank')}
+                          />
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>

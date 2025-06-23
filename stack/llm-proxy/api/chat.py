@@ -405,10 +405,13 @@ async def _stream_chat_completion_with_audio(
                 # Stream chunks
                 async for chunk in chat_stream:
                     # Extract text content from chunk
-                    if isinstance(chunk, dict) and "content" in chunk:
-                        text_content = chunk.get("content", "")
-                        if text_content:
-                            await text_queue.put(text_content)
+                    if isinstance(chunk, dict):
+                        # Only process content chunks for audio generation
+                        # Skip "complete" events to avoid re-generating audio for the full message
+                        if chunk.get("type") == "content" and "content" in chunk:
+                            text_content = chunk.get("content", "")
+                            if text_content:
+                                await text_queue.put(text_content)
                     
                     # Also yield the original chunk as text event
                     chunk_data = json.dumps({"type": "text", "data": chunk})

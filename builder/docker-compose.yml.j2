@@ -40,8 +40,8 @@ services:
 
   llm-proxy:
     build:
-      context: ../../stack/llm-proxy
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: stack/llm-proxy/Dockerfile
     container_name: llm-proxy
     hostname: llm-proxy
     ports:

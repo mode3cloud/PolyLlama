@@ -609,6 +609,46 @@ class MultiLLMService:
 
         return models
 
+    async def check_ollama_vision_support(self, model_id: str) -> bool:
+        """Check if an Ollama model supports vision by calling /api/show."""
+        if not model_id.startswith('ollama/'):
+            return False
+            
+        # Extract the model name without the ollama/ prefix
+        model_name = model_id[7:]  # Remove "ollama/" prefix
+        
+        try:
+            headers = {"Content-Type": "application/json"}
+            # Add API key if configured
+            if os.getenv("POLYLLAMA_API_KEY"):
+                headers["Authorization"] = f"Bearer {os.getenv('POLYLLAMA_API_KEY')}"
+            
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    "http://router:11434/api/show",
+                    json={"name": model_name},
+                    headers=headers
+                )
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    # Check if capabilities array includes "vision"
+                    capabilities = data.get("capabilities", [])
+                    return "vision" in capabilities
+                else:
+                    logger.warning(f"Failed to get model details for {model_name}: {response.status_code}")
+                    # Fallback to pattern matching
+                    vision_patterns = ['vision', 'llava', 'bakllava', 'vl', 'minicpm-v']
+                    model_lower = model_name.lower()
+                    return any(pattern in model_lower for pattern in vision_patterns)
+                    
+        except Exception as e:
+            logger.warning(f"Error checking vision support for {model_name}: {e}")
+            # Fallback to pattern matching
+            vision_patterns = ['vision', 'llava', 'bakllava', 'vl', 'minicpm-v']
+            model_lower = model_name.lower()
+            return any(pattern in model_lower for pattern in vision_patterns)
+
     def _filter_supported_kwargs(self, model: str, kwargs: dict) -> dict:
         """Filter kwargs to only those supported by the model/provider."""
         try:

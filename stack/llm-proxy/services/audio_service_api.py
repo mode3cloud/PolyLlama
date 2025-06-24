@@ -10,7 +10,6 @@ import httpx
 import base64
 from typing import AsyncGenerator, Optional, Tuple, List
 import re
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -46,16 +45,18 @@ class AudioServiceAPI:
             if response.status_code == 200:
                 voices = response.json()
                 logger.info(
-                    f"Audio service initialized. Available voices: {len(voices)}"
+                    "Audio service initialized. Available voices: %d", len(voices)
                 )
                 self._initialized = True
             else:
-                raise Exception(
-                    f"Failed to connect to Kokoro API: {response.status_code}"
+                raise httpx.HTTPStatusError(
+                    f"Failed to connect to Kokoro API: {response.status_code}",
+                    request=response.request,
+                    response=response,
                 )
 
         except Exception as e:
-            logger.error(f"Failed to initialize audio service: {e}")
+            logger.error("Failed to initialize audio service: %s", e)
             raise
 
     def _split_into_sentences(self, text: str) -> list[str]:
@@ -86,7 +87,6 @@ class AudioServiceAPI:
         text: str,
         voice: str = "af_bella",
         speed: float = 1.25,
-        lang: str = "en-us",
     ) -> AsyncGenerator[Tuple[bytes, int], None]:
         """
         Convert text to speech and yield audio chunks.
@@ -109,6 +109,10 @@ class AudioServiceAPI:
         try:
             # Split text into sentences for more natural streaming
             sentences = self._split_into_sentences(text)
+
+            if self._client is None:
+                logger.error("HTTP client is not initialized.")
+                return
 
             for sentence in sentences:
                 if not sentence.strip():
@@ -137,11 +141,14 @@ class AudioServiceAPI:
                     yield (audio_data, sample_rate)
                 else:
                     logger.error(
-                        f"TTS API error: {response.status_code} - {response.text}"
+                        "TTS API error: %d - %s", response.status_code, response.text
                     )
 
+        except httpx.HTTPError as e:
+            logger.error("HTTP error in text-to-speech conversion: %s", e)
+            # Continue without raising to allow graceful degradation
         except Exception as e:
-            logger.error(f"Error in text-to-speech conversion: {e}")
+            logger.error("Unexpected error in text-to-speech conversion: %s", e)
             # Continue without raising to allow graceful degradation
 
     async def generate_audio_for_streaming_text(
@@ -149,8 +156,6 @@ class AudioServiceAPI:
         text_stream: AsyncGenerator[str, None],
         voice: str = "af_bella",
         speed: float = 1.25,
-        lang: str = "en-us",
-        sentence_buffer_size: int = 2,
     ) -> AsyncGenerator[Tuple[bytes, int, str], None]:
         """
         Generate audio for streaming text input.
@@ -163,8 +168,6 @@ class AudioServiceAPI:
             text_stream: Async generator yielding text chunks
             voice: Voice to use
             speed: Speech speed
-            lang: Language code
-            sentence_buffer_size: Number of sentences to buffer before generating audio
 
         Yields:
             Tuples of (audio_data, sample_rate, text_chunk)
@@ -220,7 +223,7 @@ class AudioServiceAPI:
 
                 # Generate audio for this sentence
                 async for audio_data, sample_rate in self.text_to_speech_stream(
-                    sentence, voice, speed, lang
+                    sentence, voice, speed
                 ):
                     yield (audio_data, sample_rate, sentence)
 

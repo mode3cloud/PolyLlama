@@ -522,12 +522,18 @@ server {
                             local httpc = http.new()
                             httpc:set_timeout(5000)
                             
+                            local headers = { ["Content-Type"] = "application/json" }
+                            
+                            -- Add API key if configured
+                            local api_key = ngx.shared.env_vars:get("POLYLLAMA_API_KEY")
+                            if api_key and api_key ~= "" then
+                                headers["Authorization"] = "Bearer " .. api_key
+                            end
+                            
                             local res, err = httpc:request_uri("http://polyllama1:11434/api/show", {
                                 method = "POST",
                                 body = cjson.encode({ model = model_name }),
-                                headers = {
-                                    ["Content-Type"] = "application/json"
-                                }
+                                headers = headers
                             })
                             
                             if res and res.status == 200 then
@@ -992,12 +998,18 @@ server {
             httpc:set_timeout(10000)  -- 10 second timeout
             
             -- Make the request to the instance
+            local headers = { ["Content-Type"] = "application/json" }
+            
+            -- Add API key if configured
+            local api_key = ngx.shared.env_vars:get("POLYLLAMA_API_KEY")
+            if api_key and api_key ~= "" then
+                headers["Authorization"] = "Bearer " .. api_key
+            end
+            
             local res, err = httpc:request_uri("http://" .. instance .. ":11434/api/show", {
                 method = "POST",
                 body = body_data,
-                headers = {
-                    ["Content-Type"] = "application/json"
-                }
+                headers = headers
             })
             
             if not res or res.status ~= 200 then
@@ -1211,12 +1223,18 @@ server {
                     local httpc = http.new()
                     httpc:set_timeout(5000)
                     
+                    local headers = { ["Content-Type"] = "application/json" }
+                    
+                    -- Add API key if configured
+                    local api_key = ngx.shared.env_vars:get("POLYLLAMA_API_KEY")
+                    if api_key and api_key ~= "" then
+                        headers["Authorization"] = "Bearer " .. api_key
+                    end
+                    
                     local res, err = httpc:request_uri("http://" .. instance .. ":11434/api/show", {
                         method = "POST",
                         body = cjson.encode({ model = model_name }),
-                        headers = {
-                            ["Content-Type"] = "application/json"
-                        }
+                        headers = headers
                     })
                     
                     if res and res.status == 200 then

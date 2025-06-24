@@ -4,9 +4,8 @@ Message Manager for LLM Proxy Service
 Handles chat session persistence and message storage.
 """
 
-import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 from datetime import datetime
 
 logger = logging.getLogger(__name__)

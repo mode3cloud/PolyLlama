@@ -66,6 +66,7 @@ export interface ChatModel {
   provider: string;
   size?: number;
   supports_vision?: boolean;
+  supports_tools?: boolean;
 }
 
 export interface ChatSession {

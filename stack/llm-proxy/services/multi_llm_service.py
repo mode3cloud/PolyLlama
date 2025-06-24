@@ -225,12 +225,18 @@ class MultiLLMService:
                 completion_kwargs = {
                     "model": self.model,
                     "messages": current_msgs,
-                    "tools": tools_spec,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
                     "stream": True,
                     **filtered_kwargs,
                 }
+                
+                # Only include tools if the model supports them
+                if tools_spec and await self._model_supports_tools():
+                    completion_kwargs["tools"] = tools_spec
+                    logger.info("Model %s supports tools, including %d tools", self.model, len(tools_spec))
+                elif tools_spec:
+                    logger.info("Model %s does not support tools, omitting %d tools", self.model, len(tools_spec))
 
                 # Add Bearer Authorization header for Ollama models to pass API key
                 if self.model.startswith("ollama/") and os.getenv("POLYLLAMA_API_KEY"):
@@ -681,6 +687,62 @@ class MultiLLMService:
             vision_patterns = ["vision", "llava", "bakllava", "vl", "minicpm-v"]
             model_lower = model_name.lower()
             return any(pattern in model_lower for pattern in vision_patterns)
+
+    async def check_ollama_tools_support(self, model_id: str) -> bool:
+        """Check if an Ollama model supports tools/function calling by calling /api/show."""
+        if not model_id.startswith("ollama/"):
+            return False
+
+        # Extract the model name without the ollama/ prefix
+        model_name = model_id[7:]  # Remove "ollama/" prefix
+
+        try:
+            headers = {"Content-Type": "application/json"}
+            # Add API key if configured
+            if os.getenv("POLYLLAMA_API_KEY"):
+                headers["Authorization"] = "Bearer %s" % os.getenv("POLYLLAMA_API_KEY")
+
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                response = await client.post(
+                    "http://router:11434/api/show",
+                    json={"name": model_name},
+                    headers=headers,
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+                    # Check if capabilities array includes "tools"
+                    capabilities = data.get("capabilities", [])
+                    return "tools" in capabilities
+                else:
+                    logger.warning(
+                        "Failed to get model details for %s: %s",
+                        model_name,
+                        response.status_code,
+                    )
+                    # Fallback to pattern matching
+                    tools_patterns = ["devstral", "mistral-nemo", "llama3.1", "firefunction", "tools", "function"]
+                    model_lower = model_name.lower()
+                    return any(pattern in model_lower for pattern in tools_patterns)
+
+        except Exception as e:
+            logger.warning("Error checking tools support for %s: %s", model_name, e)
+            # Fallback to pattern matching
+            tools_patterns = ["devstral", "mistral-nemo", "llama3.1", "firefunction", "tools", "function"]
+            model_lower = model_name.lower()
+            return any(pattern in model_lower for pattern in tools_patterns)
+
+    async def _model_supports_tools(self) -> bool:
+        """Check if the current model supports tools/function calling."""
+        if self.model.startswith("ollama/"):
+            return await self.check_ollama_tools_support(self.model)
+        else:
+            try:
+                # For non-Ollama models, use litellm's support check
+                return litellm.supports_function_calling(self.model)  # type: ignore
+            except Exception:
+                # If litellm doesn't recognize the model, be conservative
+                return False
 
     def _filter_supported_kwargs(self, model: str, kwargs: dict) -> dict:
         """Filter kwargs to only those supported by the model/provider."""

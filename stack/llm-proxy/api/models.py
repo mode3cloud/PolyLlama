@@ -24,6 +24,7 @@ class ModelInfo(BaseModel):
     provider: str
     size: Optional[int] = None
     supports_vision: Optional[bool] = None
+    supports_tools: Optional[bool] = None
 
 
 class ModelListResponse(BaseModel):
@@ -70,6 +71,31 @@ async def get_models(request: Request, provider: Optional[str] = None):
                     model_lower = model_info.id.lower()
                     model_info.supports_vision = any(
                         pattern in model_lower for pattern in vision_patterns
+                    )
+
+            # Check if model supports tools/function calling
+            if model_info.id.startswith("ollama/"):
+                # For Ollama models, fetch capabilities from /api/show
+                model_info.supports_tools = (
+                    await llm_service.check_ollama_tools_support(model_info.id)
+                )
+            else:
+                try:
+                    model_info.supports_tools = litellm.supports_function_calling(model_info.id)  # type: ignore
+                except Exception:
+                    # Fallback for models not in litellm's database
+                    # Check common tool-supporting model patterns
+                    tools_patterns = [
+                        "gpt-3.5-turbo",
+                        "gpt-4",
+                        "claude",
+                        "mistral",
+                        "function",
+                        "tools",
+                    ]
+                    model_lower = model_info.id.lower()
+                    model_info.supports_tools = any(
+                        pattern in model_lower for pattern in tools_patterns
                     )
 
             model_infos.append(model_info)

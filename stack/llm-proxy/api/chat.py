@@ -141,30 +141,38 @@ async def chat_completion(request: ChatCompletionRequest, req: Request):
         # Check if model supports vision
         model_name = request.model or llm_service.model
         supports_vision = False
-        try:
-            supports_vision = litellm.supports_vision(model_name)  # type: ignore
-        except:
-            # Fallback for models not in litellm's database
-            # Check common vision model patterns
-            vision_patterns = [
-                "vision",
-                "gpt-4o",
-                "gpt-4v",
-                "claude-3",
-                "gemini-pro-vision",
-                "llava",
-                "bakllava",
-            ]
-            model_lower = model_name.lower()
-            supports_vision = any(pattern in model_lower for pattern in vision_patterns)
+        
+        # For Ollama models, use our capability check
+        if model_name.startswith("ollama/"):
+            supports_vision = await llm_service.check_ollama_vision_support(model_name)
+        else:
+            try:
+                supports_vision = litellm.supports_vision(model_name)  # type: ignore
+            except:
+                # Fallback for models not in litellm's database
+                # Check common vision model patterns
+                vision_patterns = [
+                    "vision",
+                    "gpt-4o",
+                    "gpt-4v",
+                    "claude-3",
+                    "gemini-pro-vision",
+                    "llava",
+                    "bakllava",
+                ]
+                model_lower = model_name.lower()
+                supports_vision = any(pattern in model_lower for pattern in vision_patterns)
 
         logger.info(f"Model {model_name} supports vision: {supports_vision}")
+        
+        # Debug: Log raw request messages
+        logger.info(f"Raw request messages: {[{'role': msg.role, 'content': msg.content, 'attachments': msg.attachments} for msg in request.messages]}")
 
         # Convert pydantic messages to dict format
         messages = []
 
         for msg in request.messages:
-            if msg.role == "user" and msg.attachments and supports_vision:
+            if msg.role == "user" and msg.attachments and len(msg.attachments) > 0 and supports_vision:
                 # For vision models, format content as array
                 content = []
                 if msg.content:
@@ -183,13 +191,16 @@ async def chat_completion(request: ChatCompletionRequest, req: Request):
                 messages.append(message_dict)
 
                 # For non-vision models with attachments, add a note about the image
-                if msg.role == "user" and msg.attachments and not supports_vision:
+                if msg.role == "user" and msg.attachments and len(msg.attachments) > 0 and not supports_vision:
                     # Add a text description that an image was attached
                     image_count = len(msg.attachments)
                     image_note = f"\n\n[Note: {image_count} image{'s' if image_count > 1 else ''} attached but this model doesn't support vision]"
                     message_dict["content"] += image_note
 
         # We don't process attachments anymore since document processing isn't implemented
+        
+        # Debug: Log converted messages
+        logger.info(f"Converted messages being sent to LLM: {messages}")
 
         # Prepare system prompt
         system_prompt = request.system_prompt or "You are a helpful AI assistant."
@@ -296,25 +307,30 @@ async def chat_completion_audio(request: ChatCompletionRequest, req: Request):
         # Check if model supports vision (same logic as regular completions)
         model_name = request.model or llm_service.model
         supports_vision = False
-        try:
-            supports_vision = litellm.supports_vision(model_name)  # type: ignore
-        except:
-            vision_patterns = [
-                "vision",
-                "gpt-4o",
-                "gpt-4v",
-                "claude-3",
-                "gemini-pro-vision",
-                "llava",
-                "bakllava",
-            ]
-            model_lower = model_name.lower()
-            supports_vision = any(pattern in model_lower for pattern in vision_patterns)
+        
+        # For Ollama models, use our capability check
+        if model_name.startswith("ollama/"):
+            supports_vision = await llm_service.check_ollama_vision_support(model_name)
+        else:
+            try:
+                supports_vision = litellm.supports_vision(model_name)  # type: ignore
+            except:
+                vision_patterns = [
+                    "vision",
+                    "gpt-4o",
+                    "gpt-4v",
+                    "claude-3",
+                    "gemini-pro-vision",
+                    "llava",
+                    "bakllava",
+                ]
+                model_lower = model_name.lower()
+                supports_vision = any(pattern in model_lower for pattern in vision_patterns)
 
         # Convert pydantic messages to dict format (same as regular completions)
         messages = []
         for msg in request.messages:
-            if msg.role == "user" and msg.attachments and supports_vision:
+            if msg.role == "user" and msg.attachments and len(msg.attachments) > 0 and supports_vision:
                 content = []
                 if msg.content:
                     content.append({"type": "text", "text": msg.content})
@@ -330,7 +346,7 @@ async def chat_completion_audio(request: ChatCompletionRequest, req: Request):
                 message_dict = {"role": msg.role, "content": msg.content}
                 messages.append(message_dict)
 
-                if msg.role == "user" and msg.attachments and not supports_vision:
+                if msg.role == "user" and msg.attachments and len(msg.attachments) > 0 and not supports_vision:
                     image_count = len(msg.attachments)
                     image_note = f"\n\n[Note: {image_count} image{'s' if image_count > 1 else ''} attached but this model doesn't support vision]"
                     message_dict["content"] += image_note

@@ -126,6 +126,10 @@ class MultiLLMService:
         if persistence and session_id:
             session_data = await self.message_manager.get_session_messages(session_id)
             conversation_history = session_data.get("messages", [])
+            logger.debug("Loaded %d messages from history for session %s", len(conversation_history), session_id)
+            # Log the content of history messages to understand duplicates
+            for i, msg in enumerate(conversation_history):
+                logger.debug("History message %d: role=%s, has_timestamp=%s", i, msg.get("role"), "timestamp" in msg)
             # Update session metadata with current model
             await self.message_manager.update_session_metadata(
                 session_id, {"model": self.model}
@@ -150,7 +154,22 @@ class MultiLLMService:
                 await self.message_manager.add_system_message(session_id, sys_prompt)
 
         # Process new messages with type conversion
-        for msg in messages:
+        # We need to determine which messages are truly new vs already in history
+        history_size = len(conversation_history)
+        
+        # If we have more messages than history, only process the new ones
+        if len(messages) > history_size:
+            # The client is sending the full conversation, only process new messages
+            messages_to_process = messages[history_size:]
+            logger.debug("Client sent %d messages, history has %d, processing %d new messages", 
+                        len(messages), history_size, len(messages_to_process))
+        else:
+            # All messages are new
+            messages_to_process = messages
+            logger.debug("Processing all %d messages as new (history has %d)", 
+                        len(messages_to_process), history_size)
+        
+        for msg in messages_to_process:
             # Convert litellm.Message objects to dict format
             if hasattr(msg, "role") and hasattr(msg, "content"):
                 msg_dict = {"role": msg.role, "content": msg.content}
@@ -161,6 +180,7 @@ class MultiLLMService:
 
             if msg_dict["role"] == "user":
                 current_messages.append(msg_dict)
+                logger.debug("Adding new user message to current_messages: %s", msg_dict["content"][:50])
                 if persistence and session_id:
                     await self.message_manager.add_user_message(
                         session_id, msg_dict["content"]
@@ -186,6 +206,9 @@ class MultiLLMService:
 
         # Combine with history
         full_conversation = conversation_history + current_messages
+        logger.debug("Full conversation has %d messages:", len(full_conversation))
+        for i, msg in enumerate(full_conversation):
+            logger.debug("Message %d: role=%s, content_preview=%s", i, msg.get("role"), msg.get("content", "")[:50])
 
         # Format tools for LiteLLM if provided
         tools_spec = self._format_tools(tools) if tools else None
@@ -222,8 +245,15 @@ class MultiLLMService:
                 )
 
                 # Prepare completion arguments
+                # Use ollama_chat for Ollama models to ensure proper chat endpoint usage
+                model_for_litellm = self.model
+                if self.model.startswith("ollama/"):
+                    # Replace ollama/ with ollama_chat/ for proper chat endpoint routing
+                    model_for_litellm = self.model.replace("ollama/", "ollama_chat/", 1)
+                    logger.info("Using ollama_chat endpoint for model: %s -> %s", self.model, model_for_litellm)
+                
                 completion_kwargs = {
-                    "model": self.model,
+                    "model": model_for_litellm,
                     "messages": current_msgs,
                     "temperature": temperature,
                     "max_tokens": max_tokens,
@@ -245,8 +275,41 @@ class MultiLLMService:
                     }
 
                 try:
-                    logger.debug("Messages: %s", current_msgs)
-                    logger.debug("Completion kwargs: %s", completion_kwargs)
+                    # For Ollama models with images, we need to restructure the messages
+                    if self.model.startswith("ollama/") and any(
+                        isinstance(msg.get("content"), list) for msg in current_msgs
+                    ):
+                        # Convert OpenAI format to Ollama format
+                        ollama_msgs = []
+                        for msg in current_msgs:
+                            if isinstance(msg.get("content"), list):
+                                # Extract text and images
+                                text_content = ""
+                                images = []
+                                for item in msg["content"]:
+                                    if item.get("type") == "text":
+                                        text_content = item.get("text", "")
+                                    elif item.get("type") == "image_url":
+                                        image_url = item.get("image_url", {}).get("url", "")
+                                        if image_url.startswith("data:"):
+                                            # Extract base64 data from data URL
+                                            base64_data = image_url.split(",", 1)[1] if "," in image_url else image_url
+                                            images.append(base64_data)
+                                
+                                ollama_msg = {"role": msg["role"], "content": text_content}
+                                if images:
+                                    ollama_msg["images"] = images
+                                ollama_msgs.append(ollama_msg)
+                            else:
+                                # Regular text message
+                                ollama_msgs.append(msg)
+                        
+                        completion_kwargs["messages"] = ollama_msgs
+                        logger.info("Converted messages to Ollama format with separate images field")
+                    
+                    # Enhanced logging for debugging image issue
+                    logger.info("Messages being sent to litellm: %s", json.dumps(completion_kwargs["messages"], indent=2))
+                    logger.info("Completion kwargs (without messages): %s", {k: v for k, v in completion_kwargs.items() if k != 'messages'})
 
                     # Make LiteLLM call
                     response = await litellm.acompletion(**completion_kwargs)
@@ -669,7 +732,9 @@ class MultiLLMService:
                     data = response.json()
                     # Check if capabilities array includes "vision"
                     capabilities = data.get("capabilities", [])
-                    return "vision" in capabilities
+                    has_vision = "vision" in capabilities
+                    logger.debug("Model %s capabilities: %s, has_vision: %s", model_name, capabilities, has_vision)
+                    return has_vision
                 else:
                     logger.warning(
                         "Failed to get model details for %s: %s",

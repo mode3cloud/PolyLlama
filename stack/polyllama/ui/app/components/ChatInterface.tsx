@@ -9,6 +9,7 @@ import SessionSidebar from './SessionSidebar'
 import ChatHeader from './ChatHeader'
 import ChatInput from './ChatInput'
 import MessageDisplay from './MessageDisplay'
+import MCPStatus from './MCPStatus'
 
 // Use relative URLs to hit our Next.js API routes
 const API_BASE_URL = '/ui/api/chat'
@@ -469,6 +470,8 @@ export default function ChatInterface() {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto p-4">
           <div className="max-w-4xl mx-auto space-y-4 transition-opacity duration-200">
+            {/* MCP Status */}
+            <MCPStatus />
             {isLoadingSession ? (
               <div className="text-center text-gray-500 py-8">
                 <p className="text-lg">Loading session...</p>

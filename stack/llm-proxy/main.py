@@ -19,9 +19,10 @@ sys.path.insert(0, str(current_dir))
 from api.chat import chat_router
 from api.sessions import sessions_router
 from api.models import models_router
+from api.mcp import mcp_router
 from services.multi_llm_service import MultiLLMService
 from services.message_manager import MessageManager
-from services.mcp_client import MCPClient
+from services.mcp_bridge_manager import MCPBridgeManager
 from services.audio_service_api import AudioServiceAPI
 from config import LLMProxyConfig
 
@@ -52,37 +53,41 @@ app.add_middleware(
 # Global service instances
 llm_service: MultiLLMService
 message_manager: MessageManager
-mcp_client: MCPClient
+mcp_manager: MCPBridgeManager
 audio_service: AudioServiceAPI
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
-    global llm_service, message_manager, mcp_client, audio_service
+    global llm_service, message_manager, mcp_manager, audio_service
 
     logger.info("Starting PolyLlama LLM Proxy Service...")
 
     # Initialize services
     message_manager = MessageManager()
-    llm_service = MultiLLMService(neo4j_driver=None)  # No Neo4j for now
+    llm_service = MultiLLMService()  # No Neo4j for now
     llm_service.message_manager = message_manager  # Set message manager directly
-    mcp_client = MCPClient(LLMProxyConfig.MCP_SERVICE_URL)
+    mcp_manager = MCPBridgeManager()
 
     # Initialize audio service
     audio_service = AudioServiceAPI(
         api_base=LLMProxyConfig.KOKORO_API_BASE,
         timeout=LLMProxyConfig.KOKORO_API_TIMEOUT,
     )
-    await audio_service.initialize()
+    try:
+        await audio_service.initialize()
+        logger.info("Audio service initialized successfully")
+    except Exception as e:
+        logger.warning("Failed to initialize audio service (non-critical): %s", e)
 
-    # Connect MCP client
-    await mcp_client.connect()
+    # Initialize MCP manager (this will start MCP servers)
+    await mcp_manager.initialize()
 
     # Store in app state for access in routes
     app.state.llm_service = llm_service
     app.state.message_manager = message_manager
-    app.state.mcp_client = mcp_client
+    app.state.mcp_manager = mcp_manager
     app.state.audio_service = audio_service
 
     logger.info("PolyLlama LLM Proxy Service initialized successfully")
@@ -91,14 +96,14 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up services on shutdown."""
-    global llm_service, message_manager, mcp_client, audio_service
+    global llm_service, message_manager, mcp_manager, audio_service
 
     logger.info("Shutting down PolyLlama LLM Proxy Service...")
 
     if llm_service:
         await llm_service.close()
-    if mcp_client:
-        await mcp_client.close()
+    if mcp_manager:
+        await mcp_manager.shutdown()
     if audio_service:
         await audio_service.close()
 
@@ -112,7 +117,7 @@ async def health_check():
     return {
         "status": "healthy",
         "service": "polyllama-llm-proxy",
-        "mcp_connected": mcp_client.is_connected() if mcp_client else False,
+        "mcp_connected": mcp_manager._initialized if mcp_manager else False,
     }
 
 
@@ -120,6 +125,7 @@ async def health_check():
 app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(sessions_router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(models_router, prefix="/api/models", tags=["models"])
+app.include_router(mcp_router, tags=["mcp"])
 
 
 def main():

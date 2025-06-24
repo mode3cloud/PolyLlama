@@ -38,6 +38,22 @@ services:
               capabilities: [ gpu ]
               count: 1
 
+  mcp-bridge:
+    build:
+      context: ../../stack/llm-proxy/mcp-bridge
+      dockerfile: Dockerfile
+    container_name: mcp-bridge
+    hostname: mcp-bridge
+    ports:
+      - "3000:3000"
+    environment:
+      - MCP_CONFIG_PATH=/app/mcp-config.json
+      - MCP_BRIDGE_PORT=3000
+    volumes:
+      - ../../mcp-config.json:/app/mcp-config.json:ro
+    depends_on:
+      - router
+
   llm-proxy:
     build:
       context: ../..
@@ -53,9 +69,13 @@ services:
       - LLM_PROXY_HOST=0.0.0.0
       - LLM_PROXY_PORT=11435
       - KOKORO_API_BASE=http://kokoro-tts:8880
+      - MCP_BRIDGE_URL=http://mcp-bridge:3000
+    volumes:
+      - ../../mcp-config.json:/app/mcp-config.json:ro
     depends_on:
       - router
       - kokoro-tts
+      - mcp-bridge
   
 {% for instance in ollama_instances %}
   polyllama{{ instance.number }}:

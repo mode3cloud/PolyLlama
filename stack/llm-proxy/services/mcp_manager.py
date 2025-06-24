@@ -38,6 +38,11 @@ class MCPServerConnection:
             args = self.config.get("args", [])
             env = {**os.environ, **self.config.get("env", {})}
             
+            # Debug logging
+            logger.info(f"Starting MCP server '{self.name}' with command: {command}")
+            logger.info(f"Args: {args}")
+            logger.info(f"Type of args: {type(args)}, Length: {len(args) if args else 0}")
+            
             # Create server parameters
             server_params = StdioServerParameters(
                 command=command,
@@ -67,6 +72,10 @@ class MCPServerConnection:
             raise
         except Exception as e:
             logger.error(f"Failed to run MCP server '{self.name}': {e}")
+            # Log more details about the exception
+            import traceback
+            logger.error(f"Exception type: {type(e).__name__}")
+            logger.error(f"Exception traceback:\n{traceback.format_exc()}")
             raise
         finally:
             self._running = False

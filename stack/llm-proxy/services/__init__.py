@@ -1,10 +1,6 @@
 # Services module
-from .mcp_client import MCPClient
+from .mcp_manager import MCPManager
 from .message_manager import MessageManager
 from .multi_llm_service import MultiLLMService
 
-__all__ = [
-    "MCPClient", 
-    "MessageManager",
-    "MultiLLMService"
-]
+__all__ = ["MCPManager", "MessageManager", "MultiLLMService"]

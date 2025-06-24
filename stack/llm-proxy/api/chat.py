@@ -125,7 +125,7 @@ async def chat_completion(request: ChatCompletionRequest, req: Request):
     """
     try:
         llm_service = req.app.state.llm_service
-        mcp_client = req.app.state.mcp_client
+        mcp_manager = req.app.state.mcp_manager
 
         # Set model if provided
         if request.model:
@@ -203,7 +203,7 @@ async def chat_completion(request: ChatCompletionRequest, req: Request):
                 system_prompt=system_prompt,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
-                tool_manager=mcp_client,
+                tool_manager=mcp_manager,
             ),
             media_type="text/event-stream",
             headers={
@@ -280,7 +280,7 @@ async def chat_completion_audio(request: ChatCompletionRequest, req: Request):
     """
     try:
         llm_service = req.app.state.llm_service
-        mcp_client = req.app.state.mcp_client
+        mcp_manager = req.app.state.mcp_manager
         audio_service = req.app.state.audio_service
 
         # Set model if provided
@@ -352,7 +352,7 @@ async def chat_completion_audio(request: ChatCompletionRequest, req: Request):
                 system_prompt=system_prompt,
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
-                tool_manager=mcp_client,
+                tool_manager=mcp_manager,
                 voice=voice,
                 speed=speed,
                 lang=lang,

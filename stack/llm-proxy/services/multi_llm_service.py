@@ -33,6 +33,10 @@ class ToolManagerProtocol(Protocol):
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         """Execute a tool with given arguments."""
         ...
+    
+    def format_tools_for_llm(self) -> List[Dict[str, Any]]:
+        """Format tools for LLM function calling."""
+        ...
 
 
 class MultiLLMService:
@@ -90,7 +94,7 @@ class MultiLLMService:
         tools: Optional[List[Tool]] = None,
         temperature: float = 0.7,
         max_tokens: int = 8192,
-        tool_manager: Optional["ToolManagerProtocol"] = None,
+        tool_manager: Optional[ToolManagerProtocol] = None,
         attachments: Optional[List[str]] = None,
         **kwargs: Any,
     ) -> AsyncGenerator[Dict[str, Any], None]:
@@ -185,6 +189,19 @@ class MultiLLMService:
 
         # Format tools for LiteLLM if provided
         tools_spec = self._format_tools(tools) if tools else None
+
+        # If tool_manager is provided but no tools, get them from MCP
+        if tool_manager and not tools_spec:
+            try:
+                # Check if tool_manager has the format_tools_for_llm method (MCPManager)
+                if hasattr(tool_manager, "format_tools_for_llm"):
+                    tools_spec = tool_manager.format_tools_for_llm()
+                    logger.info(
+                        "Loaded %d tools from MCP manager",
+                        len(tools_spec) if tools_spec else 0,
+                    )
+            except Exception as e:
+                logger.warning("Failed to load tools from MCP manager: %s", e)
 
         # Filter supported parameters for this model
         filtered_kwargs = self._filter_supported_kwargs(self.model, kwargs)

@@ -3,12 +3,12 @@ MCP API endpoints for the LLM Proxy Service.
 """
 
 import logging
-from typing import Any, Dict, List
+import asyncio
+from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
-import asyncio
 from services.mcp_manager import MCPManager
 
 logger = logging.getLogger(__name__)
@@ -22,16 +22,18 @@ mcp_manager = MCPManager()
 
 class ToolExecutionRequest(BaseModel):
     """Request model for tool execution."""
+
     tool_name: str
     arguments: Dict[str, Any] = {}
 
 
 class ToolExecutionResponse(BaseModel):
     """Response model for tool execution."""
+
     tool_name: str
     result: Any
     success: bool = True
-    error: str = None
+    error: Optional[str] = None
 
 
 # Background task for MCP initialization
@@ -44,7 +46,7 @@ async def initialize_mcp_background():
         await mcp_manager.initialize()
         logger.info("MCP manager initialized successfully")
     except Exception as e:
-        logger.error(f"Failed to initialize MCP manager: {e}", exc_info=True)
+        logger.error("Failed to initialize MCP manager: %s", e, exc_info=True)
 
 
 @mcp_router.on_event("startup")
@@ -62,7 +64,7 @@ async def shutdown_event():
         await mcp_manager.shutdown()
         logger.info("MCP manager shutdown successfully")
     except Exception as e:
-        logger.error(f"Error during MCP manager shutdown: {e}")
+        logger.error("Error during MCP manager shutdown: %s", e)
 
 
 @mcp_router.get("/status")
@@ -73,11 +75,11 @@ async def get_mcp_status():
         return {
             "status": "configured" if status["initialized"] else "not_configured",
             "servers": status["servers"],
-            "total_tools": status["total_tools"]
+            "total_tools": status["total_tools"],
         }
     except Exception as e:
-        logger.error(f"Error getting MCP status: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error getting MCP status: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @mcp_router.get("/tools")
@@ -85,44 +87,30 @@ async def list_tools():
     """List all available MCP tools."""
     try:
         tools = await mcp_manager.list_tools()
-        return {
-            "tools": tools,
-            "count": len(tools)
-        }
+        return {"tools": tools, "count": len(tools)}
     except Exception as e:
-        logger.error(f"Error listing MCP tools: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error listing MCP tools: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @mcp_router.post("/tools/execute", response_model=ToolExecutionResponse)
 async def execute_tool(request: ToolExecutionRequest):
     """Execute a specific MCP tool."""
     try:
-        result = await mcp_manager.execute_tool(
-            request.tool_name,
-            request.arguments
-        )
-        
+        result = await mcp_manager.execute_tool(request.tool_name, request.arguments)
+
         return ToolExecutionResponse(
-            tool_name=request.tool_name,
-            result=result,
-            success=True
+            tool_name=request.tool_name, result=result, success=True
         )
     except ValueError as e:
         # Tool not found
         return ToolExecutionResponse(
-            tool_name=request.tool_name,
-            result=None,
-            success=False,
-            error=str(e)
+            tool_name=request.tool_name, result=None, success=False, error=str(e)
         )
     except Exception as e:
-        logger.error(f"Error executing tool '{request.tool_name}': {e}")
+        logger.error("Error executing tool '%s': %s", request.tool_name, e)
         return ToolExecutionResponse(
-            tool_name=request.tool_name,
-            result=None,
-            success=False,
-            error=str(e)
+            tool_name=request.tool_name, result=None, success=False, error=str(e)
         )
 
 
@@ -131,10 +119,7 @@ async def get_formatted_tools():
     """Get tools formatted for LLM function calling."""
     try:
         formatted_tools = mcp_manager.format_tools_for_llm()
-        return {
-            "tools": formatted_tools,
-            "count": len(formatted_tools)
-        }
+        return {"tools": formatted_tools, "count": len(formatted_tools)}
     except Exception as e:
-        logger.error(f"Error formatting MCP tools: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Error formatting MCP tools: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e

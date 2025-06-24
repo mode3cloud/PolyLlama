@@ -6,15 +6,15 @@ Unified streaming LLM service using LiteLLM for provider abstraction.
 
 import os
 import json
-import time
 import asyncio
 import logging
-from typing import Any, Dict, List, Optional, AsyncGenerator, Protocol, TypedDict
-from functools import wraps
+import inspect
+from typing import Any, Dict, List, Optional, AsyncGenerator, Protocol, TypedDict, cast
 
 import litellm
+from litellm.types.utils import ModelResponse  # noqa: F401 # pylint: disable=W0611
+from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 import httpx
-import inspect
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,6 @@ class MultiLLMService:
         self,
         model: str | None = None,
         *,
-        neo4j_driver: Any | None = None,
         timeout: int = int(os.getenv("MULTI_LLM_REQUEST_TIMEOUT", "120")),
         max_concurrent: int = int(os.getenv("MULTI_LLM_CLIENT_MAX_CONCURRENT", "3")),
     ) -> None:
@@ -60,26 +59,23 @@ class MultiLLMService:
         self.timeout = timeout
         self.semaphore = asyncio.Semaphore(max_concurrent)
 
-        logger.info(f"Initialized MultiLLMService with default model: {self.model}")
+        logger.info("Initialized MultiLLMService with default model: %s", self.model)
 
-        # Message manager for persistence
-        self.message_manager = None
-        if neo4j_driver:
-            from .message_manager import MessageManager
+        from .message_manager import MessageManager
 
-            self.message_manager = MessageManager(neo4j_driver)
+        self.message_manager = MessageManager()
 
         # Configure LiteLLM
         self._prepare_env()
         litellm.modify_params = True
-        litellm.REPEATED_STREAMING_CHUNK_LIMIT = 1000
+        litellm.REPEATED_STREAMING_CHUNK_LIMIT = 1000  # type: ignore
         # Enable debug logging for LiteLLM
         if logger.isEnabledFor(logging.DEBUG):
-            litellm.set_verbose = True
+            litellm.set_verbose = True  # type: ignore
 
     def set_model(self, model: str) -> None:
         """Update the current model."""
-        logger.info(f"Setting model to: {model}")
+        logger.info("Setting model to: %s", model)
         self.model = model
         self._prepare_env()
 
@@ -146,7 +142,7 @@ class MultiLLMService:
             not conversation_history or conversation_history[0].get("role") != "system"
         ):
             current_messages.append({"role": "system", "content": sys_prompt})
-            if persistence:
+            if persistence and session_id:
                 await self.message_manager.add_system_message(session_id, sys_prompt)
 
         # Process new messages with type conversion
@@ -157,11 +153,11 @@ class MultiLLMService:
             elif isinstance(msg, dict):
                 msg_dict = msg
             else:
-                raise TypeError(f"Unexpected message type: {type(msg)}")
+                raise TypeError("Unexpected message type: %s" % type(msg))
 
             if msg_dict["role"] == "user":
                 current_messages.append(msg_dict)
-                if persistence:
+                if persistence and session_id:
                     await self.message_manager.add_user_message(
                         session_id, msg_dict["content"]
                     )
@@ -171,14 +167,17 @@ class MultiLLMService:
             # Check if this is a vision model
             is_vision_model = False
             try:
-                is_vision_model = litellm.supports_vision(self.model)
-            except:
+                is_vision_model = litellm.supports_vision(self.model)  # type: ignore
+            except Exception:
                 pass
-            
+
             if not is_vision_model:
                 # For non-vision models, we would process documents here
                 # For now, just log a warning since document processing is not implemented
-                logger.warning(f"Document processing not implemented for attachments: {attachments}")
+                logger.warning(
+                    "Document processing not implemented for attachments: %s",
+                    attachments,
+                )
             # For vision models, images are already in the message content
 
         # Combine with history
@@ -201,7 +200,9 @@ class MultiLLMService:
 
             while iteration < max_iterations and should_continue:
                 iteration += 1
-                logger.info(f"Starting iteration {iteration} with model: {self.model}")
+                logger.info(
+                    "Starting iteration %d with model: %s", iteration, self.model
+                )
 
                 # Prepare completion arguments
                 completion_kwargs = {
@@ -217,12 +218,12 @@ class MultiLLMService:
                 # Add Bearer Authorization header for Ollama models to pass API key
                 if self.model.startswith("ollama/") and os.getenv("POLYLLAMA_API_KEY"):
                     completion_kwargs["extra_headers"] = {
-                        "Authorization": f"Bearer {os.getenv('POLYLLAMA_API_KEY')}"
+                        "Authorization": "Bearer %s" % os.getenv("POLYLLAMA_API_KEY")
                     }
 
                 try:
-                    logger.debug(f"Messages: {current_msgs}")
-                    logger.debug(f"Completion kwargs: {completion_kwargs}")
+                    logger.debug("Messages: %s", current_msgs)
+                    logger.debug("Completion kwargs: %s", completion_kwargs)
 
                     # Make LiteLLM call
                     response = await litellm.acompletion(**completion_kwargs)
@@ -230,17 +231,19 @@ class MultiLLMService:
                     if response is None:
                         raise ValueError("LiteLLM returned None response")
 
-                    # Check if response is an async generator
-                    import inspect
+                    # Type assertion: when stream=True, response is always CustomStreamWrapper
+                    # This helps the type checker understand the response is async iterable
+                    response = cast(CustomStreamWrapper, response)
 
+                    # Check if response is an async generator
                     if not inspect.isasyncgen(response):
                         logger.warning(
-                            f"Response is not an async generator: {type(response)}"
+                            "Response is not an async generator: %s", type(response)
                         )
 
                 except Exception as e:
                     logger.error(
-                        f"Error calling litellm.acompletion: {e}", exc_info=True
+                        "Error calling litellm.acompletion: %s", e, exc_info=True
                     )
                     yield {"type": "error", "error": str(e)}
                     raise
@@ -254,18 +257,12 @@ class MultiLLMService:
                 # Stream response
                 async for chunk in response:
                     chunk_count += 1
-                    logger.debug(f"Received chunk {chunk_count}: {chunk}")
+                    logger.debug("Received chunk %d: %s", chunk_count, chunk)
 
                     if hasattr(chunk, "choices") and chunk.choices:
                         delta = chunk.choices[0].delta
 
-                        # Check for finish_reason
-                        finish_reason = None
-                        if (
-                            hasattr(chunk.choices[0], "finish_reason")
-                            and chunk.choices[0].finish_reason
-                        ):
-                            finish_reason = chunk.choices[0].finish_reason
+                        # Check for finish_reason later in the loop
 
                         # Handle content streaming
                         if getattr(delta, "content", None):
@@ -274,8 +271,9 @@ class MultiLLMService:
                             yield {"type": "content", "content": content}
 
                         # Handle tool-call streaming (buffered)
-                        if getattr(delta, "tool_calls", None) and tool_manager:
-                            for tc in delta.tool_calls:
+                        tool_calls = getattr(delta, "tool_calls", None)
+                        if tool_calls and tool_manager:
+                            for tc in tool_calls:
                                 tc_id = getattr(tc, "id", None)
                                 tc_name = (
                                     getattr(tc.function, "name", None)
@@ -293,7 +291,9 @@ class MultiLLMService:
                                     tool_buffers[tc_id] = {"name": tc_name, "args": ""}
                                     last_tool_id = tc_id
                                     active_tool_ids.add(tc_id)
-                                    logger.debug(f"New tool call: {tc_id} - {tc_name}")
+                                    logger.debug(
+                                        "New tool call: %s - %s", tc_id, tc_name
+                                    )
 
                                 # Arguments for specific tool (has id but no name)
                                 elif tc_id and tc_id in tool_buffers and tc_args:
@@ -323,7 +323,7 @@ class MultiLLMService:
                         and chunk.choices
                         and chunk.choices[0].finish_reason in ("tool_calls", "stop")
                     ):
-                        logger.info(f"Finish reason: {chunk.choices[0].finish_reason}")
+                        logger.info("Finish reason: %s", chunk.choices[0].finish_reason)
 
                         # Check if there are any active tool calls to process
                         tool_calls_processed = False
@@ -334,7 +334,9 @@ class MultiLLMService:
                                 try:
                                     args = json.loads(buf["args"] or "{}")
                                     logger.info(
-                                        f"Executing tool: {buf['name']} with args: {args}"
+                                        "Executing tool: %s with args: %s",
+                                        buf["name"],
+                                        args,
                                     )
 
                                     # Add assistant tool call message
@@ -354,9 +356,12 @@ class MultiLLMService:
                                     current_msgs.append(tool_call_msg)
 
                                     # Execute tool and add to conversation
-                                    result = await tool_manager.execute_tool(
-                                        buf["name"], args
-                                    )
+                                    if tool_manager:
+                                        result = await tool_manager.execute_tool(
+                                            buf["name"], args
+                                        )
+                                    else:
+                                        result = "Error: No tool manager provided"
                                     tool_result_msg = {
                                         "role": "tool",
                                         "name": buf["name"],
@@ -366,7 +371,7 @@ class MultiLLMService:
                                     current_msgs.append(tool_result_msg)
 
                                     # Persist tool message if enabled
-                                    if persistence:
+                                    if persistence and session_id:
                                         await self.message_manager.add_tool_message(
                                             session_id, result, buf["name"], tool_id
                                         )
@@ -377,21 +382,24 @@ class MultiLLMService:
                                         "result": result,
                                     }
                                 except json.JSONDecodeError as e:
-                                    logger.error(f"Failed to parse tool arguments: {e}")
+                                    logger.error(
+                                        "Failed to parse tool arguments: %s", e
+                                    )
                                     error_msg = {
                                         "role": "tool",
-                                        "content": f"Error parsing arguments: {str(e)}",
+                                        "content": "Error parsing arguments: %s"
+                                        % str(e),
                                         "tool_call_id": tool_id,
                                     }
                                     current_msgs.append(error_msg)
                                     yield {"type": "tool_error", "error": str(e)}
                                 except Exception as err:
                                     logger.error(
-                                        f"Tool execution error: {err}", exc_info=True
+                                        "Tool execution error: %s", err, exc_info=True
                                     )
                                     error_msg = {
                                         "role": "tool",
-                                        "content": f"Error: {str(err)}",
+                                        "content": "Error: %s" % str(err),
                                         "tool_call_id": tool_id,
                                     }
                                     current_msgs.append(error_msg)
@@ -420,11 +428,13 @@ class MultiLLMService:
                     should_continue = False
                     break
 
-                logger.info(f"Received {chunk_count} chunks in iteration {iteration}")
+                logger.info(
+                    "Received %d chunks in iteration %d", chunk_count, iteration
+                )
 
             # Persist final assistant message
             final_content = "".join(assistant_buffer)
-            if persistence and final_content:
+            if persistence and session_id and final_content:
                 await self.message_manager.add_assistant_message(
                     session_id, final_content
                 )
@@ -445,8 +455,8 @@ class MultiLLMService:
                 headers = {}
                 # Add API key if configured
                 if os.getenv("POLYLLAMA_API_KEY"):
-                    headers["Authorization"] = (
-                        f"Bearer {os.getenv('POLYLLAMA_API_KEY')}"
+                    headers["Authorization"] = "Bearer %s" % os.getenv(
+                        "POLYLLAMA_API_KEY"
                     )
 
                 async with httpx.AsyncClient(timeout=5.0) as client:
@@ -458,14 +468,14 @@ class MultiLLMService:
                         for model in data.get("models", []):
                             models.append(
                                 {
-                                    "id": f"ollama/{model['name']}",
+                                    "id": "ollama/%s" % model["name"],
                                     "name": model["name"],
                                     "provider": "ollama",
                                     "size": model.get("size", 0),
                                 }
                             )
             except Exception as e:
-                logger.warning(f"Failed to get Ollama models: {e}")
+                logger.warning("Failed to get Ollama models: %s", e)
 
         if provider == "openai" or provider is None:
             # Add OpenAI models if API key is available
@@ -476,7 +486,7 @@ class MultiLLMService:
                     async with httpx.AsyncClient(timeout=10.0) as client:
                         response = await client.get(
                             "https://api.openai.com/v1/models",
-                            headers={"Authorization": f"Bearer {api_key}"},
+                            headers={"Authorization": "Bearer %s" % api_key},
                         )
                         if response.status_code == 200:
                             data = response.json()
@@ -497,18 +507,19 @@ class MultiLLMService:
                             for model in openai_models:
                                 models.append(
                                     {
-                                        "id": f"openai/{model}",
+                                        "id": "openai/%s" % model,
                                         "name": model,
                                         "provider": "openai",
                                     }
                                 )
                         else:
                             logger.warning(
-                                f"Failed to fetch OpenAI models: {response.status_code}"
+                                "Failed to fetch OpenAI models: %s",
+                                response.status_code,
                             )
-                            raise Exception(f"API returned {response.status_code}")
+                            raise Exception("API returned %s" % response.status_code)
                 except Exception as e:
-                    logger.warning(f"Failed to get OpenAI models from API: {e}")
+                    logger.warning("Failed to get OpenAI models from API: %s", e)
                     # Fallback to known models
                     fallback_models = [
                         "gpt-4o",
@@ -523,7 +534,7 @@ class MultiLLMService:
                     for model in fallback_models:
                         models.append(
                             {
-                                "id": f"openai/{model}",
+                                "id": "openai/%s" % model,
                                 "name": model,
                                 "provider": "openai",
                             }
@@ -558,18 +569,19 @@ class MultiLLMService:
                             for model in anthropic_models:
                                 models.append(
                                     {
-                                        "id": f"anthropic/{model}",
+                                        "id": "anthropic/%s" % model,
                                         "name": model,
                                         "provider": "anthropic",
                                     }
                                 )
                         else:
                             logger.warning(
-                                f"Failed to fetch Anthropic models: {response.status_code}"
+                                "Failed to fetch Anthropic models: %s",
+                                response.status_code,
                             )
-                            raise Exception(f"API returned {response.status_code}")
+                            raise Exception("API returned %s" % response.status_code)
                 except Exception as e:
-                    logger.warning(f"Failed to get Anthropic models from API: {e}")
+                    logger.warning("Failed to get Anthropic models from API: %s", e)
                     # Fallback to known models
                     fallback_models = [
                         "claude-3-5-sonnet-20241022",
@@ -583,7 +595,7 @@ class MultiLLMService:
                     for model in fallback_models:
                         models.append(
                             {
-                                "id": f"anthropic/{model}",
+                                "id": "anthropic/%s" % model,
                                 "name": model,
                                 "provider": "anthropic",
                             }
@@ -595,7 +607,7 @@ class MultiLLMService:
                 google_models = ["gemini-pro", "gemini-pro-vision"]
                 for model in google_models:
                     models.append(
-                        {"id": f"google/{model}", "name": model, "provider": "google"}
+                        {"id": "google/%s" % model, "name": model, "provider": "google"}
                     )
 
         if provider == "groq" or provider is None:
@@ -604,55 +616,59 @@ class MultiLLMService:
                 groq_models = ["mixtral-8x7b-32768", "llama2-70b-4096"]
                 for model in groq_models:
                     models.append(
-                        {"id": f"groq/{model}", "name": model, "provider": "groq"}
+                        {"id": "groq/%s" % model, "name": model, "provider": "groq"}
                     )
 
         return models
 
     async def check_ollama_vision_support(self, model_id: str) -> bool:
         """Check if an Ollama model supports vision by calling /api/show."""
-        if not model_id.startswith('ollama/'):
+        if not model_id.startswith("ollama/"):
             return False
-            
+
         # Extract the model name without the ollama/ prefix
         model_name = model_id[7:]  # Remove "ollama/" prefix
-        
+
         try:
             headers = {"Content-Type": "application/json"}
             # Add API key if configured
             if os.getenv("POLYLLAMA_API_KEY"):
-                headers["Authorization"] = f"Bearer {os.getenv('POLYLLAMA_API_KEY')}"
-            
+                headers["Authorization"] = "Bearer %s" % os.getenv("POLYLLAMA_API_KEY")
+
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.post(
                     "http://router:11434/api/show",
                     json={"name": model_name},
-                    headers=headers
+                    headers=headers,
                 )
-                
+
                 if response.status_code == 200:
                     data = response.json()
                     # Check if capabilities array includes "vision"
                     capabilities = data.get("capabilities", [])
                     return "vision" in capabilities
                 else:
-                    logger.warning(f"Failed to get model details for {model_name}: {response.status_code}")
+                    logger.warning(
+                        "Failed to get model details for %s: %s",
+                        model_name,
+                        response.status_code,
+                    )
                     # Fallback to pattern matching
-                    vision_patterns = ['vision', 'llava', 'bakllava', 'vl', 'minicpm-v']
+                    vision_patterns = ["vision", "llava", "bakllava", "vl", "minicpm-v"]
                     model_lower = model_name.lower()
                     return any(pattern in model_lower for pattern in vision_patterns)
-                    
+
         except Exception as e:
-            logger.warning(f"Error checking vision support for {model_name}: {e}")
+            logger.warning("Error checking vision support for %s: %s", model_name, e)
             # Fallback to pattern matching
-            vision_patterns = ['vision', 'llava', 'bakllava', 'vl', 'minicpm-v']
+            vision_patterns = ["vision", "llava", "bakllava", "vl", "minicpm-v"]
             model_lower = model_name.lower()
             return any(pattern in model_lower for pattern in vision_patterns)
 
     def _filter_supported_kwargs(self, model: str, kwargs: dict) -> dict:
         """Filter kwargs to only those supported by the model/provider."""
         try:
-            supported_params = litellm.get_supported_openai_params(model)
+            supported_params = litellm.get_supported_openai_params(model)  # type: ignore
             if supported_params is None:
                 return kwargs
 
@@ -664,11 +680,11 @@ class MultiLLMService:
             removed = set(kwargs.keys()) - supported_set
 
             if removed:
-                logger.debug(f"Filtered unsupported params for {model}: {removed}")
+                logger.debug("Filtered unsupported params for %s: %s", model, removed)
 
             return filtered
         except Exception as e:
-            logger.warning(f"Could not filter params for {model}: {e}")
+            logger.warning("Could not filter params for %s: %s", model, e)
             return kwargs
 
     def _prepare_env(self):
@@ -682,9 +698,10 @@ class MultiLLMService:
             "openrouter": "OPENROUTER_API_KEY",
         }
 
-        for provider, env_var in provider_env_map.items():
-            if os.getenv(env_var) and env_var not in os.environ:
-                os.environ[env_var] = os.getenv(env_var)
+        for _, env_var in provider_env_map.items():
+            value = os.getenv(env_var)
+            if value:
+                os.environ[env_var] = value
 
         # Set Ollama base URL
         if not os.environ.get("OLLAMA_API_BASE"):
@@ -696,12 +713,14 @@ class MultiLLMService:
             os.environ["POLYLLAMA_API_KEY"] = polyllama_key
 
         logger.info(
-            f"Environment variables set - OLLAMA_API_BASE: {os.environ.get('OLLAMA_API_BASE')}"
+            "Environment variables set - OLLAMA_API_BASE: %s",
+            os.environ.get("OLLAMA_API_BASE"),
         )
 
     async def close(self):
         """Clean up resources."""
-        pass
+        # No resources to clean up currently
+        return
 
     def _augment_system_prompt(
         self,
@@ -721,8 +740,11 @@ class MultiLLMService:
             # Auto-generate tools prompt if tools provided but no custom prompt
             tool_names = [t["function"]["name"] for t in tools]
             prompt_parts.append(
-                f"You have access to the following tools: {', '.join(tool_names)}. "
-                "Use them when appropriate to help answer the user's questions."
+                (
+                    "You have access to the following tools: %s. "
+                    "Use them when appropriate to help answer the user's questions."
+                )
+                % ", ".join(tool_names)
             )
 
         return "\n\n".join(prompt_parts)
@@ -735,7 +757,7 @@ class MultiLLMService:
             if isinstance(tool, dict) and "function" in tool:
                 formatted_tools.append(tool)
             else:
-                logger.warning(f"Invalid tool format: {tool}")
+                logger.warning("Invalid tool format: %s", tool)
         return formatted_tools
 
     async def _transcribe_audio_fallback(self, audio_path: str) -> Optional[str]:
@@ -752,7 +774,7 @@ class MultiLLMService:
                 with open(audio_path, "rb") as audio_file:
                     files = {"file": (os.path.basename(audio_path), audio_file)}
                     data = {"model": "whisper-1"}
-                    headers = {"Authorization": f"Bearer {api_key}"}
+                    headers = {"Authorization": "Bearer %s" % api_key}
 
                     response = await client.post(
                         "https://api.openai.com/v1/audio/transcriptions",
@@ -766,10 +788,12 @@ class MultiLLMService:
                         return result.get("text", "")
                     else:
                         logger.error(
-                            f"Whisper API error: {response.status_code} - {response.text}"
+                            "Whisper API error: %s - %s",
+                            response.status_code,
+                            response.text,
                         )
                         return None
 
         except Exception as e:
-            logger.error(f"Audio transcription fallback failed: {e}")
+            logger.error("Audio transcription fallback failed: %s", e)
             return None

@@ -16,10 +16,10 @@ dependencies = [
     "fastapi==0.104.1",
     "uvicorn[standard]==0.24.0",
     "pydantic==2.5.0",
-    "litellm==1.61.15",
+    "litellm==1.73.0",
     "httpx==0.25.2",
     "python-multipart==0.0.18",
-    "neo4j==5.14.0"
+    "neo4j==5.14.0",
 ]
 
 [tool.pytest.ini_options]
@@ -42,5 +42,16 @@ exclude_lines = [
     "raise AssertionError",
     "raise NotImplementedError",
     "if 0:",
-    "if __name__ == .__main__.:"
+    "if __name__ == .__main__.:",
+]
+[tool.pylint.messages_control]
+disable = [
+    "W0611",
+    "W0718",
+    "W1203",
+    "W0702",
+    "C0301",
+    "W0719",
+    "C0415",
+    "C0209",
 ]

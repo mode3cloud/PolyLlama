@@ -54,8 +54,8 @@ async def get_models(request: Request, provider: Optional[str] = None):
                 )
             else:
                 try:
-                    model_info.supports_vision = litellm.supports_vision(model_info.id)
-                except:
+                    model_info.supports_vision = litellm.supports_vision(model_info.id)  # type: ignore
+                except Exception:
                     # Fallback for models not in litellm's database
                     # Check common vision model patterns
                     vision_patterns = [

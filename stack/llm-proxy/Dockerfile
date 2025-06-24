@@ -8,17 +8,18 @@ RUN apt-get update && apt-get install -y \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv
-RUN curl -LsSf https://astral.sh/uv/install.sh | sh
-ENV PATH="/root/.cargo/bin:$PATH"
-
 # Copy pyproject.toml from root for dependency installation
 COPY pyproject.toml uv.lock* ./
 
-# Install dependencies using uv
-RUN uv venv && \
+# Install uv and dependencies in one step
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    export PATH="/root/.local/bin:$PATH" && \
+    /root/.local/bin/uv venv && \
     . .venv/bin/activate && \
-    uv pip install -e .
+    /root/.local/bin/uv pip install -e .
+
+# Set PATH for subsequent commands
+ENV PATH="/root/.local/bin:$PATH"
 
 # Copy application code
 COPY stack/llm-proxy/ .

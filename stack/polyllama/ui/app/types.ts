@@ -76,9 +76,18 @@ export interface ChatSession {
 }
 
 export interface StreamChunk {
-  type: 'connected' | 'content' | 'complete' | 'error' | 'done';
+  type: 'connected' | 'content' | 'complete' | 'error' | 'done' | 'tool_result' | 'tool_error' | 'tool_call' | 'tool_call_streaming';
   content?: string;
   error?: string;
+  // Tool-related fields
+  name?: string;  // Tool name
+  result?: string;  // Tool result
+  tool_call?: {  // Tool call details
+    id: string;
+    name: string;
+    arguments?: any;
+    status?: 'started' | 'completed';
+  };
 }
 
 export interface SearchModelTag {

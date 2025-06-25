@@ -356,7 +356,6 @@ async def chat_completion_audio(request: ChatCompletionRequest, req: Request):
 
         voice = request.voice or LLMProxyConfig.AUDIO_DEFAULT_VOICE
         speed = request.speech_speed or LLMProxyConfig.AUDIO_DEFAULT_SPEED
-        lang = request.speech_lang or LLMProxyConfig.AUDIO_DEFAULT_LANG
 
         # Return streaming response with audio
         return StreamingResponse(
@@ -371,7 +370,6 @@ async def chat_completion_audio(request: ChatCompletionRequest, req: Request):
                 tool_manager=mcp_manager,
                 voice=voice,
                 speed=speed,
-                lang=lang,
             ),
             media_type="text/event-stream",
             headers={
@@ -399,7 +397,6 @@ async def _stream_chat_completion_with_audio(
     tool_manager,
     voice: str,
     speed: float,
-    lang: str,
 ):
     """Generator for streaming chat completions with audio."""
     try:
@@ -472,7 +469,7 @@ async def _stream_chat_completion_with_audio(
                     sample_rate,
                     text_chunk,
                 ) in audio_service.generate_audio_for_streaming_text(
-                    text_generator(), voice=voice, speed=speed, lang=lang
+                    text_generator(), voice=voice, speed=speed
                 ):
                     # Convert audio to base64
                     audio_base64 = audio_service.audio_to_base64(audio_data)

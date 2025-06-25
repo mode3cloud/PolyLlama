@@ -204,11 +204,16 @@ export default function ChatInterface() {
           signal: abortControllerRef.current.signal,
           onChunk: (content) => {
             assistantMessage.content += content
-            setMessages(prev =>
-              prev.map((msg, idx) =>
-                idx === prev.length - 1 ? { ...assistantMessage } : msg
-              )
-            )
+            setMessages(prev => {
+              // Find the last assistant message and update it
+              const lastAssistantIdx = prev.findLastIndex(msg => msg.role === 'assistant');
+              if (lastAssistantIdx >= 0) {
+                return prev.map((msg, idx) =>
+                  idx === lastAssistantIdx ? { ...msg, content: assistantMessage.content } : msg
+                );
+              }
+              return prev;
+            });
           },
           onError: (error) => {
             assistantMessage.content += `\n\n*Error: ${error}*`
@@ -224,6 +229,72 @@ export default function ChatInterface() {
           onAudio: (audioData) => {
             // Play audio chunk
             playAudio(audioData.audio, audioData.sample_rate)
+          },
+          onToolCallStreaming: (toolCall) => {
+            // Show tool is being prepared
+            if (toolCall.status === 'started') {
+              const toolStreamMessage: ChatMessage = {
+                role: 'assistant',
+                content: `🔧 Preparing to call tool: **${toolCall.name}**...`,
+                timestamp: new Date().toISOString()
+              }
+              setMessages(prev => {
+                // Replace the current assistant message with tool preparation message
+                const lastAssistantIdx = prev.findLastIndex(msg => msg.role === 'assistant');
+                if (lastAssistantIdx >= 0) {
+                  return [...prev.slice(0, lastAssistantIdx), toolStreamMessage];
+                }
+                return [...prev, toolStreamMessage];
+              });
+            }
+          },
+          onToolCall: (toolCall) => {
+            // Update with full tool call details
+            const toolCallMessage: ChatMessage = {
+              role: 'assistant',
+              content: `🔧 Calling tool: **${toolCall.name}**\n\`\`\`json\n${JSON.stringify(toolCall.arguments, null, 2)}\n\`\`\``,
+              timestamp: new Date().toISOString()
+            }
+            setMessages(prev => {
+              // Replace the last assistant message (which might be empty or "Preparing...")
+              const lastAssistantIdx = prev.findLastIndex(msg => msg.role === 'assistant');
+              if (lastAssistantIdx >= 0) {
+                return [...prev.slice(0, lastAssistantIdx), toolCallMessage];
+              }
+              return [...prev, toolCallMessage];
+            });
+          },
+          onToolResult: (name, result) => {
+            // Format the result - try to parse as JSON for better display
+            let formattedResult = result;
+            try {
+              const parsed = JSON.parse(result);
+              formattedResult = '```json\n' + JSON.stringify(parsed, null, 2) + '\n```';
+            } catch {
+              // Not JSON, use as-is
+            }
+            
+            // Add a tool result message
+            const toolResultMessage: ChatMessage = {
+              role: 'tool',
+              content: formattedResult,
+              tool_name: name,
+              timestamp: new Date().toISOString()
+            }
+            setMessages(prev => [...prev, toolResultMessage])
+            
+            // Don't add a new assistant message - the streaming will continue
+            // with the existing one
+          },
+          onToolError: (name, error) => {
+            // Add a tool error message
+            const toolErrorMessage: ChatMessage = {
+              role: 'tool',
+              content: `Error executing tool ${name}: ${error}`,
+              tool_name: name,
+              timestamp: new Date().toISOString()
+            }
+            setMessages(prev => [...prev, toolErrorMessage])
           }
         })
       } else {
@@ -236,11 +307,16 @@ export default function ChatInterface() {
           signal: abortControllerRef.current.signal,
           onChunk: (content) => {
             assistantMessage.content += content
-            setMessages(prev =>
-              prev.map((msg, idx) =>
-                idx === prev.length - 1 ? { ...assistantMessage } : msg
-              )
-            )
+            setMessages(prev => {
+              // Find the last assistant message and update it
+              const lastAssistantIdx = prev.findLastIndex(msg => msg.role === 'assistant');
+              if (lastAssistantIdx >= 0) {
+                return prev.map((msg, idx) =>
+                  idx === lastAssistantIdx ? { ...msg, content: assistantMessage.content } : msg
+                );
+              }
+              return prev;
+            });
           },
           onError: (error) => {
             assistantMessage.content += `\n\n*Error: ${error}*`
@@ -252,6 +328,72 @@ export default function ChatInterface() {
           },
           onDone: () => {
             // Stream completed
+          },
+          onToolCallStreaming: (toolCall) => {
+            // Show tool is being prepared
+            if (toolCall.status === 'started') {
+              const toolStreamMessage: ChatMessage = {
+                role: 'assistant',
+                content: `🔧 Preparing to call tool: **${toolCall.name}**...`,
+                timestamp: new Date().toISOString()
+              }
+              setMessages(prev => {
+                // Replace the current assistant message with tool preparation message
+                const lastAssistantIdx = prev.findLastIndex(msg => msg.role === 'assistant');
+                if (lastAssistantIdx >= 0) {
+                  return [...prev.slice(0, lastAssistantIdx), toolStreamMessage];
+                }
+                return [...prev, toolStreamMessage];
+              });
+            }
+          },
+          onToolCall: (toolCall) => {
+            // Update with full tool call details
+            const toolCallMessage: ChatMessage = {
+              role: 'assistant',
+              content: `🔧 Calling tool: **${toolCall.name}**\n\`\`\`json\n${JSON.stringify(toolCall.arguments, null, 2)}\n\`\`\``,
+              timestamp: new Date().toISOString()
+            }
+            setMessages(prev => {
+              // Replace the last assistant message (which might be empty or "Preparing...")
+              const lastAssistantIdx = prev.findLastIndex(msg => msg.role === 'assistant');
+              if (lastAssistantIdx >= 0) {
+                return [...prev.slice(0, lastAssistantIdx), toolCallMessage];
+              }
+              return [...prev, toolCallMessage];
+            });
+          },
+          onToolResult: (name, result) => {
+            // Format the result - try to parse as JSON for better display
+            let formattedResult = result;
+            try {
+              const parsed = JSON.parse(result);
+              formattedResult = '```json\n' + JSON.stringify(parsed, null, 2) + '\n```';
+            } catch {
+              // Not JSON, use as-is
+            }
+            
+            // Add a tool result message
+            const toolResultMessage: ChatMessage = {
+              role: 'tool',
+              content: formattedResult,
+              tool_name: name,
+              timestamp: new Date().toISOString()
+            }
+            setMessages(prev => [...prev, toolResultMessage])
+            
+            // Don't add a new assistant message - the streaming will continue
+            // with the existing one
+          },
+          onToolError: (name, error) => {
+            // Add a tool error message
+            const toolErrorMessage: ChatMessage = {
+              role: 'tool',
+              content: `Error executing tool ${name}: ${error}`,
+              tool_name: name,
+              timestamp: new Date().toISOString()
+            }
+            setMessages(prev => [...prev, toolErrorMessage])
           }
         })
       }
@@ -351,11 +493,16 @@ export default function ChatInterface() {
           signal: abortControllerRef.current.signal,
           onChunk: (content) => {
             assistantMessage.content += content
-            setMessages(prev =>
-              prev.map((msg, idx) =>
-                idx === prev.length - 1 ? { ...assistantMessage } : msg
-              )
-            )
+            setMessages(prev => {
+              // Find the last assistant message and update it
+              const lastAssistantIdx = prev.findLastIndex(msg => msg.role === 'assistant');
+              if (lastAssistantIdx >= 0) {
+                return prev.map((msg, idx) =>
+                  idx === lastAssistantIdx ? { ...msg, content: assistantMessage.content } : msg
+                );
+              }
+              return prev;
+            });
           },
           onError: (error) => {
             assistantMessage.content += `\n\n*Error: ${error}*`
@@ -383,11 +530,16 @@ export default function ChatInterface() {
           signal: abortControllerRef.current.signal,
           onChunk: (content) => {
             assistantMessage.content += content
-            setMessages(prev =>
-              prev.map((msg, idx) =>
-                idx === prev.length - 1 ? { ...assistantMessage } : msg
-              )
-            )
+            setMessages(prev => {
+              // Find the last assistant message and update it
+              const lastAssistantIdx = prev.findLastIndex(msg => msg.role === 'assistant');
+              if (lastAssistantIdx >= 0) {
+                return prev.map((msg, idx) =>
+                  idx === lastAssistantIdx ? { ...msg, content: assistantMessage.content } : msg
+                );
+              }
+              return prev;
+            });
           },
           onError: (error) => {
             assistantMessage.content += `\n\n*Error: ${error}*`

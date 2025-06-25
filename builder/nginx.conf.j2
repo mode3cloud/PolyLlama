@@ -447,6 +447,138 @@ server {
         }
     }
 
+    # OpenAI-compatible models endpoint
+    location /v1/models {
+        access_by_lua_block {
+            check_api_auth()
+        }
+        proxy_pass http://polyllama_backend/v1/models;
+        include /etc/nginx/proxy_params.conf;
+        
+        # Add header to indicate which instance served this request
+        header_filter_by_lua_block {
+            ngx.header["X-Served-By"] = "load_balancer"
+        }
+    }
+
+    # OpenAI-compatible chat completions endpoint
+    location /v1/chat/completions {
+        set $target_instance "";
+        
+        # First access and buffer the request body
+        rewrite_by_lua_block {
+            check_api_auth()
+            -- Force reading the request body
+            ngx.req.read_body()
+            
+            local model_router = require "model_router"
+            local cjson = require "cjson"
+            
+            -- Extract model name from request
+            local body_data = ngx.req.get_body_data()
+            if body_data then
+                local success, body = pcall(cjson.decode, body_data)
+                if success and body and body.model then
+                    local model_name = body.model
+                    
+                    -- Check if model is running on any instance
+                    local running_instance = model_router.is_model_running_on_any_instance(model_name)
+                    if running_instance then
+                        ngx.log(ngx.INFO, "Model " .. model_name .. " is already running on " .. running_instance)
+                        model_router.set_model_mapping(model_name, running_instance, true)
+                        ngx.var.target_instance = running_instance
+                        ngx.ctx.target_instance = running_instance
+                    else
+                        -- Model is not running, need to assign it to the least loaded instance
+                        ngx.log(ngx.INFO, "Model " .. model_name .. " is not running on any instance")
+                        local instance = model_router.get_instance_for_model(model_name)
+                        
+                        -- If no mapping exists, create one
+                        if not instance then
+                            ngx.log(ngx.INFO, "No mapping found for model: " .. model_name .. ". Will route to least loaded instance.")
+                            instance = model_router.assign_model_to_least_loaded_instance(model_name)
+                            
+                            -- Acquire a loading lock if necessary
+                            local lock_acquired, existing_loader = model_router.lock_model_loading(model_name, instance)
+                            
+                            if not lock_acquired and existing_loader then
+                                -- Model is being loaded by another instance, use that one
+                                ngx.log(ngx.INFO, "Model " .. model_name .. " is being loaded by " .. existing_loader)
+                                instance = existing_loader
+                            end
+                        end
+                        
+                        if instance then
+                            ngx.var.target_instance = instance
+                            ngx.ctx.target_instance = instance
+                            ngx.log(ngx.INFO, "Assigned model " .. model_name .. " to instance " .. instance)
+                        else
+                            ngx.log(ngx.ERR, "Failed to assign instance for model: " .. model_name)
+                        end
+                    end
+                else
+                    ngx.log(ngx.WARN, "Could not extract model name from request")
+                end
+            end
+        }
+        
+        access_by_lua_block {
+            -- Make sure target_instance persists between phases
+            if ngx.ctx.target_instance and ngx.ctx.target_instance ~= "" then
+                ngx.var.target_instance = ngx.ctx.target_instance
+            end
+        }
+        
+        # Determine the proxy_pass URL in the content phase
+        content_by_lua_block {
+            -- Use the specific target instance
+            local target = ngx.var.target_instance
+            ngx.log(ngx.INFO, "OpenAI endpoint - target_instance: " .. (target or "nil"))
+            
+            if target and target ~= "" then
+                -- Use internal location to proxy
+                return ngx.exec("@proxy_v1_to_target")
+            else
+                ngx.log(ngx.ERR, "No target instance available, returning error")
+                ngx.status = 500
+                ngx.say("Error: Unable to determine target instance for model")
+                return ngx.exit(500)
+            end
+        }
+    }
+
+    # Internal location for proxying v1 requests
+    location @proxy_v1_to_target {
+        internal;
+        proxy_pass http://$target_instance:11434/v1/chat/completions;
+        include /etc/nginx/proxy_params.conf;
+        
+        # Add header to indicate which instance served this request
+        header_filter_by_lua_block {
+            if ngx.var.target_instance and ngx.var.target_instance ~= "" then
+                ngx.header["X-Served-By"] = ngx.var.target_instance
+            end
+        }
+    }
+    
+    # Catch-all for other OpenAI-compatible endpoints
+    location ~ ^/v1/(.*)$ {
+        set $v1_endpoint $1;
+        
+        access_by_lua_block {
+            check_api_auth()
+        }
+        
+        # For now, use simple load balancing for other v1 endpoints
+        proxy_pass http://polyllama_backend/v1/$v1_endpoint;
+        include /etc/nginx/proxy_params.conf;
+        
+        # Add header to indicate which instance served this request
+        header_filter_by_lua_block {
+            ngx.header["X-Served-By"] = "load_balancer"
+        }
+    }
+
     location ~ ^/api/(generate|chat|embeddings)$ {
         set $endpoint $1;
         set $target_instance "";

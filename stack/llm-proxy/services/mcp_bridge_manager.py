@@ -101,17 +101,50 @@ class MCPBridgeManager:
                     "server": server_name
                 }
             )
-            response.raise_for_status()
+            
+            # Check if request was successful
+            if response.status_code >= 400:
+                # Try to extract error details from response body
+                try:
+                    error_data = response.json()
+                    error_message = error_data.get('error', f'HTTP {response.status_code} error')
+                    
+                    # Extract detailed error information if available
+                    if isinstance(error_message, str) and 'Details:' in error_message:
+                        # This is likely an MCP error with details
+                        return f"Tool execution failed: {error_message}"
+                    else:
+                        return f"Tool execution failed: {error_message}"
+                except:
+                    # If we can't parse the error response, use status text
+                    return f"Tool execution failed: HTTP {response.status_code} - {response.text}"
+            
+            response.raise_for_status()  # This shouldn't be reached if status >= 400
             
             result = response.json()
             if result.get("success"):
                 return result.get("result")
             else:
-                raise RuntimeError(f"Tool execution failed: {result.get('error')}")
+                # Return error as result instead of raising exception
+                error_msg = result.get('error', 'Unknown error')
+                return f"Tool execution failed: {error_msg}"
                 
+        except httpx.HTTPStatusError as e:
+            # HTTP error - extract details from response if available
+            error_details = ""
+            try:
+                error_data = e.response.json()
+                error_details = error_data.get('error', str(e))
+            except:
+                error_details = e.response.text or str(e)
+            
+            logger.error(f"HTTP error executing tool '{tool_name}': {error_details}")
+            return f"Tool execution failed with HTTP {e.response.status_code}: {error_details}"
+            
         except Exception as e:
             logger.error(f"Failed to execute tool '{tool_name}': {e}")
-            raise
+            # Return error message instead of raising
+            return f"Tool execution failed with error: {str(e)}"
     
     def get_status(self) -> Dict[str, Any]:
         """Get status of MCP bridge and servers."""

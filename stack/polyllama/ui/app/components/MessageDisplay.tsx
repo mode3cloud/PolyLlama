@@ -255,13 +255,33 @@ export default function MessageDisplay({
     <div className={`group flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-6`}>
       <div className="relative max-w-[80%]">
         <div
-          className={`rounded-lg p-4 ${message.role === 'user'
-            ? 'bg-blue-500 text-white'
-            : 'bg-white border border-gray-200 text-gray-900'
+          className={`rounded-lg p-4 ${
+            message.role === 'user'
+              ? 'bg-blue-500 text-white'
+              : message.role === 'tool'
+              ? 'bg-gray-100 border border-gray-300 text-gray-900'
+              : 'bg-white border border-gray-200 text-gray-900'
             }`}
         >
           <div className="flex-1">
-            {message.role === 'user' ? (
+            {message.role === 'tool' ? (
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <span className="text-sm font-semibold text-gray-600">🔧 Tool Result</span>
+                  {message.tool_name && (
+                    <span className="text-xs bg-gray-200 px-2 py-1 rounded">{message.tool_name}</span>
+                  )}
+                </div>
+                <div className="prose prose-sm max-w-none prose-gray [&>*]:text-gray-700">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={markdownComponents}
+                  >
+                    {String(message.content || '')}
+                  </ReactMarkdown>
+                </div>
+              </div>
+            ) : message.role === 'user' ? (
               <div>
                 <div className="whitespace-pre-wrap">{String(message.content || '')}</div>
                 {message.images && message.images.length > 0 && (
@@ -343,8 +363,8 @@ export default function MessageDisplay({
         </div>
         {/* Action buttons positioned below the message box */}
         <div className={`absolute -bottom-6 ${message.role === 'user' ? 'right-0' : 'right-0'} flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity`}>
-          {/* Copy button for assistant messages */}
-          {message.role === 'assistant' && (
+          {/* Copy button for assistant and tool messages */}
+          {(message.role === 'assistant' || message.role === 'tool') && (
             <button
               onClick={() => onCopy(message.content, index)}
               className="group/btn flex items-center justify-center w-6 h-6 rounded bg-gray-700 hover:bg-gray-600 transition-colors"

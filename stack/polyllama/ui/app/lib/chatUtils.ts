@@ -12,6 +12,10 @@ interface StreamChatOptions {
   onChunk: (content: string) => void
   onError: (error: string) => void
   onDone: () => void
+  onToolCall?: (toolCall: { id: string; name: string; arguments: any }) => void
+  onToolResult?: (name: string, result: string) => void
+  onToolError?: (name: string, error: string) => void
+  onToolCallStreaming?: (toolCall: { id: string; name: string; status?: 'started' | 'completed' }) => void
 }
 
 interface StreamChatAudioOptions extends StreamChatOptions {
@@ -29,7 +33,11 @@ export async function streamChat({
   signal,
   onChunk,
   onError,
-  onDone
+  onDone,
+  onToolCall,
+  onToolResult,
+  onToolError,
+  onToolCallStreaming
 }: StreamChatOptions) {
   // Convert messages to include attachments for images
   const processedMessages = messages.map(msg => {
@@ -95,9 +103,22 @@ export async function streamChat({
 
           try {
             const chunk: StreamChunk = JSON.parse(data)
+            
+            // Debug logging for tool-related events
+            if (chunk.type && chunk.type.includes('tool')) {
+              console.log(`[Chat Stream] Received ${chunk.type} event:`, chunk)
+            }
 
             if (chunk.type === 'content' && chunk.content) {
               onChunk(chunk.content)
+            } else if (chunk.type === 'tool_call' && chunk.tool_call && onToolCall) {
+              onToolCall(chunk.tool_call)
+            } else if (chunk.type === 'tool_call_streaming' && chunk.tool_call && onToolCallStreaming) {
+              onToolCallStreaming(chunk.tool_call)
+            } else if (chunk.type === 'tool_result' && chunk.name && chunk.result && onToolResult) {
+              onToolResult(chunk.name, chunk.result)
+            } else if (chunk.type === 'tool_error' && chunk.name && chunk.error && onToolError) {
+              onToolError(chunk.name, chunk.error)
             } else if (chunk.type === 'error') {
               console.error('Stream error:', chunk.error)
               onError(chunk.error || 'Unknown error')
@@ -130,7 +151,11 @@ export async function streamChatWithAudio({
   voice,
   speechSpeed,
   speechLang,
-  onAudio
+  onAudio,
+  onToolCall,
+  onToolResult,
+  onToolError,
+  onToolCallStreaming
 }: StreamChatAudioOptions) {
   // Convert messages to include attachments for images
   const processedMessages = messages.map(msg => {
@@ -205,6 +230,14 @@ export async function streamChatWithAudio({
               const chunk = event.data
               if (chunk.type === 'content' && chunk.content) {
                 onChunk(chunk.content)
+              } else if (chunk.type === 'tool_call' && chunk.tool_call && onToolCall) {
+                onToolCall(chunk.tool_call)
+              } else if (chunk.type === 'tool_call_streaming' && chunk.tool_call && onToolCallStreaming) {
+                onToolCallStreaming(chunk.tool_call)
+              } else if (chunk.type === 'tool_result' && chunk.name && chunk.result && onToolResult) {
+                onToolResult(chunk.name, chunk.result)
+              } else if (chunk.type === 'tool_error' && chunk.name && chunk.error && onToolError) {
+                onToolError(chunk.name, chunk.error)
               } else if (chunk.type === 'error') {
                 console.error('Stream error:', chunk.error)
                 onError(chunk.error || 'Unknown error')

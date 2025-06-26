@@ -84,7 +84,7 @@ export default function AssistantMessage({
     return parts.map((part, partIndex) => {
       if (part.type === 'think') {
         return (
-          <div key={partIndex} className="my-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
+          <div key={partIndex} className="my- p-4 bg-purple-50 border border-purple-200 rounded-lg">
             <div className="flex items-center gap-2 mb-2 text-purple-700">
               <span className="text-sm font-semibold">💭 Thinking Process</span>
               {part.incomplete && (
@@ -120,7 +120,7 @@ export default function AssistantMessage({
       }
 
       return (
-        <div key={partIndex} className="prose prose-sm max-w-none prose-gray [&>*]:text-gray-900">
+        <div key={partIndex} className="prose prose-sm max-w-none prose-gray [&>*]:text-gray-900 pb-2">
           <ReactMarkdown
             remarkPlugins={[remarkGfm]}
             components={markdownComponents}
@@ -134,9 +134,9 @@ export default function AssistantMessage({
 
   return (
     <>
-      <div>
-        {renderToolCalls()}
+      <div className="gap-y-4">
         {renderContent()}
+        {renderToolCalls()}
       </div>
     </>
   )

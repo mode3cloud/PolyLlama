@@ -100,9 +100,13 @@ init_worker_by_lua_block {
     instance_types:set("CPU_ROUTING_MODE", cpu_routing_mode)
     ngx.log(ngx.INFO, "CPU routing mode set to: " .. cpu_routing_mode)
     
-    local ok, err = ngx.timer.every(3, model_router.update_model_mappings)
+    -- Run model mapping updates less frequently (every 10 seconds instead of 3)
+    -- This reduces the chance of conflicting updates
+    local ok, err = ngx.timer.every(10, model_router.update_model_mappings)
     if not ok then
         ngx.log(ngx.ERR, "Failed to create timer: ", err)
+    else
+        ngx.log(ngx.INFO, "Model mapping update timer started (every 10s)")
     end
     
     -- Function to collect GPU metrics
@@ -474,51 +478,48 @@ server {
             local model_router = require "model_router"
             local cjson = require "cjson"
             
-            -- Extract model name from request
-            local body_data = ngx.req.get_body_data()
-            if body_data then
-                local success, body = pcall(cjson.decode, body_data)
-                if success and body and body.model then
-                    local model_name = body.model
+            -- Extract model name from request using the model_router function
+            -- This ensures consistent model name extraction and handles prefixes
+            local model_name = model_router.extract_model_name()
+            
+            if model_name then
+                -- Check if model is running on any instance
+                local running_instance = model_router.is_model_running_on_any_instance(model_name)
+                if running_instance then
+                    ngx.log(ngx.INFO, "Model " .. model_name .. " is already running on " .. running_instance)
+                    model_router.set_model_mapping(model_name, running_instance, true)
+                    ngx.var.target_instance = running_instance
+                    ngx.ctx.target_instance = running_instance
+                else
+                    -- Model is not running, need to assign it to the least loaded instance
+                    ngx.log(ngx.INFO, "Model " .. model_name .. " is not running on any instance")
+                    local instance = model_router.get_instance_for_model(model_name)
                     
-                    -- Check if model is running on any instance
-                    local running_instance = model_router.is_model_running_on_any_instance(model_name)
-                    if running_instance then
-                        ngx.log(ngx.INFO, "Model " .. model_name .. " is already running on " .. running_instance)
-                        model_router.set_model_mapping(model_name, running_instance, true)
-                        ngx.var.target_instance = running_instance
-                        ngx.ctx.target_instance = running_instance
-                    else
-                        -- Model is not running, need to assign it to the least loaded instance
-                        ngx.log(ngx.INFO, "Model " .. model_name .. " is not running on any instance")
-                        local instance = model_router.get_instance_for_model(model_name)
+                    -- If no mapping exists, create one
+                    if not instance then
+                        ngx.log(ngx.INFO, "No mapping found for model: " .. model_name .. ". Will route to least loaded instance.")
+                        instance = model_router.assign_model_to_least_loaded_instance(model_name)
                         
-                        -- If no mapping exists, create one
-                        if not instance then
-                            ngx.log(ngx.INFO, "No mapping found for model: " .. model_name .. ". Will route to least loaded instance.")
-                            instance = model_router.assign_model_to_least_loaded_instance(model_name)
-                            
-                            -- Acquire a loading lock if necessary
-                            local lock_acquired, existing_loader = model_router.lock_model_loading(model_name, instance)
-                            
-                            if not lock_acquired and existing_loader then
-                                -- Model is being loaded by another instance, use that one
-                                ngx.log(ngx.INFO, "Model " .. model_name .. " is being loaded by " .. existing_loader)
-                                instance = existing_loader
-                            end
-                        end
+                        -- Acquire a loading lock if necessary
+                        local lock_acquired, existing_loader = model_router.lock_model_loading(model_name, instance)
                         
-                        if instance then
-                            ngx.var.target_instance = instance
-                            ngx.ctx.target_instance = instance
-                            ngx.log(ngx.INFO, "Assigned model " .. model_name .. " to instance " .. instance)
-                        else
-                            ngx.log(ngx.ERR, "Failed to assign instance for model: " .. model_name)
+                        if not lock_acquired and existing_loader then
+                            -- Model is being loaded by another instance, use that one
+                            ngx.log(ngx.INFO, "Model " .. model_name .. " is being loaded by " .. existing_loader)
+                            instance = existing_loader
                         end
                     end
-                else
-                    ngx.log(ngx.WARN, "Could not extract model name from request")
+                    
+                    if instance then
+                        ngx.var.target_instance = instance
+                        ngx.ctx.target_instance = instance
+                        ngx.log(ngx.INFO, "Assigned model " .. model_name .. " to instance " .. instance)
+                    else
+                        ngx.log(ngx.ERR, "Failed to assign instance for model: " .. model_name)
+                    end
                 end
+            else
+                ngx.log(ngx.WARN, "Could not extract model name from request")
             end
         }
         
@@ -716,7 +717,12 @@ server {
                 local running_instance = model_router.is_model_running_on_any_instance(model_name)
                 if running_instance then
                     ngx.log(ngx.INFO, "Model " .. model_name .. " is already running on " .. running_instance)
-                    model_router.set_model_mapping(model_name, running_instance, true)
+                    -- Only set mapping if it's not already set correctly
+                    local current_mapping = model_router.get_safe_instance_mapping(model_name)
+                    if current_mapping ~= running_instance then
+                        ngx.log(ngx.INFO, "Updating mapping for " .. model_name .. " from " .. (current_mapping or "none") .. " to " .. running_instance)
+                        model_router.set_model_mapping(model_name, running_instance, true)
+                    end
                     -- Set directly in Nginx variable AND in ngx.ctx for persistence
                     ngx.var.target_instance = running_instance
                     ngx.ctx.target_instance = running_instance

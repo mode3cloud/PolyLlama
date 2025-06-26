@@ -265,7 +265,7 @@ export default function MessageDisplay({
       return <SystemMessage message={message} />
     } else {
       return (
-        <AssistantMessage 
+        <AssistantMessage
           message={message}
           markdownComponents={markdownComponents}
           parseMessageContent={parseMessageContent}
@@ -299,32 +299,21 @@ export default function MessageDisplay({
 
   return (
     <div className={`group flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-6`}>
-      <div className="relative max-w-[80%]">
-        {isAssistantWithOnlyToolCalls ? (
-          // For assistant messages with only tool calls, render without the outer box
-          <>
-            {renderMessageContent()}
-          </>
-        ) : (
-          // For all other messages, render with the outer box
-          <>
-            <div
-              className={`rounded-lg p-4 ${message.role === 'user'
-                ? 'bg-blue-500 text-white'
-                : message.role === 'tool'
-                  ? 'bg-green-50 border border-green-200 text-gray-900'
-                  : message.role === 'system'
+      <div className="relative max-w-[90%]">
+        <>
+          <div
+            className={`rounded-lg p-3 ${message.role === 'user'
+              ? 'bg-blue-500 text-white'
+              : message.role === 'tool'
+                ? 'bg-green-50 border border-green-200 text-gray-900'
+                : message.role === 'system'
                   ? 'bg-gray-100 border border-gray-300 text-gray-800 border-dashed'
                   : 'bg-white border border-gray-200 text-gray-900'
-                }`}
-            >
-              <div className="flex-1">
-                {renderMessageContent()}
-              </div>
-            </div>
-          </>
-        )}
-        
+              }`}
+          >
+            {renderMessageContent()}
+          </div>
+        </>
         {/* Action buttons container - shared for all message types */}
         <div className="absolute -bottom-6 right-0 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
           {/* Copy button - not shown for system messages */}
@@ -345,7 +334,7 @@ export default function MessageDisplay({
               )}
             </button>
           )}
-          
+
           {/* Resend button - only for user messages */}
           {message.role === 'user' && (
             <button
@@ -359,7 +348,7 @@ export default function MessageDisplay({
               </svg>
             </button>
           )}
-          
+
           {/* Delete button */}
           <button
             onClick={() => onDelete(index)}

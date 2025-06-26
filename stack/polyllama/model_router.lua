@@ -136,6 +136,14 @@ function _M.extract_model_name()
                 -- First check for direct model field
                 if body.model then
                     model_name = body.model
+                    
+                    -- Handle OpenAI-compatible endpoint model names
+                    -- Strip "openai/" prefix if present (added by LiteLLM when using OpenAI-compatible endpoint)
+                    if string.match(model_name, "^openai/") then
+                        model_name = string.sub(model_name, 8)  -- Remove "openai/" prefix
+                        ngx.log(ngx.INFO, "Stripped 'openai/' prefix from model name: openai/" .. model_name .. " -> " .. model_name)
+                    end
+                    
                     ngx.log(ngx.INFO, "Extracted model name from request body: " .. model_name)
                     return model_name
                 end
@@ -565,6 +573,15 @@ function _M.update_model_mappings()
     local start_time = ngx.now()
     local http = require "resty.http"
     
+    -- First detect any duplicate model instances
+    local duplicates = _M.detect_duplicate_model_instances()
+    if #duplicates > 0 then
+        ngx.log(ngx.WARN, "WARNING: Found " .. #duplicates .. " models running on multiple instances!")
+        for _, dup in ipairs(duplicates) do
+            ngx.log(ngx.WARN, "Model " .. dup.model .. " is running on: " .. table.concat(dup.instances, ", "))
+        end
+    end
+    
     -- Debug: Get detailed PS data from each instance directly
     ngx.log(ngx.DEBUG, "DEBUG: Getting detailed running model data from each instance:")
     local instance_ps_data = {}
@@ -660,13 +677,15 @@ function _M.update_model_mappings()
                 -- Only set mapping if it's changing
                 if current_instance ~= target_instance then
                     _M.set_model_mapping(model_name, target_instance, true)
-                    ngx.log(ngx.DEBUG, "Updated mapping for model " .. model_name .. ": " .. 
-                            (current_instance or "none") .. " -> " .. target_instance)
+                    ngx.log(ngx.INFO, "Updated mapping for model " .. model_name .. ": " .. 
+                            (current_instance or "none") .. " -> " .. target_instance .. 
+                            " (model found on " .. #running_instances .. " instances)")
                 else
                     ngx.log(ngx.DEBUG, "DEBUG: Mapping unchanged for " .. model_name)
                 end
             else
-                ngx.log(ngx.DEBUG, "DEBUG: Keeping existing mapping for " .. model_name .. " to " .. current_instance)
+                ngx.log(ngx.DEBUG, "Keeping valid mapping for " .. model_name .. " to " .. current_instance .. 
+                        " (model running on " .. #running_instances .. " instances)")
             end
         else
             ngx.log(ngx.DEBUG, "Running model " .. model_name .. " has no instances")

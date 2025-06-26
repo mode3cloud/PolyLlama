@@ -12,7 +12,17 @@ import inspect
 import re
 import time
 from functools import wraps
-from typing import Any, Dict, List, Optional, AsyncGenerator, Protocol, TypedDict, Tuple, cast
+from typing import (
+    Any,
+    Dict,
+    List,
+    Optional,
+    AsyncGenerator,
+    Protocol,
+    TypedDict,
+    Tuple,
+    cast,
+)
 
 import litellm
 from litellm.types.utils import ModelResponse  # noqa: F401 # pylint: disable=W0611
@@ -36,7 +46,7 @@ class ToolManagerProtocol(Protocol):
     async def execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
         """Execute a tool with given arguments."""
         ...
-    
+
     def format_tools_for_llm(self) -> List[Dict[str, Any]]:
         """Format tools for LLM function calling."""
         ...
@@ -86,16 +96,18 @@ def _convert_tool_call_json(text: str) -> str:
             and isinstance(obj["arguments"], dict)
         ):
             # Synthesize OpenAI-style tool_call
-            return json.dumps([
-                {
-                    "id": "synthetic",
-                    "type": "function",
-                    "function": {
-                        "name": obj["action"],
-                        "arguments": json.dumps(obj["arguments"]),
-                    },
-                }
-            ])
+            return json.dumps(
+                [
+                    {
+                        "id": "synthetic",
+                        "type": "function",
+                        "function": {
+                            "name": obj["action"],
+                            "arguments": json.dumps(obj["arguments"]),
+                        },
+                    }
+                ]
+            )
     except Exception:
         pass
     return text
@@ -130,7 +142,7 @@ class MultiLLMService:
         from .message_manager import MessageManager
 
         self.message_manager = MessageManager()
-        
+
         # Cache for Ollama model capabilities
         self._ollama_capabilities_cache: Dict[str, Tuple[bool, bool, float]] = {}
         self._cache_ttl = 300.0  # 5 minutes
@@ -142,7 +154,7 @@ class MultiLLMService:
         # Enable debug logging for LiteLLM
         if logger.isEnabledFor(logging.DEBUG):
             litellm.set_verbose = True  # type: ignore
-        
+
         # Patch litellm.acompletion for Ollama error handling
         self._patch_litellm_acompletion()
 
@@ -195,7 +207,11 @@ class MultiLLMService:
         if persistence and session_id:
             session_data = await self.message_manager.get_session_messages(session_id)
             conversation_history = session_data.get("messages", [])
-            logger.debug("Loaded %d messages from history for session %s", len(conversation_history), session_id)
+            logger.debug(
+                "Loaded %d messages from history for session %s",
+                len(conversation_history),
+                session_id,
+            )
             # Update session metadata with current model
             await self.message_manager.update_session_metadata(
                 session_id, {"model": self.model}
@@ -228,7 +244,7 @@ class MultiLLMService:
             content_preview = str(msg.get("content", ""))[:100]
             fingerprint = f"{msg.get('role')}:{content_preview}"
             history_fingerprints.add(fingerprint)
-        
+
         # Filter out messages that are already in history
         messages_to_process = []
         for msg in messages:
@@ -239,21 +255,23 @@ class MultiLLMService:
                 msg_dict = msg
             else:
                 raise TypeError("Unexpected message type: %s" % type(msg))
-            
+
             # Skip system messages as they're handled separately
             if msg_dict.get("role") == "system":
                 continue
-                
+
             # Check if this message is already in history
             content_preview = str(msg_dict.get("content", ""))[:100]
             fingerprint = f"{msg_dict.get('role')}:{content_preview}"
-            
+
             if fingerprint not in history_fingerprints:
                 messages_to_process.append(msg_dict)
                 logger.debug("New message detected: role=%s", msg_dict.get("role"))
             else:
-                logger.debug("Skipping duplicate message: role=%s", msg_dict.get("role"))
-        
+                logger.debug(
+                    "Skipping duplicate message: role=%s", msg_dict.get("role")
+                )
+
         for msg_dict in messages_to_process:
             # msg_dict is already a dictionary from the processing above
             if msg_dict["role"] == "user":
@@ -284,8 +302,12 @@ class MultiLLMService:
 
         # Combine with history
         full_conversation = conversation_history + current_messages
-        logger.debug("Full conversation has %d messages (history: %d, new: %d)", 
-                    len(full_conversation), len(conversation_history), len(current_messages))
+        logger.debug(
+            "Full conversation has %d messages (history: %d, new: %d)",
+            len(full_conversation),
+            len(conversation_history),
+            len(current_messages),
+        )
 
         # Format tools for LiteLLM if provided
         tools_spec = self._format_tools(tools) if tools else None
@@ -304,6 +326,27 @@ class MultiLLMService:
                     )
             except Exception as e:
                 logger.warning("Failed to load tools from MCP manager: %s", e)
+        
+        # Check for duplicate tool names and remove them
+        if tools_spec:
+            tool_names = [tool.get("function", {}).get("name", "") for tool in tools_spec if tool.get("function")]
+            duplicates = [name for name in tool_names if tool_names.count(name) > 1]
+            if duplicates:
+                unique_duplicates = list(set(duplicates))
+                logger.warning("Found duplicate tool names: %s", unique_duplicates)
+                logger.warning("All tool names: %s", tool_names)
+                
+                # Remove duplicates - keep only the first occurrence of each tool
+                seen_names = set()
+                unique_tools = []
+                for tool in tools_spec:
+                    tool_name = tool.get("function", {}).get("name", "")
+                    if tool_name and tool_name not in seen_names:
+                        seen_names.add(tool_name)
+                        unique_tools.append(tool)
+                
+                logger.info("Reduced tools from %d to %d after removing duplicates", len(tools_spec), len(unique_tools))
+                tools_spec = unique_tools
 
         # Filter supported parameters for this model
         filtered_kwargs = self._filter_supported_kwargs(self.model, kwargs)
@@ -316,7 +359,9 @@ class MultiLLMService:
             max_iterations = 10
             current_msgs = full_conversation.copy()
             should_continue = True
-            has_persisted_tool_calls = False  # Track if we've persisted an assistant message with tool_calls
+            has_persisted_tool_calls = (
+                False  # Track if we've persisted an assistant message with tool_calls
+            )
 
             while iteration < max_iterations and should_continue:
                 iteration += 1
@@ -334,8 +379,12 @@ class MultiLLMService:
                     model_name = self.model[7:]  # Remove "ollama/" prefix
                     model_for_litellm = f"openai/{model_name}"
                     api_base = "http://router:11434/v1"
-                    logger.info("Using Ollama OpenAI-compatible endpoint for model: %s -> %s", self.model, model_for_litellm)
-                
+                    logger.info(
+                        "Using Ollama OpenAI-compatible endpoint for model: %s -> %s",
+                        self.model,
+                        model_for_litellm,
+                    )
+
                 completion_kwargs = {
                     "model": model_for_litellm,
                     "messages": current_msgs,
@@ -344,22 +393,33 @@ class MultiLLMService:
                     "stream": True,
                     **filtered_kwargs,
                 }
-                
+
                 # Add api_base for Ollama models using OpenAI-compatible endpoint
                 if api_base:
                     completion_kwargs["api_base"] = api_base
-                
+
                 # Only include tools if the model supports them
                 model_supports_tools = await self._model_supports_tools()
-                logger.info("Tool support check for %s: %s (tools available: %d)", 
-                           self.model, model_supports_tools, len(tools_spec) if tools_spec else 0)
-                
+                logger.info(
+                    "Tool support check for %s: %s (tools available: %d)",
+                    self.model,
+                    model_supports_tools,
+                    len(tools_spec) if tools_spec else 0,
+                )
+
                 if tools_spec and model_supports_tools:
                     completion_kwargs["tools"] = tools_spec
-                    logger.info("Model %s supports tools, including %d tools", self.model, len(tools_spec))
+                    logger.info(
+                        "Model %s supports tools, including %d tools",
+                        self.model,
+                        len(tools_spec),
+                    )
                 elif tools_spec:
-                    logger.warning("Model %s does not support tools, omitting %d tools. To force enable, set FORCE_ENABLE_TOOLS=true", 
-                                 self.model, len(tools_spec))
+                    logger.warning(
+                        "Model %s does not support tools, omitting %d tools. To force enable, set FORCE_ENABLE_TOOLS=true",
+                        self.model,
+                        len(tools_spec),
+                    )
                     # Check for force enable flag
                     if os.getenv("FORCE_ENABLE_TOOLS", "").lower() == "true":
                         logger.info("FORCE_ENABLE_TOOLS is set, including tools anyway")
@@ -378,19 +438,28 @@ class MultiLLMService:
                 # Log the request details
                 logger.info("Making completion request:")
                 logger.info("  Model: %s", completion_kwargs.get("model"))
-                logger.info("  Message count: %d", len(completion_kwargs.get("messages", [])))
+                logger.info(
+                    "  Message count: %d", len(completion_kwargs.get("messages", []))
+                )
                 logger.info("  Has tools: %s", bool(completion_kwargs.get("tools")))
                 logger.info("  Temperature: %s", completion_kwargs.get("temperature"))
                 logger.info("  Max tokens: %s", completion_kwargs.get("max_tokens"))
-                logger.info("  Has extra_headers: %s", bool(completion_kwargs.get("extra_headers")))
+                logger.info(
+                    "  Has extra_headers: %s",
+                    bool(completion_kwargs.get("extra_headers")),
+                )
                 logger.info("  Has api_key: %s", bool(completion_kwargs.get("api_key")))
-                
+
                 try:
                     # For Ollama models with images, we need to check if we're using OpenAI-compatible endpoint
                     # If using /v1 endpoint, keep OpenAI format. Otherwise, convert to native Ollama format.
-                    if self.model.startswith("ollama/") and any(
-                        isinstance(msg.get("content"), list) for msg in current_msgs
-                    ) and not (api_base and "/v1" in api_base):
+                    if (
+                        self.model.startswith("ollama/")
+                        and any(
+                            isinstance(msg.get("content"), list) for msg in current_msgs
+                        )
+                        and not (api_base and "/v1" in api_base)
+                    ):
                         # Only convert to Ollama native format when NOT using OpenAI-compatible endpoint
                         ollama_msgs = []
                         for msg in current_msgs:
@@ -402,37 +471,59 @@ class MultiLLMService:
                                     if item.get("type") == "text":
                                         text_content = item.get("text", "")
                                     elif item.get("type") == "image_url":
-                                        image_url = item.get("image_url", {}).get("url", "")
+                                        image_url = item.get("image_url", {}).get(
+                                            "url", ""
+                                        )
                                         if image_url.startswith("data:"):
                                             # Extract base64 data from data URL
-                                            base64_data = image_url.split(",", 1)[1] if "," in image_url else image_url
+                                            base64_data = (
+                                                image_url.split(",", 1)[1]
+                                                if "," in image_url
+                                                else image_url
+                                            )
                                             images.append(base64_data)
-                                
-                                ollama_msg = {"role": msg["role"], "content": text_content}
+
+                                ollama_msg = {
+                                    "role": msg["role"],
+                                    "content": text_content,
+                                }
                                 if images:
                                     ollama_msg["images"] = images
                                 ollama_msgs.append(ollama_msg)
                             else:
                                 # Regular text message
                                 ollama_msgs.append(msg)
-                        
+
                         completion_kwargs["messages"] = ollama_msgs
-                        logger.info("Converted messages to Ollama native format with separate images field")
+                        logger.info(
+                            "Converted messages to Ollama native format with separate images field"
+                        )
                     else:
                         # Keep OpenAI format for OpenAI-compatible endpoint
-                        if api_base and "/v1" in api_base and any(
-                            isinstance(msg.get("content"), list) for msg in current_msgs
+                        if (
+                            api_base
+                            and "/v1" in api_base
+                            and any(
+                                isinstance(msg.get("content"), list)
+                                for msg in current_msgs
+                            )
                         ):
-                            logger.info("Keeping OpenAI format for images with OpenAI-compatible endpoint")
-                    
+                            logger.info(
+                                "Keeping OpenAI format for images with OpenAI-compatible endpoint"
+                            )
+
                     # Log message structure for debugging (without full content)
                     logger.debug("Message structure being sent to litellm:")
                     for i, msg in enumerate(completion_kwargs.get("messages", [])):
                         msg_info = f"  Message {i}: role={msg.get('role')}"
                         if isinstance(msg.get("content"), list):
-                            msg_info += f", content_type=list({len(msg['content'])} items)"
+                            msg_info += (
+                                f", content_type=list({len(msg['content'])} items)"
+                            )
                         elif isinstance(msg.get("content"), str):
-                            msg_info += f", content_type=string({len(msg['content'])} chars)"
+                            msg_info += (
+                                f", content_type=string({len(msg['content'])} chars)"
+                            )
                         if msg.get("images"):
                             msg_info += f", images={len(msg['images'])}"
                         logger.debug(msg_info)
@@ -474,7 +565,7 @@ class MultiLLMService:
                     if hasattr(chunk, "choices") and chunk.choices:
                         delta = chunk.choices[0].delta
                         finish_reason = getattr(chunk.choices[0], "finish_reason", None)
-                        
+
                         if finish_reason:
                             logger.info("Chunk has finish_reason: %s", finish_reason)
 
@@ -520,8 +611,8 @@ class MultiLLMService:
                                         "tool_call": {
                                             "id": tc_id,
                                             "name": tc_name,
-                                            "status": "started"
-                                        }
+                                            "status": "started",
+                                        },
                                     }
 
                                 # Arguments for specific tool (has id but no name)
@@ -570,20 +661,20 @@ class MultiLLMService:
                                         buf["name"],
                                         args,
                                     )
-                                    
+
                                     # Emit tool call event for UI
                                     yield {
                                         "type": "tool_call",
                                         "tool_call": {
                                             "id": tool_id,
                                             "name": buf["name"],
-                                            "arguments": args
-                                        }
+                                            "arguments": args,
+                                        },
                                     }
 
                                     # Get any accumulated content from the assistant buffer
                                     accumulated_content = "".join(assistant_buffer)
-                                    
+
                                     # Add assistant tool call message
                                     tool_call_msg = {
                                         "role": "assistant",
@@ -600,12 +691,18 @@ class MultiLLMService:
                                         ],
                                     }
                                     current_msgs.append(tool_call_msg)
-                                    
+
                                     # Persist assistant message with tool_calls if enabled
-                                    if persistence and session_id and self.message_manager:
+                                    if (
+                                        persistence
+                                        and session_id
+                                        and self.message_manager
+                                    ):
                                         # Use the regular add_assistant_message which accepts both content and tool_calls
                                         await self.message_manager.add_assistant_message(
-                                            session_id, accumulated_content, tool_call_msg["tool_calls"]
+                                            session_id,
+                                            accumulated_content,
+                                            tool_call_msg["tool_calls"],
                                         )
                                         has_persisted_tool_calls = True
 
@@ -641,7 +738,7 @@ class MultiLLMService:
                                         buf["name"],
                                         e,
                                         repr(args_str),
-                                        repr(cleaned_args)
+                                        repr(cleaned_args),
                                     )
                                     error_msg = {
                                         "role": "tool",
@@ -653,7 +750,7 @@ class MultiLLMService:
                                     yield {
                                         "type": "tool_error",
                                         "name": buf["name"],
-                                        "error": str(e)
+                                        "error": str(e),
                                     }
                                 except Exception as err:
                                     logger.error(
@@ -668,7 +765,7 @@ class MultiLLMService:
                                     yield {
                                         "type": "tool_error",
                                         "name": buf["name"],
-                                        "error": str(err)
+                                        "error": str(err),
                                     }
 
                                 active_tool_ids.remove(tool_id)
@@ -704,9 +801,13 @@ class MultiLLMService:
 
             # Persist final assistant message only if we have content and haven't already persisted it
             final_content = "".join(assistant_buffer)
-            logger.info("Final content length: %d, Buffer items: %d, has_persisted_tool_calls: %s", 
-                       len(final_content), len(assistant_buffer), has_persisted_tool_calls)
-            
+            logger.info(
+                "Final content length: %d, Buffer items: %d, has_persisted_tool_calls: %s",
+                len(final_content),
+                len(assistant_buffer),
+                has_persisted_tool_calls,
+            )
+
             # Only persist if there's content to persist
             if persistence and session_id and final_content:
                 # Always persist the final content as it represents the complete assistant response
@@ -833,8 +934,8 @@ class MultiLLMService:
                             anthropic_models = []
                             for model in data.get("data", []):
                                 model_id = model.get("id", "")
-                                # Only include models that are actively available
-                                if model.get("status") == "active":
+                                # Add all models from the API response
+                                if model_id:
                                     anthropic_models.append(model_id)
 
                             # Sort models
@@ -848,6 +949,10 @@ class MultiLLMService:
                                         "provider": "anthropic",
                                     }
                                 )
+                            logger.info(
+                                "Fetched %d Anthropic models from API",
+                                len(anthropic_models),
+                            )
                         else:
                             logger.warning(
                                 "Failed to fetch Anthropic models: %s",
@@ -908,7 +1013,9 @@ class MultiLLMService:
         if cache_key in self._ollama_capabilities_cache:
             has_vision, _, timestamp = self._ollama_capabilities_cache[cache_key]
             if time.time() - timestamp < self._cache_ttl:
-                logger.debug("Using cached vision support for %s: %s", model_name, has_vision)
+                logger.debug(
+                    "Using cached vision support for %s: %s", model_name, has_vision
+                )
                 return has_vision
 
         try:
@@ -930,10 +1037,19 @@ class MultiLLMService:
                     # Check if capabilities array includes "vision"
                     capabilities = data.get("capabilities", [])
                     has_vision = "vision" in capabilities
-                    logger.debug("Model %s capabilities: %s, has_vision: %s", model_name, capabilities, has_vision)
-                    
+                    logger.debug(
+                        "Model %s capabilities: %s, has_vision: %s",
+                        model_name,
+                        capabilities,
+                        has_vision,
+                    )
+
                     # Update cache
-                    self._ollama_capabilities_cache[cache_key] = (has_vision, False, time.time())
+                    self._ollama_capabilities_cache[cache_key] = (
+                        has_vision,
+                        False,
+                        time.time(),
+                    )
                     return has_vision
                 else:
                     logger.warning(
@@ -946,7 +1062,11 @@ class MultiLLMService:
                     model_lower = model_name.lower()
                     result = any(pattern in model_lower for pattern in vision_patterns)
                     # Cache the fallback result too
-                    self._ollama_capabilities_cache[cache_key] = (result, False, time.time())
+                    self._ollama_capabilities_cache[cache_key] = (
+                        result,
+                        False,
+                        time.time(),
+                    )
                     return result
 
         except Exception as e:
@@ -972,7 +1092,9 @@ class MultiLLMService:
         if cache_key in self._ollama_capabilities_cache:
             _, has_tools, timestamp = self._ollama_capabilities_cache[cache_key]
             if time.time() - timestamp < self._cache_ttl:
-                logger.debug("Using cached tools support for %s: %s", model_name, has_tools)
+                logger.debug(
+                    "Using cached tools support for %s: %s", model_name, has_tools
+                )
                 return has_tools
 
         try:
@@ -994,28 +1116,40 @@ class MultiLLMService:
                     # Check if capabilities array includes "tools"
                     capabilities = data.get("capabilities", [])
                     has_tools = "tools" in capabilities
-                    
+
                     # Log detailed model info for debugging
                     logger.info("Ollama model %s info:", model_name)
                     logger.info("  Capabilities: %s", capabilities)
                     logger.info("  Has 'tools' capability: %s", has_tools)
-                    
+
                     # Also check for other indicators of tool support
                     # Some models might not report "tools" but still support it
                     template = data.get("template", "")
-                    if not has_tools and ("function" in template.lower() or "tool" in template.lower()):
-                        logger.info("  Model template contains function/tool references, enabling tools")
+                    if not has_tools and (
+                        "function" in template.lower() or "tool" in template.lower()
+                    ):
+                        logger.info(
+                            "  Model template contains function/tool references, enabling tools"
+                        )
                         has_tools = True
-                    
+
                     # Update cache
-                    self._ollama_capabilities_cache[cache_key] = (False, has_tools, time.time())
-                    
+                    self._ollama_capabilities_cache[cache_key] = (
+                        False,
+                        has_tools,
+                        time.time(),
+                    )
+
                     # Also cache vision support if we got it
                     vision_cache_key = f"vision:{model_name}"
                     if vision_cache_key not in self._ollama_capabilities_cache:
                         has_vision = "vision" in capabilities
-                        self._ollama_capabilities_cache[vision_cache_key] = (has_vision, False, time.time())
-                    
+                        self._ollama_capabilities_cache[vision_cache_key] = (
+                            has_vision,
+                            False,
+                            time.time(),
+                        )
+
                     return has_tools
                 else:
                     logger.warning(
@@ -1024,17 +1158,35 @@ class MultiLLMService:
                         response.status_code,
                     )
                     # Fallback to pattern matching
-                    tools_patterns = ["devstral", "mistral-nemo", "llama3.1", "firefunction", "tools", "function"]
+                    tools_patterns = [
+                        "devstral",
+                        "mistral-nemo",
+                        "llama3.1",
+                        "firefunction",
+                        "tools",
+                        "function",
+                    ]
                     model_lower = model_name.lower()
                     result = any(pattern in model_lower for pattern in tools_patterns)
                     # Cache the fallback result
-                    self._ollama_capabilities_cache[cache_key] = (False, result, time.time())
+                    self._ollama_capabilities_cache[cache_key] = (
+                        False,
+                        result,
+                        time.time(),
+                    )
                     return result
 
         except Exception as e:
             logger.warning("Error checking tools support for %s: %s", model_name, e)
             # Fallback to pattern matching
-            tools_patterns = ["devstral", "mistral-nemo", "llama3.1", "firefunction", "tools", "function"]
+            tools_patterns = [
+                "devstral",
+                "mistral-nemo",
+                "llama3.1",
+                "firefunction",
+                "tools",
+                "function",
+            ]
             model_lower = model_name.lower()
             result = any(pattern in model_lower for pattern in tools_patterns)
             # Cache the fallback result
@@ -1199,13 +1351,17 @@ class MultiLLMService:
             try:
                 # Call the original method
                 response = await orig_acompletion(*args, **kwargs)
-                
+
                 # If streaming and using Ollama (now through OpenAI endpoint), wrap the response to filter None values
                 model = kwargs.get("model", "")
-                is_ollama = model.startswith("ollama") or (model.startswith("openai/") and kwargs.get("api_base", "").endswith("/v1"))
+                is_ollama = model.startswith("ollama") or (
+                    model.startswith("openai/")
+                    and kwargs.get("api_base", "").endswith("/v1")
+                )
                 if kwargs.get("stream", False) and is_ollama:
                     # Check if response is async iterable
                     if hasattr(response, "__aiter__"):
+
                         async def filtered_stream():
                             # Cast to help type checker
                             stream = cast(AsyncGenerator[Any, None], response)
@@ -1213,69 +1369,104 @@ class MultiLLMService:
                                 # Filter out chunks with None content to prevent TypeError
                                 if hasattr(chunk, "choices") and chunk.choices:
                                     delta = chunk.choices[0].delta
-                                    if hasattr(delta, "content") and delta.content is None:
+                                    if (
+                                        hasattr(delta, "content")
+                                        and delta.content is None
+                                    ):
                                         # Skip chunks with None content or replace with empty string
                                         delta.content = ""
                                 yield chunk
+
                         return filtered_stream()
-                
+
                 return response
-                
+
             except KeyError as e:
                 # Only catch this error if we're dealing with tool calls
                 if "arguments" in str(e) and kwargs.get("tools"):
-                    logger.warning("Caught Ollama arguments KeyError for tool calling, returning synthetic response")
+                    logger.warning(
+                        "Caught Ollama arguments KeyError for tool calling, returning synthetic response"
+                    )
                     # For streaming responses, we need to return an async generator
                     if kwargs.get("stream", False):
+
                         async def dummy_stream():
                             # Yield a dummy chunk with tool call
                             class DummyChunk:
                                 class Choice:
                                     finish_reason = "tool_calls"
+
                                     class Delta:
                                         content = None
-                                        tool_calls = [{
-                                            "id": "fallback",
-                                            "function": {
-                                                "name": "unknown",
-                                                "arguments": "{}"
+                                        tool_calls = [
+                                            {
+                                                "id": "fallback",
+                                                "function": {
+                                                    "name": "unknown",
+                                                    "arguments": "{}",
+                                                },
                                             }
-                                        }]
+                                        ]
+
                                     delta = Delta()
+
                                 choices = [Choice()]
+
                             yield DummyChunk()
+
                         return dummy_stream()
                     else:
                         # Non-streaming response (shouldn't happen in our case)
                         class DummyResp:
                             id = "fallback"
                             created = int(time.time())
-                            model = kwargs.get('model', 'unknown')
+                            model = kwargs.get("model", "unknown")
+
                             class Choice:
                                 finish_reason = "tool_calls"
+
                                 class Message:
                                     content = ""
-                                    tool_calls = [{"function": {"name": "unknown", "arguments": "{}"}}]
+                                    tool_calls = [
+                                        {
+                                            "function": {
+                                                "name": "unknown",
+                                                "arguments": "{}",
+                                            }
+                                        }
+                                    ]
+
                                 message = Message()
+
                             choices = [Choice()]
+
                         return DummyResp()
                 raise
             except TypeError as e:
                 # Handle TypeError from None content in streaming
                 if "sequence item" in str(e) and "NoneType found" in str(e):
-                    logger.error("Caught TypeError from None content in Ollama streaming response: %s", e)
+                    logger.error(
+                        "Caught TypeError from None content in Ollama streaming response: %s",
+                        e,
+                    )
+
                     # Return an error stream
                     async def error_stream():
                         class ErrorChunk:
                             class Choice:
                                 finish_reason = "error"
+
                                 class Delta:
                                     content = "Error: Failed to process Ollama response due to None content"
+
                                 delta = Delta()
+
                             choices = [Choice()]
+
                         yield ErrorChunk()
+
                     return error_stream()
                 raise
-        
+
         # Replace litellm.acompletion with our patched version
         litellm.acompletion = safe_acompletion

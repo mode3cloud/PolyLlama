@@ -52,6 +52,14 @@ export interface ChatMessage {
   tool_name?: string;
   tool_call_id?: string;
   images?: ChatImage[];
+  tool_calls?: Array<{
+    id: string;
+    type: 'function';
+    function: {
+      name: string;
+      arguments: string;
+    };
+  }>;
 }
 
 export interface ChatImage {
@@ -82,6 +90,7 @@ export interface StreamChunk {
   // Tool-related fields
   name?: string;  // Tool name
   result?: string;  // Tool result
+  tool_call_id?: string;  // Tool call ID for result messages
   tool_call?: {  // Tool call details
     id: string;
     name: string;

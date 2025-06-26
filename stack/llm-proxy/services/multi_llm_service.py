@@ -316,6 +316,7 @@ class MultiLLMService:
             max_iterations = 10
             current_msgs = full_conversation.copy()
             should_continue = True
+            has_persisted_tool_calls = False  # Track if we've persisted an assistant message with tool_calls
 
             while iteration < max_iterations and should_continue:
                 iteration += 1
@@ -580,9 +581,13 @@ class MultiLLMService:
                                         }
                                     }
 
+                                    # Get any accumulated content from the assistant buffer
+                                    accumulated_content = "".join(assistant_buffer)
+                                    
                                     # Add assistant tool call message
                                     tool_call_msg = {
                                         "role": "assistant",
+                                        "content": accumulated_content,  # Include any content before tool calls
                                         "tool_calls": [
                                             {
                                                 "id": tool_id,
@@ -595,6 +600,14 @@ class MultiLLMService:
                                         ],
                                     }
                                     current_msgs.append(tool_call_msg)
+                                    
+                                    # Persist assistant message with tool_calls if enabled
+                                    if persistence and session_id and self.message_manager:
+                                        # Use the regular add_assistant_message which accepts both content and tool_calls
+                                        await self.message_manager.add_assistant_message(
+                                            session_id, accumulated_content, tool_call_msg["tool_calls"]
+                                        )
+                                        has_persisted_tool_calls = True
 
                                     # Execute tool and add to conversation
                                     if tool_manager:
@@ -669,6 +682,8 @@ class MultiLLMService:
                             logger.info(
                                 "Tool calls processed, continuing to next iteration"
                             )
+                            # Reset assistant buffer for next iteration since we're starting fresh after tools
+                            assistant_buffer = []
                             break
                         else:
                             # finish_reason is "stop" and no tool calls were processed - exit the while loop
@@ -687,10 +702,14 @@ class MultiLLMService:
                     "Received %d chunks in iteration %d", chunk_count, iteration
                 )
 
-            # Persist final assistant message
+            # Persist final assistant message only if we have content and haven't already persisted it
             final_content = "".join(assistant_buffer)
-            logger.info("Final content length: %d, Buffer items: %d", len(final_content), len(assistant_buffer))
+            logger.info("Final content length: %d, Buffer items: %d, has_persisted_tool_calls: %s", 
+                       len(final_content), len(assistant_buffer), has_persisted_tool_calls)
+            
+            # Only persist if there's content to persist
             if persistence and session_id and final_content:
+                # Always persist the final content as it represents the complete assistant response
                 await self.message_manager.add_assistant_message(
                     session_id, final_content
                 )

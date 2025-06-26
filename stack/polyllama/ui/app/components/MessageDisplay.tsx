@@ -1,10 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { ChatMessage } from '../types'
-import ImagePreview from './ImagePreview'
+import UserMessage from './UserMessage'
+import ToolMessage from './ToolMessage'
+import AssistantMessage from './AssistantMessage'
+import SystemMessage from './SystemMessage'
 
 interface MessageDisplayProps {
   message: ChatMessage
@@ -26,7 +27,6 @@ export default function MessageDisplay({
   isLoading
 }: MessageDisplayProps) {
   const [copiedCode, setCopiedCode] = useState<{ [key: string]: boolean }>({})
-  const [previewImage, setPreviewImage] = useState<{ url: string; name?: string } | null>(null)
 
   const extractText = (node: React.ReactNode): string => {
     if (typeof node === 'string') return node
@@ -139,8 +139,13 @@ export default function MessageDisplay({
 
   const parseMessageContent = () => {
     // Ensure content is a string
-    const contentStr = String(message.content || '')
-    
+    let contentStr = String(message.content || '')
+
+    // If we have tool_calls, filter out the "Preparing to call tool" messages
+    if (message.tool_calls && message.tool_calls.length > 0) {
+      contentStr = contentStr.replace(/🔧 Preparing to call tool: \*\*[^*]+\*\*\.\.\.\n*/g, '').trim()
+    }
+
     // Check if content contains think/thought/output blocks (complete or incomplete)
     const completeThinkRegex = /<(think|thought)>([\s\S]*?)<\/(think|thought)>/gi
     const incompleteThinkRegex = /<(think|thought)>([\s\S]*?)$/i
@@ -251,122 +256,81 @@ export default function MessageDisplay({
     return parts
   }
 
+  const renderMessageContent = () => {
+    if (message.role === 'tool') {
+      return <ToolMessage message={message} />
+    } else if (message.role === 'user') {
+      return <UserMessage message={message} />
+    } else if (message.role === 'system') {
+      return <SystemMessage message={message} />
+    } else {
+      return (
+        <AssistantMessage 
+          message={message}
+          markdownComponents={markdownComponents}
+          parseMessageContent={parseMessageContent}
+        />
+      )
+    }
+  }
+
+  // Check if assistant message has only tool calls and no content
+  const hasOnlyToolCalls = () => {
+    if (message.role !== 'assistant') return false
+    const hasToolCalls = message.tool_calls && message.tool_calls.length > 0
+    const hasContent = message.content && message.content.trim().length > 0
+    return hasToolCalls && !hasContent
+  }
+
+  const isAssistantWithOnlyToolCalls = hasOnlyToolCalls()
+
+  // Helper function to handle copy action based on message type
+  const handleCopy = () => {
+    if (message.role === 'assistant' && message.tool_calls && message.tool_calls.length > 0) {
+      const toolCallsText = message.tool_calls
+        .map(tc => `Tool: ${tc.function.name}\nArguments: ${tc.function.arguments}`)
+        .join('\n\n')
+      const fullText = message.content ? `${message.content}\n\n${toolCallsText}` : toolCallsText
+      onCopy(fullText, index)
+    } else {
+      onCopy(message.content, index)
+    }
+  }
+
   return (
     <div className={`group flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} mb-6`}>
       <div className="relative max-w-[80%]">
-        <div
-          className={`rounded-lg p-4 ${
-            message.role === 'user'
-              ? 'bg-blue-500 text-white'
-              : message.role === 'tool'
-              ? 'bg-gray-100 border border-gray-300 text-gray-900'
-              : 'bg-white border border-gray-200 text-gray-900'
-            }`}
-        >
-          <div className="flex-1">
-            {message.role === 'tool' ? (
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-sm font-semibold text-gray-600">🔧 Tool Result</span>
-                  {message.tool_name && (
-                    <span className="text-xs bg-gray-200 px-2 py-1 rounded">{message.tool_name}</span>
-                  )}
-                </div>
-                <div className="prose prose-sm max-w-none prose-gray [&>*]:text-gray-700">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    components={markdownComponents}
-                  >
-                    {String(message.content || '')}
-                  </ReactMarkdown>
-                </div>
+        {isAssistantWithOnlyToolCalls ? (
+          // For assistant messages with only tool calls, render without the outer box
+          <>
+            {renderMessageContent()}
+          </>
+        ) : (
+          // For all other messages, render with the outer box
+          <>
+            <div
+              className={`rounded-lg p-4 ${message.role === 'user'
+                ? 'bg-blue-500 text-white'
+                : message.role === 'tool'
+                  ? 'bg-green-50 border border-green-200 text-gray-900'
+                  : message.role === 'system'
+                  ? 'bg-gray-100 border border-gray-300 text-gray-800 border-dashed'
+                  : 'bg-white border border-gray-200 text-gray-900'
+                }`}
+            >
+              <div className="flex-1">
+                {renderMessageContent()}
               </div>
-            ) : message.role === 'user' ? (
-              <div>
-                <div className="whitespace-pre-wrap">{String(message.content || '')}</div>
-                {message.images && message.images.length > 0 && (
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {message.images.map((image, imgIndex) => {
-                      // Ensure image has valid structure
-                      if (!image || typeof image !== 'object' || !image.url) {
-                        return null
-                      }
-                      return (
-                        <div key={imgIndex} className="relative">
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={image.url}
-                            alt={image.name || `Image ${imgIndex + 1}`}
-                            className="max-h-64 max-w-full rounded border border-white/20 cursor-pointer hover:opacity-90 transition-opacity"
-                            onClick={() => setPreviewImage({ url: image.url, name: image.name })}
-                          />
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div>
-                {parseMessageContent().map((part, partIndex) => {
-                  if (part.type === 'think') {
-                    return (
-                      <div key={partIndex} className="my-4 p-4 bg-purple-50 border border-purple-200 rounded-lg">
-                        <div className="flex items-center gap-2 mb-2 text-purple-700">
-                          <span className="text-sm font-semibold">💭 Thinking Process</span>
-                          {part.incomplete && (
-                            <span className="text-xs text-purple-600 animate-pulse">● Streaming...</span>
-                          )}
-                        </div>
-                        <div className="text-sm text-purple-900 whitespace-pre-wrap">
-                          {part.text}
-                        </div>
-                      </div>
-                    )
-                  }
-
-                  if (part.type === 'output') {
-                    return (
-                      <div key={partIndex} className="my-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                        <div className="flex items-center gap-2 mb-2 text-blue-700">
-                          <span className="text-sm font-semibold">📤 Output</span>
-                          {part.incomplete && (
-                            <span className="text-xs text-blue-600 animate-pulse">● Streaming...</span>
-                          )}
-                        </div>
-                        <div className="prose prose-sm max-w-none prose-gray [&>*]:text-gray-900">
-                          <ReactMarkdown
-                            remarkPlugins={[remarkGfm]}
-                            components={markdownComponents}
-                          >
-                            {part.text}
-                          </ReactMarkdown>
-                        </div>
-                      </div>
-                    )
-                  }
-
-                  return (
-                    <div key={partIndex} className="prose prose-sm max-w-none prose-gray [&>*]:text-gray-900">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={markdownComponents}
-                      >
-                        {part.text}
-                      </ReactMarkdown>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        </div>
-        {/* Action buttons positioned below the message box */}
-        <div className={`absolute -bottom-6 ${message.role === 'user' ? 'right-0' : 'right-0'} flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity`}>
-          {/* Copy button for assistant and tool messages */}
-          {(message.role === 'assistant' || message.role === 'tool') && (
+            </div>
+          </>
+        )}
+        
+        {/* Action buttons container - shared for all message types */}
+        <div className="absolute -bottom-6 right-0 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+          {/* Copy button - not shown for system messages */}
+          {message.role !== 'system' && (
             <button
-              onClick={() => onCopy(message.content, index)}
+              onClick={handleCopy}
               className="group/btn flex items-center justify-center w-6 h-6 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
               title="Copy message"
             >
@@ -381,12 +345,12 @@ export default function MessageDisplay({
               )}
             </button>
           )}
-
-          {/* Resend button for user messages */}
+          
+          {/* Resend button - only for user messages */}
           {message.role === 'user' && (
             <button
               onClick={() => onResend(index)}
-              className="group/btn flex items-center justify-center w-6 h-6 rounded bg-gray-700 hover:bg-green-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              className="group/btn flex items-center justify-center w-6 h-6 rounded bg-gray-700 hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               title="Resend message"
               disabled={isLoading}
             >
@@ -395,8 +359,8 @@ export default function MessageDisplay({
               </svg>
             </button>
           )}
-
-          {/* Delete button for all messages */}
+          
+          {/* Delete button */}
           <button
             onClick={() => onDelete(index)}
             className="group/btn flex items-center justify-center w-6 h-6 rounded bg-gray-700 hover:bg-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
@@ -409,14 +373,6 @@ export default function MessageDisplay({
           </button>
         </div>
       </div>
-      
-      {/* Image Preview Modal */}
-      <ImagePreview
-        imageUrl={previewImage?.url || ''}
-        imageName={previewImage?.name}
-        isOpen={!!previewImage}
-        onClose={() => setPreviewImage(null)}
-      />
     </div>
   )
 }

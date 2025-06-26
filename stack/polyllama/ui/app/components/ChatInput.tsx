@@ -13,6 +13,7 @@ interface ChatInputProps {
   onInputChange: (value: string) => void
   onSendMessage: (images?: ChatImage[]) => void
   onStopGeneration: () => void
+  onStopAudio?: () => void
 }
 
 export default function ChatInput({
@@ -24,7 +25,8 @@ export default function ChatInput({
   audioEnabled,
   onInputChange,
   onSendMessage,
-  onStopGeneration
+  onStopGeneration,
+  onStopAudio
 }: ChatInputProps) {
   const [attachedImages, setAttachedImages] = useState<ChatImage[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -176,6 +178,23 @@ export default function ChatInput({
             >
               Stop
             </button>
+          ) : audioEnabled && isAudioPlaying && onStopAudio ? (
+            <div className="flex gap-2">
+              <button
+                onClick={onStopAudio}
+                className="px-6 py-3 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+                title="Stop audio playback"
+              >
+                Stop Audio
+              </button>
+              <button
+                onClick={handleSend}
+                disabled={(!input.trim() && attachedImages.length === 0) || !selectedModel}
+                className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+              >
+                Send
+              </button>
+            </div>
           ) : (
             <button
               onClick={handleSend}

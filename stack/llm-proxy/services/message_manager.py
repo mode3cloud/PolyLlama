@@ -60,12 +60,25 @@ class MessageManager:
         }
         session["messages"].append(message)
 
-    async def add_assistant_message(self, session_id: str, content: str) -> None:
+    async def add_assistant_message(self, session_id: str, content: str, tool_calls: List[Dict[str, Any]] = None) -> None:
         """Add an assistant message to the session."""
         session = await self.get_session_messages(session_id)
         message = {
             "role": "assistant",
             "content": content,
+            "timestamp": datetime.now().isoformat(),
+        }
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+        session["messages"].append(message)
+    
+    async def add_assistant_message_with_tool_calls(self, session_id: str, tool_calls: List[Dict[str, Any]]) -> None:
+        """Add an assistant message with tool_calls to the session."""
+        session = await self.get_session_messages(session_id)
+        message = {
+            "role": "assistant",
+            "content": "",  # Tool call messages typically have empty content
+            "tool_calls": tool_calls,
             "timestamp": datetime.now().isoformat(),
         }
         session["messages"].append(message)

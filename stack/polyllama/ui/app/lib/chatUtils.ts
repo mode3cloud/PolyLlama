@@ -13,8 +13,8 @@ interface StreamChatOptions {
   onError: (error: string) => void
   onDone: () => void
   onToolCall?: (toolCall: { id: string; name: string; arguments: any }) => void
-  onToolResult?: (name: string, result: string) => void
-  onToolError?: (name: string, error: string) => void
+  onToolResult?: (name: string, result: string, toolCallId?: string) => void
+  onToolError?: (name: string, error: string, toolCallId?: string) => void
   onToolCallStreaming?: (toolCall: { id: string; name: string; status?: 'started' | 'completed' }) => void
 }
 
@@ -112,13 +112,16 @@ export async function streamChat({
             if (chunk.type === 'content' && chunk.content) {
               onChunk(chunk.content)
             } else if (chunk.type === 'tool_call' && chunk.tool_call && onToolCall) {
-              onToolCall(chunk.tool_call)
+              // Ensure arguments is present before calling onToolCall
+              if (chunk.tool_call.arguments !== undefined) {
+                onToolCall(chunk.tool_call as { id: string; name: string; arguments: any })
+              }
             } else if (chunk.type === 'tool_call_streaming' && chunk.tool_call && onToolCallStreaming) {
               onToolCallStreaming(chunk.tool_call)
             } else if (chunk.type === 'tool_result' && chunk.name && chunk.result && onToolResult) {
-              onToolResult(chunk.name, chunk.result)
+              onToolResult(chunk.name, chunk.result, chunk.tool_call_id)
             } else if (chunk.type === 'tool_error' && chunk.name && chunk.error && onToolError) {
-              onToolError(chunk.name, chunk.error)
+              onToolError(chunk.name, chunk.error, chunk.tool_call_id)
             } else if (chunk.type === 'error') {
               console.error('Stream error:', chunk.error)
               onError(chunk.error || 'Unknown error')
@@ -231,7 +234,10 @@ export async function streamChatWithAudio({
               if (chunk.type === 'content' && chunk.content) {
                 onChunk(chunk.content)
               } else if (chunk.type === 'tool_call' && chunk.tool_call && onToolCall) {
-                onToolCall(chunk.tool_call)
+                // Ensure arguments is present before calling onToolCall
+                if (chunk.tool_call.arguments !== undefined) {
+                  onToolCall(chunk.tool_call as { id: string; name: string; arguments: any })
+                }
               } else if (chunk.type === 'tool_call_streaming' && chunk.tool_call && onToolCallStreaming) {
                 onToolCallStreaming(chunk.tool_call)
               } else if (chunk.type === 'tool_result' && chunk.name && chunk.result && onToolResult) {
@@ -277,7 +283,10 @@ export async function syncSessionMessages(sessionId: string, messages: ChatMessa
           role: msg.role,
           content: msg.content,
           timestamp: msg.timestamp || new Date().toISOString(),
-          images: msg.images
+          images: msg.images,
+          tool_calls: msg.tool_calls,
+          tool_name: msg.tool_name,
+          tool_call_id: msg.tool_call_id
         }))
       })
     })

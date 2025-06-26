@@ -313,16 +313,25 @@ function _M.is_model_running_on_any_instance(model_name, force_refresh)
     
     -- If not found and force_refresh wasn't already true, try one more time with a force refresh
     if not force_refresh then
-        ngx.log(ngx.INFO, "Model " .. model_name .. " not found in cache, forcing refresh and checking again")
-        _M.force_refresh_running_models_cache()
+        ngx.log(ngx.WARN, "Model " .. model_name .. " not found in cache, forcing refresh and checking again")
+        local all_models = _M.force_refresh_running_models_cache()
+        
+        -- Log what models are actually running
+        local model_list = {}
+        for model, instances in pairs(all_models) do
+            table.insert(model_list, model .. " on " .. table.concat(instances, ","))
+        end
+        ngx.log(ngx.INFO, "Running models after force refresh: " .. table.concat(model_list, "; "))
         
         -- Check again after force refresh
         if running_models_cache.data[model_name] then
             local instances = running_models_cache.data[model_name]
             if #instances > 0 then
-                ngx.log(ngx.DEBUG, "Found running model " .. model_name .. " on " .. instances[1] .. " after force refresh")
+                ngx.log(ngx.INFO, "Found running model " .. model_name .. " on " .. instances[1] .. " after force refresh")
                 return instances[1]
             end
+        else
+            ngx.log(ngx.WARN, "Model " .. model_name .. " still not found after force refresh!")
         end
     end
     
@@ -677,9 +686,9 @@ function _M.update_model_mappings()
                 -- Only set mapping if it's changing
                 if current_instance ~= target_instance then
                     _M.set_model_mapping(model_name, target_instance, true)
-                    ngx.log(ngx.INFO, "Updated mapping for model " .. model_name .. ": " .. 
-                            (current_instance or "none") .. " -> " .. target_instance .. 
-                            " (model found on " .. #running_instances .. " instances)")
+                    ngx.log(ngx.WARN, "MAPPING CONFLICT: Model " .. model_name .. " was mapped to " .. 
+                            (current_instance or "none") .. " but is running on " .. table.concat(running_instances, ", ") ..
+                            ". Updating mapping to " .. target_instance)
                 else
                     ngx.log(ngx.DEBUG, "DEBUG: Mapping unchanged for " .. model_name)
                 end

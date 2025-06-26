@@ -466,7 +466,7 @@ server {
     }
 
     # OpenAI-compatible chat completions endpoint
-    location /v1/chat/completions {
+    location = /v1/chat/completions {
         set $target_instance "";
         
         # First access and buffer the request body

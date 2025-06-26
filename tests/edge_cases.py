@@ -5,6 +5,7 @@ Tests unusual configurations and error conditions
 """
 
 import json
+import os
 import sys
 import subprocess
 from pathlib import Path
@@ -36,6 +37,8 @@ def empty_gpu_group():
 def single_gpu():
     """Test single GPU configuration"""
     print("🧪 Testing edge case: Single GPU")
+    os.environ["POLYLLAMA_CPU_INSTANCES"] = ""
+    os.environ["POLYLLAMA_MIXED_MODE"] = ""
 
     root_dir = Path(__file__).parent.parent
     cmd = [
@@ -81,6 +84,8 @@ def large_gpu_indices():
 def many_instances():
     """Test configuration with many instances"""
     print("🧪 Testing edge case: Many instances (10)")
+    os.environ["POLYLLAMA_CPU_INSTANCES"] = ""
+    os.environ["POLYLLAMA_MIXED_MODE"] = ""
 
     gpu_groups = []
     for i in range(10):
@@ -109,5 +114,5 @@ if __name__ == "__main__":
     single_gpu()
     large_gpu_indices()
     many_instances()
-    
+
     print("\n🎉 All edge case tests completed!")

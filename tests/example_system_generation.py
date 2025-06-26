@@ -18,6 +18,8 @@ import pytest
 def template_generation():
     """Test that template generation matches expected artifacts for local system."""
 
+    os.environ["POLYLLAMA_CPU_INSTANCES"] = ""
+    os.environ["POLYLLAMA_MIXED_MODE"] = ""
     # Get the project root directory
     project_root = Path(__file__).parent.parent
     builder_dir = project_root / "builder"
@@ -67,20 +69,30 @@ def template_generation():
     # Validate the generated output has correct structure
     # The test config has 2 GPU groups: 3x RTX 4090 + 1x RTX 6000
     # This should create 2 instances (one per group)
-    
+
     # Check docker-compose structure
     assert "polyllama1:" in generated_compose, "Missing polyllama1 service"
     assert "polyllama2:" in generated_compose, "Missing polyllama2 service"
     assert "polyllama3:" not in generated_compose, "Should only have 2 instances"
-    assert "CUDA_VISIBLE_DEVICES=0,1,2" in generated_compose, "Missing GPU assignment for first group"
-    assert "CUDA_VISIBLE_DEVICES=3" in generated_compose, "Missing GPU assignment for second group"
+    assert (
+        "CUDA_VISIBLE_DEVICES=0,1,2" in generated_compose
+    ), "Missing GPU assignment for first group"
+    assert (
+        "CUDA_VISIBLE_DEVICES=3" in generated_compose
+    ), "Missing GPU assignment for second group"
     assert "OLLAMA_INSTANCE_COUNT=2" in generated_compose, "Wrong instance count"
-    
+
     # Check nginx structure
     assert "upstream polyllama_backend" in generated_nginx, "Missing upstream block"
-    assert "server polyllama1:11434" in generated_nginx, "Missing polyllama1 in upstream"
-    assert "server polyllama2:11434" in generated_nginx, "Missing polyllama2 in upstream"
-    assert "server polyllama3:11434" not in generated_nginx, "Should only have 2 servers in upstream"
+    assert (
+        "server polyllama1:11434" in generated_nginx
+    ), "Missing polyllama1 in upstream"
+    assert (
+        "server polyllama2:11434" in generated_nginx
+    ), "Missing polyllama2 in upstream"
+    assert (
+        "server polyllama3:11434" not in generated_nginx
+    ), "Should only have 2 servers in upstream"
     assert 'or "2"' in generated_nginx, "Missing correct default instance count"
 
     print("✅ Local system template generation matches expected artifacts")
@@ -193,7 +205,8 @@ def generated_compose_structure():
 
 def generated_nginx_structure():
     """Validate that generated nginx.conf has correct structure."""
-
+    os.environ["POLYLLAMA_CPU_INSTANCES"] = ""
+    os.environ["POLYLLAMA_MIXED_MODE"] = ""
     # Get the project root directory
     project_root = Path(__file__).parent.parent
     builder_dir = project_root / "builder"
@@ -206,6 +219,7 @@ def generated_nginx_structure():
 
     # Generate files with test config
     import subprocess
+
     original_cwd = os.getcwd()
     try:
         os.chdir(builder_dir)

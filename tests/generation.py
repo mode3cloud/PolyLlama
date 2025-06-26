@@ -291,6 +291,8 @@ tester = PolyLlamaGenerationTest()
 
 def two_gpu_groups():
     """Test two GPU groups configuration"""
+    os.environ["POLYLLAMA_CPU_INSTANCES"] = ""
+    os.environ["POLYLLAMA_MIXED_MODE"] = ""
     assert tester.run_test(
         gpu_config={
             "gpu_groups": [
@@ -305,6 +307,8 @@ def two_gpu_groups():
 
 def three_gpu_groups():
     """Test three GPU groups configuration"""
+    os.environ["POLYLLAMA_CPU_INSTANCES"] = ""
+    os.environ["POLYLLAMA_MIXED_MODE"] = ""
     assert tester.run_test(
         gpu_config={
             "gpu_groups": [
@@ -320,6 +324,8 @@ def three_gpu_groups():
 
 def single_gpu_group():
     """Test single GPU group configuration"""
+    os.environ["POLYLLAMA_CPU_INSTANCES"] = ""
+    os.environ["POLYLLAMA_MIXED_MODE"] = ""
     assert tester.run_test(
         gpu_config={"gpu_groups": [{"name": "RTX 4090", "indices": [0, 1, 2, 3]}]},
         test_name="Single GPU Group (all GPUs)",
@@ -338,6 +344,8 @@ def cpu_only():
 
 def mixed_gpu_types():
     """Test mixed GPU types configuration"""
+    os.environ["POLYLLAMA_CPU_INSTANCES"] = ""
+    os.environ["POLYLLAMA_MIXED_MODE"] = ""
     assert tester.run_test(
         gpu_config={
             "gpu_groups": [
@@ -378,18 +386,18 @@ if __name__ == "__main__":
     cpu_only()
     mixed_gpu_types()
     large_configuration()
-    
+
     # Print summary
     print("\n📊 Test Summary:")
-    print("="*50)
-    passed = sum(1 for r in tester.test_results if r['success'])
-    failed = sum(1 for r in tester.test_results if not r['success'])
+    print("=" * 50)
+    passed = sum(1 for r in tester.test_results if r["success"])
+    failed = sum(1 for r in tester.test_results if not r["success"])
     total = len(tester.test_results)
-    
+
     print(f"Total tests: {total}")
     print(f"Passed: {passed} ✅")
     print(f"Failed: {failed} ❌")
-    
+
     if failed == 0:
         print("\n🎉 All tests passed!")
     else:

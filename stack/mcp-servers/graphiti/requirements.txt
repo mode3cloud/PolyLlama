@@ -1,0 +1,10 @@
+# Graphiti MCP Server Requirements
+
+# MCP SDK for Model Context Protocol support
+mcp>=1.1.0
+
+# Core dependencies for the server
+asyncio-mqtt>=0.16.0  # For async operations (optional)
+
+# Future dependencies for actual Graphiti integration
+# graphiti-core  # Will be added when integrating with real Graphiti instance

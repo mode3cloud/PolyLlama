@@ -20,6 +20,7 @@ from api.chat import chat_router
 from api.sessions import sessions_router
 from api.models import models_router
 from api.mcp import mcp_router
+from api.ingestion import ingestion_router
 from services.multi_llm_service import MultiLLMService
 from services.message_manager import MessageManager
 from services.mcp_bridge_manager import MCPBridgeManager
@@ -126,6 +127,7 @@ app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(sessions_router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(models_router, prefix="/api/models", tags=["models"])
 app.include_router(mcp_router, tags=["mcp"])
+app.include_router(ingestion_router, tags=["ingestion"])
 
 
 def main():

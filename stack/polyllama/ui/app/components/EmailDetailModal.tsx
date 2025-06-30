@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { EmailMessage } from '../types'
+import { EmailMessage, ChatMessage } from '../types'
 import { sanitizeHtml } from '../lib/emailUtils'
 import LLMOutput from './LLMOutput'
 
@@ -19,6 +19,10 @@ interface EmailDetailModalProps {
   currentDraft: string
   onStopGeneration: () => void
   hasModel: boolean
+  selectedModel: string
+  onSendConversationMessage: (message: string, messages: ChatMessage[]) => void
+  conversationMessages: ChatMessage[]
+  isConversationLoading: boolean
 }
 
 export default function EmailDetailModal({
@@ -34,17 +38,30 @@ export default function EmailDetailModal({
   currentSummary,
   currentDraft,
   onStopGeneration,
-  hasModel
+  hasModel,
+  selectedModel,
+  onSendConversationMessage,
+  conversationMessages,
+  isConversationLoading
 }: EmailDetailModalProps) {
   const [activeTab, setActiveTab] = useState<'email' | 'summary' | 'draft'>('email')
   const [draftContext, setDraftContext] = useState('')
   const [draftType, setDraftType] = useState<'reply' | 'replyAll' | 'forward'>('reply')
+  const [conversationInput, setConversationInput] = useState('')
   const modalRef = useRef<HTMLDivElement>(null)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (currentSummary) setActiveTab('summary')
     if (currentDraft) setActiveTab('draft')
   }, [currentSummary, currentDraft])
+
+  // Auto-scroll to bottom when new messages arrive
+  useEffect(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [conversationMessages])
 
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
@@ -61,6 +78,20 @@ export default function EmailDetailModal({
   const handleDraftSubmit = () => {
     onDraft(draftType, draftContext)
     setDraftContext('')
+  }
+
+  const handleSendConversationMessage = () => {
+    if (!conversationInput.trim() || isConversationLoading) return
+    
+    onSendConversationMessage(conversationInput.trim(), conversationMessages)
+    setConversationInput('')
+  }
+
+  const handleConversationKeyPress = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSendConversationMessage()
+    }
   }
 
   return (
@@ -167,24 +198,100 @@ export default function EmailDetailModal({
           )}
 
           {activeTab === 'summary' && (
-            <div>
-              {currentSummary ? (
-                <LLMOutput 
-                  content={currentSummary}
-                  isStreaming={isSummarizing}
-                  messageIndex={0}
-                  timestamp={email.receivedDateTime}
-                />
-              ) : (
-                <div className="text-center py-8 text-gray-500">
-                  <p>No summary generated yet.</p>
-                  <button
-                    onClick={onSummarize}
-                    disabled={!hasModel || isSummarizing}
-                    className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            <div className="flex flex-col h-full">
+              {/* Messages area */}
+              <div className="flex-1 overflow-y-auto mb-4 space-y-4">
+                {/* Initial summary */}
+                {currentSummary && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    <div className="text-sm font-medium text-blue-700 mb-2">
+                      📧 Email Summary
+                    </div>
+                    <LLMOutput 
+                      content={currentSummary}
+                      isStreaming={isSummarizing}
+                      messageIndex={0}
+                      timestamp={email.receivedDateTime}
+                    />
+                  </div>
+                )}
+
+                {/* Conversation messages */}
+                {conversationMessages.map((message, index) => (
+                  <div
+                    key={`${message.timestamp}-${index}`}
+                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
                   >
-                    Generate Summary
-                  </button>
+                    <div
+                      className={`max-w-[80%] rounded-lg p-3 ${
+                        message.role === 'user'
+                          ? 'bg-blue-500 text-white'
+                          : message.role === 'tool'
+                            ? 'bg-green-50 border border-green-200 text-gray-900'
+                            : 'bg-white border border-gray-200 text-gray-900'
+                      }`}
+                    >
+                      {message.role === 'assistant' ? (
+                        <LLMOutput
+                          content={message.content}
+                          isStreaming={isConversationLoading && index === conversationMessages.length - 1}
+                          messageIndex={index + 1}
+                          timestamp={message.timestamp}
+                        />
+                      ) : (
+                        <div className="whitespace-pre-wrap">
+                          {message.content}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+
+                {/* No summary generated state */}
+                {!currentSummary && !isSummarizing && conversationMessages.length === 0 && (
+                  <div className="text-center py-8 text-gray-500">
+                    <p>No summary generated yet.</p>
+                    <button
+                      onClick={onSummarize}
+                      disabled={!hasModel}
+                      className="mt-4 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Generate Summary
+                    </button>
+                  </div>
+                )}
+
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Input area - only show if we have a summary or conversation */}
+              {(currentSummary || conversationMessages.length > 0) && (
+                <div className="border-t pt-4">
+                  <div className="flex space-x-2">
+                    <textarea
+                      value={conversationInput}
+                      onChange={(e) => setConversationInput(e.target.value)}
+                      onKeyDown={handleConversationKeyPress}
+                      placeholder="Ask follow-up questions, request actions, or tell me to remember something..."
+                      className="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
+                      rows={2}
+                      disabled={isConversationLoading}
+                    />
+                    <button
+                      onClick={handleSendConversationMessage}
+                      disabled={!conversationInput.trim() || isConversationLoading || !selectedModel}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                    >
+                      {isConversationLoading ? (
+                        <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      ) : (
+                        'Send'
+                      )}
+                    </button>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-2">
+                    💡 I can help you remember information, search for related content, or take actions using available tools.
+                  </div>
                 </div>
               )}
             </div>

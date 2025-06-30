@@ -1,10 +1,10 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { EmailMessage, ChatModel, EmailSummary, EmailDraft } from '../types'
+import { EmailMessage, ChatModel, ChatMessage } from '../types'
 import { fetchWithAuth } from '../lib/fetchWithAuth'
 import { GraphClient } from '../lib/graphClient'
-import { streamEmailSummarize, streamEmailDraft, formatEmailDate } from '../lib/emailUtils'
+import { streamEmailSummarize, streamEmailDraft } from '../lib/emailUtils'
 import EmailHeader from './EmailHeader'
 import EmailList from './EmailList'
 import EmailDetailModal from './EmailDetailModal'
@@ -22,7 +22,7 @@ export default function EmailInterface() {
     }
     return ''
   })
-  const [currentPage, setCurrentPage] = useState(1)
+  const [, setCurrentPage] = useState(1)
   const [nextPageToken, setNextPageToken] = useState<string | undefined>()
   const [selectedEmail, setSelectedEmail] = useState<EmailMessage | null>(null)
   const [showDetailModal, setShowDetailModal] = useState(false)
@@ -30,8 +30,11 @@ export default function EmailInterface() {
   const [isDrafting, setIsDrafting] = useState(false)
   const [currentSummary, setCurrentSummary] = useState<string>('')
   const [currentDraft, setCurrentDraft] = useState<string>('')
+  const [conversationMessages, setConversationMessages] = useState<ChatMessage[]>([])
+  const [isConversationLoading, setIsConversationLoading] = useState(false)
   const graphClientRef = useRef<GraphClient | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
+  const conversationAbortControllerRef = useRef<AbortController | null>(null)
 
   // Fetch available models
   const fetchModels = useCallback(async () => {
@@ -136,12 +139,17 @@ export default function EmailInterface() {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
     }
+    if (conversationAbortControllerRef.current) {
+      conversationAbortControllerRef.current.abort()
+    }
     
     // Reset states for new email
     setCurrentSummary('')
     setCurrentDraft('')
     setIsSummarizing(false)
     setIsDrafting(false)
+    setConversationMessages([])
+    setIsConversationLoading(false)
     
     try {
       // Fetch full email details including body
@@ -275,9 +283,13 @@ export default function EmailInterface() {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
     }
+    if (conversationAbortControllerRef.current) {
+      conversationAbortControllerRef.current.abort()
+    }
     // Reset the loading states
     setIsSummarizing(false)
     setIsDrafting(false)
+    setIsConversationLoading(false)
   }
 
   const handleModelChange = (model: string) => {
@@ -285,6 +297,117 @@ export default function EmailInterface() {
     // Save to localStorage
     if (typeof window !== 'undefined') {
       localStorage.setItem('email-selected-model', model)
+    }
+  }
+
+  const handleSendConversationMessage = async (message: string, messages: ChatMessage[]) => {
+    if (!selectedEmail || !selectedModel || isConversationLoading) return
+
+    setIsConversationLoading(true)
+
+    // Add user message to conversation
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: message,
+      timestamp: new Date().toISOString()
+    }
+    setConversationMessages(prev => [...prev, userMessage])
+
+    // Create abort controller for conversation
+    conversationAbortControllerRef.current = new AbortController()
+
+    try {
+      const response = await fetchWithAuth('/ui/api/email/conversation', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: selectedEmail,
+          model: selectedModel,
+          messages,
+          message,
+          sessionId: selectedEmail.id, // Use email ID as session ID
+          stream: true
+        }),
+        signal: conversationAbortControllerRef.current.signal
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('No response body')
+      }
+
+      let assistantContent = ''
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
+        content: '',
+        timestamp: new Date().toISOString()
+      }
+
+      // Add assistant message placeholder
+      setConversationMessages(prev => [...prev, assistantMessage])
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (line.trim() === '') continue
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6)
+            if (data === '[DONE]') {
+              break
+            }
+
+            try {
+              const chunk = JSON.parse(data)
+              const content = chunk.choices?.[0]?.delta?.content
+              if (content) {
+                assistantContent += content
+                // Update the last message (assistant) with new content
+                setConversationMessages(prev => {
+                  const updated = [...prev]
+                  updated[updated.length - 1] = {
+                    ...updated[updated.length - 1],
+                    content: assistantContent
+                  }
+                  return updated
+                })
+              }
+            } catch (e) {
+              console.error('Error parsing chunk:', e)
+            }
+          }
+        }
+      }
+    } catch (error: unknown) {
+      const err = error as Error
+      if (err.name === 'AbortError') {
+        console.log('Conversation stream aborted')
+      } else {
+        console.error('Conversation error:', error)
+        // Add error message to conversation
+        const errorMessage: ChatMessage = {
+          role: 'assistant',
+          content: `Error: ${err.message || 'Unknown error occurred'}`,
+          timestamp: new Date().toISOString()
+        }
+        setConversationMessages(prev => [...prev, errorMessage])
+      }
+    } finally {
+      setIsConversationLoading(false)
     }
   }
 
@@ -334,6 +457,7 @@ export default function EmailInterface() {
             setShowDetailModal(false)
             setCurrentSummary('')
             setCurrentDraft('')
+            setConversationMessages([])
           }}
           onArchive={() => handleArchive([selectedEmail.id])}
           onDelete={() => handleDelete([selectedEmail.id])}
@@ -345,6 +469,10 @@ export default function EmailInterface() {
           currentDraft={currentDraft}
           onStopGeneration={stopGeneration}
           hasModel={!!selectedModel}
+          selectedModel={selectedModel}
+          onSendConversationMessage={handleSendConversationMessage}
+          conversationMessages={conversationMessages}
+          isConversationLoading={isConversationLoading}
         />
       )}
     </div>

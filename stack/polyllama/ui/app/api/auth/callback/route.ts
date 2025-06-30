@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
   const pca = new ConfidentialClientApplication(msalConfig);
   const tokenRequest = {
     code,
-    scopes: ["user.read"],
+    scopes: ["user.read", "mail.read", "mail.readwrite", "mail.send"],
     redirectUri: getRedirectUri(baseDomain),
   };
 
@@ -76,10 +76,24 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    const { accessToken, refreshToken } = await createTokenPair(
-      userName,
-      response.account!.name ?? "Unnamed User",
-    );
+    let accessToken, refreshToken;
+    try {
+      const tokenPair = await createTokenPair(
+        userName,
+        response.account!.name ?? "Unnamed User"
+      );
+      accessToken = tokenPair.accessToken;
+      refreshToken = tokenPair.refreshToken;
+    } catch (tokenError) {
+      console.error("Error creating token pair:", tokenError);
+      return NextResponse.json(
+        { 
+          error: "Token Creation Failed", 
+          message: tokenError instanceof Error ? tokenError.message : "Failed to create authentication tokens"
+        },
+        { status: 500 },
+      );
+    }
 
     console.log("User authenticated:", userName);
 
@@ -104,6 +118,17 @@ export async function GET(req: NextRequest) {
       path: "/",
       maxAge: 7 * 24 * 60 * 60, // 7 days in seconds
     });
+
+    // Store Graph access token in a separate cookie
+    if (response.accessToken) {
+      redirectResponse.cookies.set("graph_token", response.accessToken, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+        maxAge: 1 * 60 * 60, // 1 hour in seconds
+      });
+    }
 
     return redirectResponse;
   } catch (error) {

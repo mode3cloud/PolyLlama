@@ -3,12 +3,16 @@ import { proxyToLLM } from '../../proxy-to-llm'
 
 // This endpoint checks the proxy's MCP integration status
 export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url)
+  const includeTools = searchParams.get('includeTools') === 'true'
+  
   // Using a shorter timeout for health check
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), 5000)
   
   try {
-    const response = await proxyToLLM('/api/mcp/status', { 
+    const url = includeTools ? '/api/mcp/status?include_tools=true' : '/api/mcp/status'
+    const response = await proxyToLLM(url, { 
       request,
       headers: {
         'signal': controller.signal as unknown as string

@@ -24,7 +24,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Proxy to LLM proxy service
-    const response = await fetch('http://llm-proxy:11435/api/chat', {
+    const response = await fetch('http://llm-proxy:11435/api/chat/completions', {
       method: 'POST',
       headers,
       body: JSON.stringify(body),

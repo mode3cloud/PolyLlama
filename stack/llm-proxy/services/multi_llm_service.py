@@ -742,6 +742,7 @@ class MultiLLMService:
                                     )
                                     error_msg = {
                                         "role": "tool",
+                                        "name": buf["name"],
                                         "content": "Error parsing arguments: %s"
                                         % str(e),
                                         "tool_call_id": tool_id,
@@ -758,6 +759,7 @@ class MultiLLMService:
                                     )
                                     error_msg = {
                                         "role": "tool",
+                                        "name": buf["name"],
                                         "content": "Error: %s" % str(err),
                                         "tool_call_id": tool_id,
                                     }

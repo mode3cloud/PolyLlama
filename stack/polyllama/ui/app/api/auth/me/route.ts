@@ -22,10 +22,14 @@ export async function GET(request: NextRequest) {
   try {
     const decoded = jwt.verify(token, jwtSecret) as { email: string; name: string }
     
+    // Get Graph access token from separate cookie
+    const graphToken = request.cookies.get('graph_token')?.value
+    
     return NextResponse.json({
       email: decoded.email,
       displayName: decoded.name,
       userId: decoded.email,
+      accessToken: graphToken,
     })
   } catch {
     // Token is invalid or expired

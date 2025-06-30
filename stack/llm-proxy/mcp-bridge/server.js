@@ -17,6 +17,14 @@ app.use(express.json());
 // Store active MCP connections
 const mcpConnections = new Map();
 
+// Store initialization state and tool counts per server
+const serverState = new Map();
+
+// Configuration constants
+const INIT_RETRY_DELAY = 2000; // 2 seconds
+const INIT_MAX_RETRIES = 3;
+const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
+
 // Load MCP configuration
 async function loadConfig() {
   try {
@@ -29,17 +37,11 @@ async function loadConfig() {
   }
 }
 
-// Initialize MCP server connection
-async function initializeMcpServer(name, config) {
-  console.log(`Initializing MCP server: ${name}`);
+// Initialize MCP server connection with retries
+async function initializeMcpServer(name, config, retryCount = 0) {
+  console.log(`Initializing MCP server: ${name} (attempt ${retryCount + 1})`);
   
   try {
-    // Spawn the MCP server process
-    const serverProcess = spawn(config.command, config.args, {
-      env: { ...process.env, ...config.env },
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
-
     // Create transport
     const transport = new StdioClientTransport({
       command: config.command,
@@ -58,18 +60,46 @@ async function initializeMcpServer(name, config) {
     // Connect client to transport
     await client.connect(transport);
 
+    // Fetch initial tools to verify connection
+    const tools = await client.listTools();
+    const toolCount = tools.tools?.length || 0;
+
     // Store connection
     mcpConnections.set(name, {
       client,
       transport,
-      process: serverProcess,
-      config
+      config,
+      lastHealthCheck: Date.now()
     });
 
-    console.log(`Successfully connected to MCP server: ${name}`);
+    // Store server state
+    serverState.set(name, {
+      connected: true,
+      toolCount,
+      lastError: null,
+      initTime: Date.now()
+    });
+
+    console.log(`Successfully connected to MCP server: ${name} with ${toolCount} tools`);
     return true;
   } catch (error) {
     console.error(`Failed to initialize MCP server ${name}:`, error);
+    
+    // Store failed state
+    serverState.set(name, {
+      connected: false,
+      toolCount: 0,
+      lastError: error.message,
+      initTime: Date.now()
+    });
+
+    // Retry logic
+    if (retryCount < INIT_MAX_RETRIES) {
+      console.log(`Retrying ${name} in ${INIT_RETRY_DELAY}ms...`);
+      await new Promise(resolve => setTimeout(resolve, INIT_RETRY_DELAY));
+      return await initializeMcpServer(name, config, retryCount + 1);
+    }
+
     return false;
   }
 }
@@ -79,11 +109,58 @@ async function initializeAllServers() {
   const config = await loadConfig();
   const results = {};
 
-  for (const [name, serverConfig] of Object.entries(config.mcpServers)) {
+  // Initialize servers in parallel with staggered start
+  const initPromises = Object.entries(config.mcpServers).map(async ([name, serverConfig], index) => {
+    // Stagger initialization to avoid overwhelming the system
+    await new Promise(resolve => setTimeout(resolve, index * 500));
     results[name] = await initializeMcpServer(name, serverConfig);
+  });
+
+  await Promise.all(initPromises);
+  return results;
+}
+
+// Health check for a single server
+async function checkServerHealth(name) {
+  const connection = mcpConnections.get(name);
+  const state = serverState.get(name) || { connected: false, toolCount: 0 };
+
+  if (!connection) {
+    serverState.set(name, { ...state, connected: false, lastError: 'No connection' });
+    return false;
   }
 
-  return results;
+  try {
+    // Try to list tools as a health check
+    const tools = await connection.client.listTools();
+    const toolCount = tools.tools?.length || 0;
+    
+    serverState.set(name, {
+      connected: true,
+      toolCount,
+      lastError: null,
+      lastHealthCheck: Date.now()
+    });
+    
+    connection.lastHealthCheck = Date.now();
+    return true;
+  } catch (error) {
+    console.error(`Health check failed for ${name}:`, error.message);
+    serverState.set(name, {
+      ...state,
+      connected: false,
+      lastError: error.message,
+      lastHealthCheck: Date.now()
+    });
+    return false;
+  }
+}
+
+// Periodic health check for all servers
+async function runHealthChecks() {
+  for (const [name] of mcpConnections) {
+    await checkServerHealth(name);
+  }
 }
 
 // API Routes
@@ -91,27 +168,71 @@ async function initializeAllServers() {
 // Get status of all MCP servers
 app.get('/status', async (req, res) => {
   const status = {};
+  const includeTools = req.query.includeTools === 'true';
   
-  for (const [name, connection] of mcpConnections.entries()) {
-    status[name] = {
-      connected: connection.client.getServerCapabilities() !== null,
-      capabilities: connection.client.getServerCapabilities()
+  // Include both configured servers and their actual state
+  const config = await loadConfig();
+  const allServerNames = new Set([
+    ...Object.keys(config.mcpServers),
+    ...mcpConnections.keys()
+  ]);
+
+  for (const name of allServerNames) {
+    const state = serverState.get(name);
+    const connection = mcpConnections.get(name);
+    
+    const serverStatus = {
+      connected: state?.connected || false,
+      toolCount: state?.toolCount || 0,
+      lastError: state?.lastError || null,
+      lastHealthCheck: state?.lastHealthCheck || null,
+      configured: config.mcpServers.hasOwnProperty(name),
+      capabilities: connection?.client?.getServerCapabilities() || null
     };
+
+    // Include tool details if requested
+    if (includeTools && connection && state?.connected) {
+      try {
+        const tools = await connection.client.listTools();
+        serverStatus.tools = tools.tools || [];
+      } catch (error) {
+        console.error(`Failed to list tools for status from ${name}:`, error);
+        serverStatus.tools = [];
+      }
+    }
+
+    status[name] = serverStatus;
   }
 
   res.json({
     servers: status,
-    total: mcpConnections.size
+    total: mcpConnections.size,
+    totalConfigured: Object.keys(config.mcpServers).length
   });
 });
 
 // List all available tools
 app.get('/tools', async (req, res) => {
   const allTools = [];
+  const errors = {};
 
   for (const [serverName, connection] of mcpConnections.entries()) {
+    const state = serverState.get(serverName);
+    
+    // Skip if server is known to be disconnected
+    if (state && !state.connected) {
+      errors[serverName] = state.lastError || 'Server disconnected';
+      continue;
+    }
+
     try {
       const tools = await connection.client.listTools();
+      const toolCount = tools.tools?.length || 0;
+      
+      // Update tool count in server state
+      if (state) {
+        state.toolCount = toolCount;
+      }
       
       // Add server name to each tool
       for (const tool of tools.tools || []) {
@@ -122,10 +243,23 @@ app.get('/tools', async (req, res) => {
       }
     } catch (error) {
       console.error(`Failed to list tools from ${serverName}:`, error);
+      errors[serverName] = error.message;
+      
+      // Update server state to reflect error
+      serverState.set(serverName, {
+        ...state,
+        connected: false,
+        lastError: error.message,
+        toolCount: 0
+      });
     }
   }
 
-  res.json({ tools: allTools });
+  res.json({ 
+    tools: allTools, 
+    errors: Object.keys(errors).length > 0 ? errors : undefined,
+    totalTools: allTools.length
+  });
 });
 
 // Execute a tool
@@ -180,6 +314,7 @@ app.post('/reinitialize', async (req, res) => {
 
 // Start server
 const PORT = process.env.MCP_BRIDGE_PORT || 3000;
+let healthCheckInterval;
 
 app.listen(PORT, async () => {
   console.log(`MCP Bridge server running on port ${PORT}`);
@@ -187,11 +322,30 @@ app.listen(PORT, async () => {
   // Initialize MCP servers on startup
   const results = await initializeAllServers();
   console.log('MCP servers initialization results:', results);
+  
+  // Start periodic health checks
+  healthCheckInterval = setInterval(() => {
+    runHealthChecks().catch(error => {
+      console.error('Error during health checks:', error);
+    });
+  }, HEALTH_CHECK_INTERVAL);
+  
+  // Run initial health check after 5 seconds
+  setTimeout(() => {
+    runHealthChecks().catch(error => {
+      console.error('Error during initial health check:', error);
+    });
+  }, 5000);
 });
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM received, shutting down gracefully');
+  
+  // Clear health check interval
+  if (healthCheckInterval) {
+    clearInterval(healthCheckInterval);
+  }
   
   for (const [name, connection] of mcpConnections.entries()) {
     try {

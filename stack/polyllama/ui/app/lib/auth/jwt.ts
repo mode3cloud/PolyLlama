@@ -1,6 +1,5 @@
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET!;
 const ACCESS_TOKEN_EXPIRY = '1d';
 const REFRESH_TOKEN_EXPIRY = '7d';
 
@@ -11,6 +10,11 @@ interface TokenPayload {
 }
 
 export async function createTokenPair(email: string, name: string) {
+  const JWT_SECRET = process.env.JWT_SECRET;
+  if (!JWT_SECRET) {
+    throw new Error('JWT_SECRET is not configured');
+  }
+
   const accessPayload: TokenPayload = {
     email,
     name,
@@ -35,6 +39,11 @@ export async function createTokenPair(email: string, name: string) {
 }
 
 export function verifyToken(token: string): TokenPayload | null {
+  const JWT_SECRET = process.env.JWT_SECRET;
+  if (!JWT_SECRET) {
+    return null;
+  }
+  
   try {
     return jwt.verify(token, JWT_SECRET) as TokenPayload;
   } catch {

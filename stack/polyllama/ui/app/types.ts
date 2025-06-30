@@ -161,3 +161,91 @@ export interface PullStatusesResponse {
   pull_statuses: PullStatus[];
   count: number;
 }
+
+// Email interface types
+export interface EmailMessage {
+  id: string;
+  conversationId?: string;
+  subject: string;
+  bodyPreview: string;
+  body?: EmailBody;
+  from: EmailAddress;
+  toRecipients: EmailAddress[];
+  ccRecipients?: EmailAddress[];
+  receivedDateTime: string;
+  hasAttachments: boolean;
+  importance: 'low' | 'normal' | 'high';
+  isRead: boolean;
+  isDraft: boolean;
+  webLink?: string;
+  attachments?: EmailAttachment[];
+}
+
+export interface EmailBody {
+  contentType: 'text' | 'html';
+  content: string;
+}
+
+export interface EmailAddress {
+  emailAddress: {
+    name?: string;
+    address: string;
+  };
+}
+
+export interface EmailAttachment {
+  id: string;
+  name: string;
+  contentType: string;
+  size: number;
+}
+
+export interface EmailSummary {
+  id: string;
+  emailId: string;
+  summary: string;
+  keyTopics: string[];
+  entities: {
+    people: string[];
+    organizations: string[];
+    locations: string[];
+  };
+  extractedFacts: string[];
+  actionItems: string[];
+  createdAt: string;
+  model: string;
+}
+
+export interface EmailDraft {
+  id: string;
+  emailId: string;
+  replyType: 'reply' | 'replyAll' | 'forward';
+  subject: string;
+  body: string;
+  createdAt: string;
+  model: string;
+}
+
+export interface EmailSession {
+  id: string;
+  emailId: string;
+  summaries: EmailSummary[];
+  drafts: EmailDraft[];
+  createdAt: string;
+  updatedAt: string;
+  metadata?: {
+    model?: string;
+    [key: string]: any;
+  };
+}
+
+export interface EmailListResponse {
+  messages: EmailMessage[];
+  nextPageToken?: string;
+  totalCount?: number;
+}
+
+export interface EmailAction {
+  type: 'archive' | 'delete' | 'summarize' | 'draft' | 'remember';
+  emailIds: string[];
+}

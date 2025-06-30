@@ -30,7 +30,7 @@ export async function GET(req: NextRequest) {
   const pca = new ConfidentialClientApplication(msalConfig);
 
   const authCodeUrlParameters = {
-    scopes: ["user.read"],
+    scopes: ["user.read", "mail.read", "mail.readwrite", "mail.send"],
     redirectUri: redirectUri,
     state: encodeURIComponent(baseDomain!), // Pass returnUrl in state
   };

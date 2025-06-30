@@ -21,6 +21,8 @@ class MCPBridgeManager:
         self.client = httpx.AsyncClient(timeout=30.0)
         self.tools_cache: List[Dict[str, Any]] = []
         self._initialized = False
+        self._refresh_task = None
+        self._refresh_interval = 60  # Refresh every 60 seconds
         
     async def initialize(self):
         """Initialize connection to MCP bridge and refresh tools."""
@@ -41,6 +43,9 @@ class MCPBridgeManager:
             await self._refresh_tools_cache()
             self._initialized = True
             
+            # Start periodic refresh task
+            self._refresh_task = asyncio.create_task(self._periodic_refresh())
+            
             logger.info(f"MCP Bridge Manager initialized with {len(self.tools_cache)} tools")
             
         except Exception as e:
@@ -55,16 +60,40 @@ class MCPBridgeManager:
             
             data = response.json()
             self.tools_cache = data.get("tools", [])
+            
+            # Log any errors from individual servers
+            if "errors" in data:
+                for server, error in data.get("errors", {}).items():
+                    logger.warning(f"Server '{server}' has error: {error}")
+            
             logger.info(f"Refreshed tools cache: {len(self.tools_cache)} tools available")
             
         except Exception as e:
             logger.error(f"Failed to refresh tools cache: {e}")
             self.tools_cache = []
     
+    async def _periodic_refresh(self):
+        """Periodically refresh tools cache."""
+        while self._initialized:
+            try:
+                await asyncio.sleep(self._refresh_interval)
+                await self._refresh_tools_cache()
+            except Exception as e:
+                logger.error(f"Error in periodic refresh: {e}")
+                
     async def shutdown(self):
         """Shutdown the bridge connection."""
-        await self.client.aclose()
         self._initialized = False
+        
+        # Cancel refresh task
+        if self._refresh_task:
+            self._refresh_task.cancel()
+            try:
+                await self._refresh_task
+            except asyncio.CancelledError:
+                pass
+                
+        await self.client.aclose()
     
     async def list_tools(self) -> List[Dict[str, Any]]:
         """List all available tools from all servers."""
@@ -154,10 +183,11 @@ class MCPBridgeManager:
             "total_tools": len(self.tools_cache)
         }
     
-    async def get_bridge_status(self) -> Dict[str, Any]:
+    async def get_bridge_status(self, include_tools: bool = False) -> Dict[str, Any]:
         """Get detailed status from bridge."""
         try:
-            response = await self.client.get(f"{self.bridge_url}/status")
+            params = {"includeTools": "true"} if include_tools else {}
+            response = await self.client.get(f"{self.bridge_url}/status", params=params)
             response.raise_for_status()
             return response.json()
         except Exception as e:

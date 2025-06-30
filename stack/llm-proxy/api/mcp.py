@@ -37,7 +37,7 @@ class ToolExecutionResponse(BaseModel):
 
 
 @mcp_router.get("/status")
-async def get_mcp_status(request: Request):
+async def get_mcp_status(request: Request, include_tools: bool = False):
     """Get the status of MCP servers and tools."""
     try:
         mcp_manager = request.app.state.mcp_manager
@@ -45,17 +45,30 @@ async def get_mcp_status(request: Request):
         
         # Get detailed bridge status if available
         servers = {}
+        total_connected_tools = 0
+        
         if status["initialized"]:
             try:
-                bridge_status = await mcp_manager.get_bridge_status()
+                bridge_status = await mcp_manager.get_bridge_status(include_tools=include_tools)
                 servers = bridge_status.get("servers", {})
+                
+                # Calculate total tools from connected servers
+                for server_name, server_info in servers.items():
+                    if server_info.get("connected") and server_info.get("toolCount"):
+                        total_connected_tools += server_info.get("toolCount", 0)
+                        
             except Exception as e:
                 logger.warning(f"Failed to get bridge status: {e}")
+        
+        # Use connected tools count if available, otherwise fall back to cache
+        actual_total_tools = total_connected_tools if total_connected_tools > 0 else status["total_tools"]
         
         return {
             "status": "configured" if status["initialized"] else "not_configured",
             "servers": servers,
-            "total_tools": status["total_tools"],
+            "total_tools": actual_total_tools,
+            "cache_tools": status["total_tools"],  # Include cached count for debugging
+            "connected_tools": total_connected_tools,  # Include connected count
         }
     except Exception as e:
         logger.error("Error getting MCP status: %s", e)

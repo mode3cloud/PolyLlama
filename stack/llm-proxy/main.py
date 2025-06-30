@@ -20,10 +20,12 @@ from api.chat import chat_router
 from api.sessions import sessions_router
 from api.models import models_router
 from api.mcp import mcp_router
+from api.ingestion import ingestion_router
 from services.multi_llm_service import MultiLLMService
 from services.message_manager import MessageManager
 from services.mcp_bridge_manager import MCPBridgeManager
 from services.audio_service_api import AudioServiceAPI
+from services.graphiti_service import GraphitiService
 from config import LLMProxyConfig
 
 # Configure logging
@@ -55,12 +57,13 @@ llm_service: MultiLLMService
 message_manager: MessageManager
 mcp_manager: MCPBridgeManager
 audio_service: AudioServiceAPI
+graphiti_service: GraphitiService
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
-    global llm_service, message_manager, mcp_manager, audio_service
+    global llm_service, message_manager, mcp_manager, audio_service, graphiti_service
 
     logger.info("Starting PolyLlama LLM Proxy Service...")
 
@@ -84,11 +87,20 @@ async def startup_event():
     # Initialize MCP manager (this will start MCP servers)
     await mcp_manager.initialize()
 
+    # Initialize Graphiti service
+    graphiti_service = GraphitiService()
+    try:
+        await graphiti_service.initialize()
+        logger.info("Graphiti service initialized successfully")
+    except Exception as e:
+        logger.warning("Failed to initialize Graphiti service (non-critical): %s", e)
+
     # Store in app state for access in routes
     app.state.llm_service = llm_service
     app.state.message_manager = message_manager
     app.state.mcp_manager = mcp_manager
     app.state.audio_service = audio_service
+    app.state.graphiti_service = graphiti_service
 
     logger.info("PolyLlama LLM Proxy Service initialized successfully")
 
@@ -96,7 +108,7 @@ async def startup_event():
 @app.on_event("shutdown")
 async def shutdown_event():
     """Clean up services on shutdown."""
-    global llm_service, message_manager, mcp_manager, audio_service
+    global llm_service, message_manager, mcp_manager, audio_service, graphiti_service
 
     logger.info("Shutting down PolyLlama LLM Proxy Service...")
 
@@ -106,6 +118,8 @@ async def shutdown_event():
         await mcp_manager.shutdown()
     if audio_service:
         await audio_service.close()
+    if graphiti_service:
+        await graphiti_service.close()
 
     logger.info("PolyLlama LLM Proxy Service shutdown complete")
 
@@ -118,6 +132,7 @@ async def health_check():
         "status": "healthy",
         "service": "polyllama-llm-proxy",
         "mcp_connected": mcp_manager._initialized if mcp_manager else False,
+        "graphiti_connected": graphiti_service.is_connected if graphiti_service else False,
     }
 
 
@@ -126,6 +141,7 @@ app.include_router(chat_router, prefix="/api/chat", tags=["chat"])
 app.include_router(sessions_router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(models_router, prefix="/api/models", tags=["models"])
 app.include_router(mcp_router, tags=["mcp"])
+app.include_router(ingestion_router, prefix="/api/ingest", tags=["ingestion"])
 
 
 def main():

@@ -29,28 +29,10 @@ export async function POST(request: NextRequest) {
     }
 
     // Prepare the prompt for summarization
-    const systemPrompt = `You are an AI assistant that analyzes emails and provides structured summaries. 
-Extract key information including:
-- A concise summary (2-3 sentences)
-- Key topics discussed
-- People, organizations, and locations mentioned
-- Important facts
-- Action items or tasks
+    const systemPrompt = `You are an AI assistant that analyzes emails and provides clear, concise summaries. 
+Extract and present key information in a readable format.`
 
-Respond in JSON format with the following structure:
-{
-  "summary": "Brief summary here",
-  "keyTopics": ["topic1", "topic2"],
-  "entities": {
-    "people": ["name1", "name2"],
-    "organizations": ["org1", "org2"],
-    "locations": ["location1", "location2"]
-  },
-  "extractedFacts": ["fact1", "fact2"],
-  "actionItems": ["action1", "action2"]
-}`
-
-    const userPrompt = `Please analyze this email:
+    const userPrompt = `Please analyze this email and provide a comprehensive summary:
 
 From: ${email.from.emailAddress.name || email.from.emailAddress.address}
 To: ${email.toRecipients.map(r => r.emailAddress.name || r.emailAddress.address).join(', ')}
@@ -58,7 +40,16 @@ Subject: ${email.subject}
 Date: ${new Date(email.receivedDateTime).toLocaleString()}
 
 Body:
-${email.body?.content || email.bodyPreview}`
+${email.body?.content || email.bodyPreview}
+
+Please provide:
+1. A brief summary (2-3 sentences)
+2. Key topics discussed
+3. Any people, organizations, or locations mentioned
+4. Important facts or information
+5. Any action items or tasks mentioned
+
+Format your response as clear, readable text (not JSON).`
 
     // Prepare the request to LLM proxy
     const llmRequest = {
@@ -68,8 +59,7 @@ ${email.body?.content || email.bodyPreview}`
         { role: 'user', content: userPrompt }
       ],
       stream,
-      temperature: 0.3,
-      response_format: { type: 'json_object' }
+      temperature: 0.3
     }
 
     // Add API key if configured for Ollama models
@@ -105,29 +95,40 @@ ${email.body?.content || email.bodyPreview}`
       const decoder = new TextDecoder()
 
       // Create a TransformStream to handle the streaming
+      let buffer = ''
       const stream = new TransformStream({
         async transform(chunk, controller) {
-          const text = decoder.decode(chunk, { stream: true })
-          const lines = text.split('\n')
+          // Decode the chunk and add to buffer
+          buffer += decoder.decode(chunk, { stream: true })
+          
+          // Process complete lines
+          const lines = buffer.split('\n')
+          // Keep the last line in buffer if it's incomplete
+          buffer = lines.pop() || ''
           
           for (const line of lines) {
+            if (line.trim() === '') continue // Skip empty lines
+            
             if (line.startsWith('data: ')) {
-              const jsonStr = line.slice(6)
+              const jsonStr = line.slice(6).trim()
               if (jsonStr === '[DONE]') {
-                // Parse the complete response and save summary
-                try {
-                  const summaryData = JSON.parse(fullContent)
-                  await saveEmailSummary(
-                    email.id,
-                    summaryData.summary,
-                    summaryData.keyTopics,
-                    summaryData.entities,
-                    summaryData.extractedFacts,
-                    summaryData.actionItems,
-                    model
-                  )
-                } catch (e) {
-                  console.error('Error parsing summary:', e)
+                // Save the complete text summary
+                if (fullContent.trim()) {
+                  try {
+                    // For now, save the full text as summary
+                    // In a real implementation, you might want to parse the text
+                    await saveEmailSummary(
+                      email.id,
+                      fullContent.trim(),
+                      [], // keyTopics - would need text parsing
+                      { people: [], organizations: [], locations: [] }, // entities
+                      [], // extractedFacts
+                      [], // actionItems
+                      model
+                    )
+                  } catch (e) {
+                    console.error('Error saving summary:', e)
+                  }
                 }
                 controller.enqueue(encoder.encode('data: [DONE]\n\n'))
                 return
@@ -138,14 +139,22 @@ ${email.body?.content || email.bodyPreview}`
                 if (data.choices?.[0]?.delta?.content) {
                   fullContent += data.choices[0].delta.content
                 }
-                controller.enqueue(chunk)
+                // Forward the complete line with newline
+                controller.enqueue(encoder.encode(line + '\n'))
               } catch (e) {
-                // Pass through non-JSON lines
-                controller.enqueue(chunk)
+                // Forward non-JSON lines as-is
+                controller.enqueue(encoder.encode(line + '\n'))
               }
             } else {
-              controller.enqueue(chunk)
+              // Forward non-data lines as-is
+              controller.enqueue(encoder.encode(line + '\n'))
             }
+          }
+        },
+        flush(controller) {
+          // Handle any remaining data in buffer
+          if (buffer.trim()) {
+            controller.enqueue(encoder.encode(buffer))
           }
         }
       })
@@ -165,25 +174,17 @@ ${email.body?.content || email.bodyPreview}`
       const content = data.choices?.[0]?.message?.content
       
       if (content) {
-        try {
-          const summaryData = JSON.parse(content)
-          const summary = await saveEmailSummary(
-            email.id,
-            summaryData.summary,
-            summaryData.keyTopics,
-            summaryData.entities,
-            summaryData.extractedFacts,
-            summaryData.actionItems,
-            model
-          )
-          
-          return NextResponse.json({ summary, success: true })
-        } catch (e) {
-          return NextResponse.json(
-            { error: 'Failed to parse summary response' },
-            { status: 500 }
-          )
-        }
+        const summary = await saveEmailSummary(
+          email.id,
+          content.trim(),
+          [], // keyTopics
+          { people: [], organizations: [], locations: [] }, // entities
+          [], // extractedFacts
+          [], // actionItems
+          model
+        )
+        
+        return NextResponse.json({ summary, success: true })
       } else {
         return NextResponse.json(
           { error: 'No content in response' },

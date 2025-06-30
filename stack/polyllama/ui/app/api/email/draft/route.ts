@@ -106,14 +106,22 @@ Keep responses concise and professional.`
       const decoder = new TextDecoder()
 
       // Create a TransformStream to handle the streaming
+      let buffer = ''
       const stream = new TransformStream({
         async transform(chunk, controller) {
-          const text = decoder.decode(chunk, { stream: true })
-          const lines = text.split('\n')
+          // Decode the chunk and add to buffer
+          buffer += decoder.decode(chunk, { stream: true })
+          
+          // Process complete lines
+          const lines = buffer.split('\n')
+          // Keep the last line in buffer if it's incomplete
+          buffer = lines.pop() || ''
           
           for (const line of lines) {
+            if (line.trim() === '') continue // Skip empty lines
+            
             if (line.startsWith('data: ')) {
-              const jsonStr = line.slice(6)
+              const jsonStr = line.slice(6).trim()
               if (jsonStr === '[DONE]') {
                 // Save the complete draft at the end
                 if (!savedDraftId && fullContent) {
@@ -145,14 +153,22 @@ Keep responses concise and professional.`
                 if (data.choices?.[0]?.delta?.content) {
                   fullContent += data.choices[0].delta.content
                 }
-                controller.enqueue(chunk)
+                // Forward the complete line with newline
+                controller.enqueue(encoder.encode(line + '\n'))
               } catch (e) {
-                // Pass through non-JSON lines
-                controller.enqueue(chunk)
+                // Forward non-JSON lines as-is
+                controller.enqueue(encoder.encode(line + '\n'))
               }
             } else {
-              controller.enqueue(chunk)
+              // Forward non-data lines as-is
+              controller.enqueue(encoder.encode(line + '\n'))
             }
+          }
+        },
+        flush(controller) {
+          // Handle any remaining data in buffer
+          if (buffer.trim()) {
+            controller.enqueue(encoder.encode(buffer))
           }
         }
       })

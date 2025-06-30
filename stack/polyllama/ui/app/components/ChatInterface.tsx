@@ -68,7 +68,7 @@ export default function ChatInterface() {
         // Include user, assistant, tool, and system messages
         const sessionMessages = data.messages
           .filter((msg: { role: string }) => msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool' || msg.role === 'system')
-          .map((msg: { role: string; content: unknown; timestamp: string; images?: unknown[]; tool_calls?: any; tool_name?: string; tool_call_id?: string }) => {
+          .map((msg: { role: string; content: unknown; timestamp: string; images?: unknown[]; tool_calls?: Array<{ id: string; type: string; function: { name: string; arguments: string } }>; tool_name?: string; tool_call_id?: string }) => {
             // Handle content that might be an array with image objects
             let messageContent = msg.content
             let images = msg.images

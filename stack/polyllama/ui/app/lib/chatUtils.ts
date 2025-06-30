@@ -12,7 +12,7 @@ interface StreamChatOptions {
   onChunk: (content: string) => void
   onError: (error: string) => void
   onDone: () => void
-  onToolCall?: (toolCall: { id: string; name: string; arguments: any }) => void
+  onToolCall?: (toolCall: { id: string; name: string; arguments: Record<string, unknown> }) => void
   onToolResult?: (name: string, result: string, toolCallId?: string) => void
   onToolError?: (name: string, error: string, toolCallId?: string) => void
   onToolCallStreaming?: (toolCall: { id: string; name: string; status?: 'started' | 'completed' }) => void
@@ -102,34 +102,41 @@ export async function streamChat({
           if (data === '') continue
 
           try {
-            const chunk: StreamChunk = JSON.parse(data)
-            
-            // Debug logging for tool-related events
-            if (chunk.type && chunk.type.includes('tool')) {
-              console.log(`[Chat Stream] Received ${chunk.type} event:`, chunk)
-            }
-
-            if (chunk.type === 'content' && chunk.content) {
-              onChunk(chunk.content)
-            } else if (chunk.type === 'tool_call' && chunk.tool_call && onToolCall) {
-              // Ensure arguments is present before calling onToolCall
-              if (chunk.tool_call.arguments !== undefined) {
-                onToolCall(chunk.tool_call as { id: string; name: string; arguments: any })
-              }
-            } else if (chunk.type === 'tool_call_streaming' && chunk.tool_call && onToolCallStreaming) {
-              onToolCallStreaming(chunk.tool_call)
-            } else if (chunk.type === 'tool_result' && chunk.name && chunk.result && onToolResult) {
-              onToolResult(chunk.name, chunk.result, chunk.tool_call_id)
-            } else if (chunk.type === 'tool_error' && chunk.name && chunk.error && onToolError) {
-              onToolError(chunk.name, chunk.error, chunk.tool_call_id)
-            } else if (chunk.type === 'error') {
-              console.error('Stream error:', chunk.error)
-              onError(chunk.error || 'Unknown error')
-            } else if (chunk.type === 'done') {
+            // Handle OpenAI format
+            if (data === '[DONE]') {
               onDone()
               return
-            } else if (chunk.type === 'connected') {
-              // Connection established
+            }
+            
+            const chunk = JSON.parse(data)
+            
+            // Check if it's OpenAI format
+            if (chunk.choices && Array.isArray(chunk.choices) && chunk.choices.length > 0) {
+              const choice = chunk.choices[0]
+              const delta = choice.delta
+              
+              // Handle content
+              if (delta?.content) {
+                onChunk(delta.content)
+              }
+              
+              // Handle tool calls
+              if (delta?.tool_calls && onToolCall) {
+                for (const toolCall of delta.tool_calls) {
+                  if (toolCall.function) {
+                    onToolCall({
+                      id: toolCall.id,
+                      name: toolCall.function.name,
+                      arguments: JSON.parse(toolCall.function.arguments || '{}')
+                    })
+                  }
+                }
+              }
+              
+              // Handle finish reason
+              if (choice.finish_reason === 'stop') {
+                // Normal completion handled by [DONE]
+              }
             }
           } catch (parseError) {
             console.error('Failed to parse chunk:', data, parseError)
@@ -236,7 +243,7 @@ export async function streamChatWithAudio({
               } else if (chunk.type === 'tool_call' && chunk.tool_call && onToolCall) {
                 // Ensure arguments is present before calling onToolCall
                 if (chunk.tool_call.arguments !== undefined) {
-                  onToolCall(chunk.tool_call as { id: string; name: string; arguments: any })
+                  onToolCall(chunk.tool_call as { id: string; name: string; arguments: Record<string, unknown> })
                 }
               } else if (chunk.type === 'tool_call_streaming' && chunk.tool_call && onToolCallStreaming) {
                 onToolCallStreaming(chunk.tool_call)

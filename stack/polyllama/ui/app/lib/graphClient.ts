@@ -1,5 +1,40 @@
 import { EmailMessage, EmailListResponse } from '../types'
 
+interface GraphMessage {
+  id: string;
+  conversationId: string;
+  subject?: string;
+  bodyPreview?: string;
+  from: {
+    emailAddress: {
+      name: string;
+      address: string;
+    };
+  };
+  toRecipients?: Array<{
+    emailAddress: {
+      name: string;
+      address: string;
+    };
+  }>;
+  ccRecipients?: Array<{
+    emailAddress: {
+      name: string;
+      address: string;
+    };
+  }>;
+  receivedDateTime: string;
+  hasAttachments?: boolean;
+  importance?: string;
+  isRead?: boolean;
+  isDraft?: boolean;
+  webLink: string;
+  body?: {
+    contentType: string;
+    content: string;
+  };
+}
+
 export class GraphClient {
   private accessToken: string
 
@@ -47,7 +82,7 @@ export class GraphClient {
     const data = await response.json()
 
     // Map Graph API response to our EmailMessage type
-    const messages: EmailMessage[] = data.value.map((msg: any) => ({
+    const messages: EmailMessage[] = data.value.map((msg: GraphMessage) => ({
       id: msg.id,
       conversationId: msg.conversationId,
       subject: msg.subject || '(No subject)',

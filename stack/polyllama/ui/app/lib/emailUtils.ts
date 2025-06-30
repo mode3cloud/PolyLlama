@@ -1,4 +1,5 @@
 import { fetchWithAuth } from './fetchWithAuth'
+import { EmailMessage } from '../types'
 import { EmailSummary, EmailDraft } from '../types'
 
 interface StreamEmailOptions {
@@ -11,7 +12,7 @@ interface StreamEmailOptions {
 }
 
 export async function streamEmailSummarize(
-  email: any,
+  email: EmailMessage,
   model: string,
   options: StreamEmailOptions
 ): Promise<void> {
@@ -55,17 +56,15 @@ export async function streamEmailSummarize(
           }
 
           try {
+            // Handle [DONE] signal
+            if (data === '[DONE]') {
+              return
+            }
+            
             const json = JSON.parse(data)
             
-            // Handle llm-proxy wrapped format
-            if (json.type === 'content' && json.data) {
-              const innerData = json.data
-              if (innerData.choices?.[0]?.delta?.content) {
-                options.onChunk(innerData.choices[0].delta.content)
-              }
-            } 
-            // Also handle direct OpenAI format (in case it changes)
-            else if (json.choices?.[0]?.delta?.content) {
+            // Handle OpenAI format
+            if (json.choices?.[0]?.delta?.content) {
               options.onChunk(json.choices[0].delta.content)
             }
             
@@ -99,7 +98,7 @@ export async function streamEmailSummarize(
 }
 
 export async function streamEmailDraft(
-  email: any,
+  email: EmailMessage,
   model: string,
   replyType: 'reply' | 'replyAll' | 'forward',
   context: string | undefined,
@@ -145,17 +144,15 @@ export async function streamEmailDraft(
           }
 
           try {
+            // Handle [DONE] signal
+            if (data === '[DONE]') {
+              return
+            }
+            
             const json = JSON.parse(data)
             
-            // Handle llm-proxy wrapped format
-            if (json.type === 'content' && json.data) {
-              const innerData = json.data
-              if (innerData.choices?.[0]?.delta?.content) {
-                options.onChunk(innerData.choices[0].delta.content)
-              }
-            }
-            // Also handle direct OpenAI format (in case it changes)
-            else if (json.choices?.[0]?.delta?.content) {
+            // Handle OpenAI format
+            if (json.choices?.[0]?.delta?.content) {
               options.onChunk(json.choices[0].delta.content)
             }
             

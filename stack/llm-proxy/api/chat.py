@@ -118,6 +118,47 @@ class ChatCompletionRequest(BaseModel):
     speech_lang: Optional[str] = None
 
 
+def _convert_to_openai_format(chunk: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Convert llm-proxy internal format to OpenAI streaming format."""
+    if chunk.get("type") == "content":
+        return {
+            "choices": [{
+                "delta": {"content": chunk.get("content", "")},
+                "finish_reason": None,
+                "index": 0
+            }]
+        }
+    elif chunk.get("type") == "tool_call":
+        tool_call = chunk.get("tool_call", {})
+        return {
+            "choices": [{
+                "delta": {
+                    "tool_calls": [{
+                        "id": tool_call.get("id"),
+                        "type": "function",
+                        "function": {
+                            "name": tool_call.get("name"),
+                            "arguments": json.dumps(tool_call.get("arguments", {}))
+                        }
+                    }]
+                },
+                "finish_reason": None,
+                "index": 0
+            }]
+        }
+    elif chunk.get("type") == "complete":
+        # Send final content with finish reason
+        return {
+            "choices": [{
+                "delta": {},
+                "finish_reason": "stop",
+                "index": 0
+            }]
+        }
+    # Skip other types like "connected", "tool_result", "tool_error", "done"
+    return None
+
+
 @chat_router.post("/completions")
 async def chat_completion(request: ChatCompletionRequest, req: Request):
     """
@@ -242,8 +283,7 @@ async def _stream_chat_completion(
 ):
     """Generator for streaming chat completions."""
     try:
-        # Send initial connection event
-        yield 'data: {"type": "connected"}\n\n'
+        # OpenAI format doesn't have a connection event, so we skip it
 
         logger.info(f"Starting chat stream with model: {llm_service.model}")
         logger.debug(f"Session ID: {session_id}, Messages count: {len(messages)}")
@@ -263,8 +303,11 @@ async def _stream_chat_completion(
         chunk_count = 0
         async for chunk in chat_stream:
             chunk_count += 1
-            chunk_data = json.dumps(chunk)
-            yield f"data: {chunk_data}\n\n"
+            # Convert to OpenAI format
+            openai_chunk = _convert_to_openai_format(chunk)
+            if openai_chunk:
+                chunk_data = json.dumps(openai_chunk)
+                yield f"data: {chunk_data}\n\n"
 
             # Log first few chunks for debugging
             if chunk_count <= 3:
@@ -272,14 +315,21 @@ async def _stream_chat_completion(
 
         logger.info(f"Streamed {chunk_count} chunks")
 
-        # Signal completion
-        yield 'data: {"type": "done"}\n\n'
+        # Signal completion in OpenAI format
+        yield 'data: [DONE]\n\n'
 
     except Exception as e:
         logger.error(f"Error in streaming chat completion: {e}", exc_info=True)
-        error_data = json.dumps({"type": "error", "error": str(e)})
-        yield f"data: {error_data}\n\n"
-        yield 'data: {"type": "done"}\n\n'
+        # For errors, we'll send an error in the content
+        error_chunk = {
+            "choices": [{
+                "delta": {"content": f"Error: {str(e)}"},
+                "finish_reason": None,
+                "index": 0
+            }]
+        }
+        yield f"data: {json.dumps(error_chunk)}\n\n"
+        yield 'data: [DONE]\n\n'
 
 
 @chat_router.post("/completions_audio")

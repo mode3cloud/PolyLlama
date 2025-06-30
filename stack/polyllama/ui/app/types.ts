@@ -94,7 +94,7 @@ export interface StreamChunk {
   tool_call?: {  // Tool call details
     id: string;
     name: string;
-    arguments?: any;
+    arguments?: Record<string, unknown>;
     status?: 'started' | 'completed';
   };
 }
@@ -235,7 +235,7 @@ export interface EmailSession {
   updatedAt: string;
   metadata?: {
     model?: string;
-    [key: string]: any;
+    [key: string]: unknown;
   };
 }
 

@@ -266,11 +266,13 @@ Implementation details:
 ## Development Guidelines
 - We use pnpm NOT npm
 
-## Agent Layer Implementation Plan
+# PolyLlama Multi-Agent Implementation Plan
 
-### Overview
+## Overview
 
-This section outlines the incremental approach to adding agent capabilities (tool use, orchestration, guardrails) to PolyLlama while preserving the existing multi-instance Ollama architecture and security patterns.
+This document provides a comprehensive implementation plan for adding multi-agent capabilities to PolyLlama while preserving the existing multi-instance Ollama architecture, security patterns, and routing logic.
+
+## Architecture Overview
 
 ### Core Principles
 
@@ -278,163 +280,485 @@ This section outlines the incremental approach to adding agent capabilities (too
 - **Server-Side Only**: All agent/tool operations must be server-side (no browser-based tool calls)
 - **Security First**: Preserve API-KEY and JWT/OAuth patterns on all endpoints
 - **Incremental**: Build single-agent flows before multi-agent orchestration
+- **Streaming First**: Support progressive feedback at every layer
 
-### Architecture Components
+### High-Level Architecture
 
-#### 1. Agent Controller Service (NEW)
-
-Deploy as a Python FastAPI service alongside existing services:
-
-- Location: `stack/agent-controller/`
-- Port: 11436 (internal only)
-- Responsibilities:
-  - Orchestrate LLM workflows using PolyLlama backend
-  - Manage agent sessions and conversation state
-  - Interface with MCP tools and external services
-  - Handle turn-taking and context management
-
-#### 2. Tool Registry (NEW)
-
-Standardized tool interface for all integrations:
-
-- Each MCP/external service wrapped as Python callable
-- Consistent interface: `def tool(args: dict) -> dict`
-- Central registry in `agent_controller/tools/`
-- Tools invoked by agent code, not LLM directly
-
-#### 3. Integration Pattern
-
-```text
-[Browser] → [Next.js /ui/api/agent/*] → [Agent Controller :11436] → [Ollama via :11434/api/*]
+```
+[Browser] → [Next.js /ui/api/agent/*] → [Agent Controller :11436] → [LLM Proxy :11435] → [Ollama :11434]
                                               ↓
                                          [MCP Tools/Services]
 ```
 
-### Implementation Phases
+### Detailed Component Flow
 
-#### Phase 1: Single-Agent Foundation
-
-1. Create agent controller service with basic session management
-2. Add Next.js API routes:
-   - `/ui/api/agent/chat` - Agent-powered chat
-   - `/ui/api/agent/status` - Session status
-3. Implement core agent loop:
-
-   ```python
-   # Pseudocode for agent step
-   def agent_step(session_id, user_input):
-       # Load session state
-       # Compose prompt with instructions + context
-       # Call LLM via localhost:11434/api/* with API-KEY
-       # Parse for tool requirements
-       # Execute tools if needed
-       # Return response or request user input
-   ```
-
-#### Phase 2: Tool Integration
-
-1. Wrap existing MCP tools with standard interface
-2. Create tool metadata registry (name, description, parameters)
-3. Implement tool detection in LLM responses
-4. Add tool result injection back into agent context
-
-#### Phase 3: Multi-Agent Orchestration
-
-1. Extend controller for multiple agent instances per session
-2. Implement agent patterns:
-   - **Manager Pattern**: Top-level agent delegates to specialists
-   - **Handoff Pattern**: Agents transfer control based on domain
-3. Add inter-agent communication via shared session state
-
-#### Phase 4: Guardrails & Safety
-
-1. Input validation middleware:
-   - Content filtering (regex, classifiers)
-   - PII detection and masking
-2. Output safety checks:
-   - Response validation
-   - High-risk action confirmation
-3. Audit logging for all agent actions
-
-### Technical Integration Details
-
-#### LLM Communication
-
-- All agent→LLM calls use existing `/api/*` endpoints
-- Always include API-KEY header for Ollama access
-- Maintain model routing through existing Lua logic
-- No direct Ollama container access
-
-#### Session Management
-
-- Store state in Redis or PostgreSQL (not in-memory)
-- Session schema:
-
-  ```json
-  {
-    "session_id": "uuid",
-    "agent_type": "chat|workflow|email",
-    "context": [...],
-    "tools_used": [...],
-    "state": "active|paused|complete"
-  }
-  ```
-
-#### Tool API Standards
-
-```python
-# Example tool wrapper
-class EmailSearchTool:
-    def __init__(self, mcp_client):
-        self.mcp = mcp_client
-        
-    def search(self, args: dict) -> dict:
-        # Validate args
-        # Call MCP email service
-        # Format response for agent
-        return {"status": "success", "results": [...]}
+```
++---------------------------------------------------------------------------------------+
+|                                       User                                            |
+|                    (PolyLlama UI: /chat, /email, etc)                                |
++--------------------------------------+------------------------------------------------+
+                                       |
+                                       | 1. Prompt/Query
+                                       v
++-----------------------------------[ Next.js API Layer ]-------------------------------+
+|  /ui/api/agent/* (chat, email, workflow)                                            |
+|   - Receives user prompt                                                            |
+|   - Manages JWT auth                                                                |
+|   - Streams partial outputs to browser (Server-Sent Events / HTTP chunking)          |
+|   - Calls Agent Controller Service                                                  |
++--------------------------------------+------------------------------------------------+
+                                       |
+                                       | 2. Full prompt/context/session_id
+                                       v
++-----------------------------[ Agent Controller Service (Python) ]---------------------+
+|   Port: 11436 (internal only)                                                       |
+|   - Session memory (per user/conversation)                                          |
+|   - Implements Aggregator Agent with planning capabilities                          |
+|   - Streaming support: yields partial LLM or agent output back to API               |
+|   - Orchestrates workflow:                                                          |
+|        a) Plan/Reason (CoT, ReACT, etc)                                            |
+|        b) Decide which sub-agent/tool to call                                      |
+|        c) Invoke LLM via LLM Proxy (litellm)                                       |
+|        d) Invoke MCP sub-agents as needed                                          |
+|        e) Combine/generate results                                                 |
++------------------------+---------------+---------------+-----------------------------+
+                         |               |               |
+          [Sub-Agent: Search]   [Sub-Agent: Local Data]   [Sub-Agent: Cloud/API]
+           - Calls MCP search      - Calls DB/file/API       - Calls cloud API, etc.
+           - Returns results       - Returns results         - Returns results
+                         |               |               |
+                         +-------+-------+-------+-------+
+                                       |
+                                       | 3. Calls LLM Proxy
+                                       v
++-----------------------------[ LLM Proxy (litellm) :11435 ]---------------------------+
+|   - Multi-provider support (OpenAI, Anthropic, Ollama, etc.)                        |
+|   - Streaming support                                                               |
+|   - Forwards Ollama requests to localhost:11434 with API-KEY                        |
++--------------------------------------+------------------------------------------------+
+                                       |
+                                       | 4. Ollama requests (when needed)
+                                       v
++-----------------------------[ Nginx Router + Ollama :11434 ]--------------------------+
+|   - API-KEY protected endpoints                                                     |
+|   - Lua-based model routing to appropriate instance                                 |
+|   - Multiple Ollama instances (polyllama1, polyllama2, etc.)                       |
++--------------------------------------------------------------------------------------+
 ```
 
-### File Structure Additions
+## Implementation Components
 
-```text
+### 1. Agent Controller Service (NEW)
+
+**Location**: `stack/agent-controller/`
+**Port**: 11436 (internal only)
+**Technology**: Python FastAPI with async support
+
+**Responsibilities**:
+- Orchestrate LLM workflows using PolyLlama backend via LLM proxy
+- Manage agent sessions and conversation state
+- Interface with MCP tools and external services
+- Handle turn-taking and context management
+- Support streaming responses for real-time feedback
+
+### 2. Tool Registry (NEW)
+
+**Location**: `stack/agent-controller/tools/`
+
+Standardized tool interface for all integrations:
+- Each MCP/external service wrapped as Python callable
+- Consistent interface: `async def tool(args: dict) -> dict`
+- Central registry for tool discovery and metadata
+- Tools invoked by agent code, not LLM directly
+- Support for streaming tools where applicable
+
+### 3. Session Management
+
+**Storage**: Redis or PostgreSQL (not in-memory)
+**Session Schema**:
+```json
+{
+  "session_id": "uuid",
+  "agent_type": "chat|workflow|email",
+  "context": [...],
+  "tools_used": [...],
+  "state": "active|paused|complete",
+  "created_at": "timestamp",
+  "updated_at": "timestamp"
+}
+```
+
+## Implementation Phases
+
+### Phase 1: Single-Agent Foundation
+
+1. **Create Agent Controller Service**
+   ```python
+   # stack/agent-controller/main.py
+   from fastapi import FastAPI
+   from fastapi.responses import StreamingResponse
+   
+   app = FastAPI()
+   
+   @app.post("/agent/chat")
+   async def agent_chat(request: AgentRequest):
+       async def generate():
+           async for chunk in agent.process(request):
+               yield f"data: {json.dumps(chunk)}\n\n"
+       return StreamingResponse(generate(), media_type="text/event-stream")
+   ```
+
+2. **Add Next.js API Routes**
+   ```typescript
+   // app/api/agent/chat/route.ts
+   export async function POST(req: Request) {
+     const { userPrompt, sessionId } = await req.json()
+     
+     // Stream from agent controller to client
+     const response = await fetch('http://agent-controller:11436/agent/chat', {
+       method: 'POST',
+       headers: { 'Content-Type': 'application/json' },
+       body: JSON.stringify({ userPrompt, sessionId })
+     })
+     
+     // Pass through the stream
+     return new Response(response.body, {
+       headers: {
+         'Content-Type': 'text/event-stream',
+         'Cache-Control': 'no-cache',
+         'Connection': 'keep-alive',
+       }
+     })
+   }
+   ```
+
+3. **Implement Core Agent Loop**
+   ```python
+   class Agent:
+       async def process(self, request: AgentRequest):
+           # Load session state
+           session = await self.load_session(request.session_id)
+           
+           # Compose prompt with instructions + context
+           prompt = self.build_prompt(session, request.user_prompt)
+           
+           # Stream reasoning steps
+           yield {"type": "thinking", "content": "Analyzing request..."}
+           
+           # Call LLM via proxy
+           async for chunk in self.llm_client.stream(prompt):
+               yield {"type": "llm_output", "content": chunk}
+           
+           # Parse for tool requirements
+           if tools_needed := self.parse_tools(response):
+               for tool in tools_needed:
+                   result = await self.execute_tool(tool)
+                   yield {"type": "tool_result", "tool": tool.name, "result": result}
+           
+           # Save session state
+           await self.save_session(session)
+   ```
+
+### Phase 2: Tool Integration
+
+1. **Standard Tool Interface**
+   ```python
+   # stack/agent-controller/tools/base.py
+   from abc import ABC, abstractmethod
+   
+   class Tool(ABC):
+       @property
+       @abstractmethod
+       def name(self) -> str:
+           pass
+       
+       @property
+       @abstractmethod
+       def description(self) -> str:
+           pass
+       
+       @abstractmethod
+       async def execute(self, args: dict) -> dict:
+           pass
+   ```
+
+2. **Example MCP Tool Wrapper**
+   ```python
+   # stack/agent-controller/tools/email.py
+   class EmailSearchTool(Tool):
+       name = "email_search"
+       description = "Search through email messages"
+       
+       def __init__(self, mcp_client):
+           self.mcp = mcp_client
+       
+       async def execute(self, args: dict) -> dict:
+           query = args.get("query", "")
+           results = await self.mcp.search_emails(query)
+           return {
+               "status": "success",
+               "results": results,
+               "count": len(results)
+           }
+   ```
+
+3. **Tool Registry**
+   ```python
+   # stack/agent-controller/tools/registry.py
+   class ToolRegistry:
+       def __init__(self):
+           self.tools = {}
+       
+       def register(self, tool: Tool):
+           self.tools[tool.name] = tool
+       
+       def get_tool(self, name: str) -> Tool:
+           return self.tools.get(name)
+       
+       def list_tools(self) -> List[dict]:
+           return [
+               {"name": t.name, "description": t.description}
+               for t in self.tools.values()
+           ]
+   ```
+
+### Phase 3: Multi-Agent Orchestration
+
+1. **Agent Types**
+   ```python
+   # stack/agent-controller/agents/
+   class ManagerAgent(Agent):
+       """Delegates to specialist agents"""
+       async def delegate(self, task, specialist):
+           # Hand off control to specialist
+           pass
+   
+   class ResearchAgent(Agent):
+       """Specialized in research tasks"""
+       tools = ["search", "summarize", "extract"]
+   
+   class DataAgent(Agent):
+       """Specialized in data analysis"""
+       tools = ["query", "analyze", "visualize"]
+   ```
+
+2. **Orchestration Patterns**
+   - **Manager Pattern**: Top-level agent delegates to specialists
+   - **Pipeline Pattern**: Sequential agent processing
+   - **Consensus Pattern**: Multiple agents vote on output
+   - **Handoff Pattern**: Agents transfer control based on domain
+
+### Phase 4: Guardrails & Safety
+
+1. **Input Validation**
+   ```python
+   class InputValidator:
+       async def validate(self, input_text: str):
+           # Content filtering
+           if await self.contains_harmful_content(input_text):
+               raise ValidationError("Harmful content detected")
+           
+           # PII detection
+           pii_entities = await self.detect_pii(input_text)
+           if pii_entities:
+               input_text = self.mask_pii(input_text, pii_entities)
+           
+           return input_text
+   ```
+
+2. **Output Safety**
+   ```python
+   class OutputValidator:
+       async def validate(self, output: str, context: dict):
+           # Check for sensitive information
+           # Validate against business rules
+           # Flag high-risk responses
+           pass
+   ```
+
+3. **Audit Logging**
+   ```python
+   class AuditLogger:
+       async def log_action(self, session_id: str, action: dict):
+           # Log to persistent storage
+           # Include: timestamp, user, action, tools used, outcome
+           pass
+   ```
+
+## File Structure
+
+```
 stack/
 ├── agent-controller/
 │   ├── Dockerfile
 │   ├── requirements.txt
 │   ├── main.py
-│   ├── agent/
+│   ├── config.py
+│   ├── agents/
 │   │   ├── __init__.py
-│   │   ├── controller.py
+│   │   ├── base.py
+│   │   ├── manager.py
+│   │   ├── research.py
+│   │   └── data.py
+│   ├── core/
+│   │   ├── __init__.py
 │   │   ├── session.py
-│   │   └── prompts.py
-│   └── tools/
+│   │   ├── prompts.py
+│   │   └── llm_client.py
+│   ├── tools/
+│   │   ├── __init__.py
+│   │   ├── base.py
+│   │   ├── registry.py
+│   │   ├── email.py
+│   │   ├── search.py
+│   │   └── data.py
+│   └── guardrails/
 │       ├── __init__.py
-│       ├── registry.py
-│       ├── email.py
-│       └── search.py
+│       ├── input.py
+│       ├── output.py
+│       └── audit.py
 └── polyllama/ui/app/api/agent/
     ├── chat/
     │   └── route.ts
-    └── status/
+    ├── status/
+    │   └── route.ts
+    └── sessions/
         └── route.ts
 ```
 
-### Testing Strategy
+## LLM Client Integration
 
-- Unit tests for each tool wrapper
-- Integration tests for agent flows
-- Load tests for concurrent sessions
-- Security tests for input validation
+```python
+# stack/agent-controller/core/llm_client.py
+class LLMProxyClient:
+    """Client for LLM proxy (litellm) that supports multiple providers"""
+    
+    def __init__(self, base_url: str = "http://llm-proxy:11435"):
+        self.base_url = base_url
+    
+    async def stream(self, prompt: str, model: str = None):
+        """Stream response from LLM"""
+        async with aiohttp.ClientSession() as session:
+            payload = {
+                "model": model or "default",
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": True
+            }
+            
+            async with session.post(
+                f"{self.base_url}/v1/chat/completions",
+                json=payload,
+                headers={"Content-Type": "application/json"}
+            ) as response:
+                async for line in response.content:
+                    if line:
+                        chunk = json.loads(line.decode('utf-8').strip('data: '))
+                        if content := chunk.get('choices', [{}])[0].get('delta', {}).get('content'):
+                            yield content
+```
 
-### Deployment Considerations
+## Docker Compose Addition
 
-- Add agent-controller to docker-compose template
-- Configure service discovery for MCP access
-- Set resource limits for agent service
-- Monitor token usage and costs
+```yaml
+# Add to builder/docker-compose.yml.j2
+agent-controller:
+  build:
+    context: ./stack/agent-controller
+  container_name: agent-controller
+  ports:
+    - "11436:11436"  # Internal only
+  environment:
+    - LLM_PROXY_URL=http://llm-proxy:11435
+    - REDIS_URL=redis://redis:6379
+  networks:
+    - polyllama-network
+  depends_on:
+    - llm-proxy
+    - redis
+```
 
-### Do NOT
+## Testing Strategy
+
+1. **Unit Tests**
+   - Tool wrapper functionality
+   - Agent state management
+   - Input/output validation
+
+2. **Integration Tests**
+   - End-to-end agent flows
+   - Multi-agent coordination
+   - Streaming response handling
+
+3. **Load Tests**
+   - Concurrent session handling
+   - Token usage optimization
+   - Response time benchmarks
+
+4. **Security Tests**
+   - Input injection attempts
+   - Authentication bypass attempts
+   - Data leakage prevention
+
+## Deployment Considerations
+
+- Configure resource limits for agent service
+- Set up monitoring for token usage and costs
+- Implement rate limiting per user/session
+- Add health checks for all components
+- Configure log aggregation for debugging
+
+## Key Streaming Patterns
+
+### 1. Simple Pass-through (Chat Routes)
+```typescript
+// When proxying without server-side processing
+if (response.ok && response.body) {
+  return new Response(response.body, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection': 'keep-alive',
+    }
+  })
+}
+```
+
+### 2. Transform Stream (Agent Routes)
+```typescript
+// When server needs to process/transform the stream
+const stream = new TransformStream({
+  async transform(chunk, controller) {
+    // Parse agent response, format for UI
+    const data = JSON.parse(chunk)
+    const formatted = formatAgentResponse(data)
+    controller.enqueue(new TextEncoder().encode(formatted))
+  }
+})
+const transformedStream = response.body.pipeThrough(stream)
+return new Response(transformedStream, { headers: streamHeaders })
+```
+
+## Security Considerations
+
+- All agent→LLM calls use LLM proxy with proper authentication
+- Agent controller never exposes tools directly to clients
+- Session data encrypted at rest
+- PII masking before tool execution
+- Rate limiting on agent endpoints
+- Audit trail for all agent actions
+
+## Monitoring & Observability
+
+- OpenTelemetry integration for distributed tracing
+- Prometheus metrics for:
+  - Agent response times
+  - Tool execution counts
+  - Token usage per session
+  - Error rates by agent type
+- Structured logging with correlation IDs
+- Real-time dashboards for agent performance
+
+## Do NOT
 
 - Modify existing Nginx configurations
 - Expose agent tools as public APIs

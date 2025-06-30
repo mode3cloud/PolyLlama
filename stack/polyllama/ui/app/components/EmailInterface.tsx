@@ -132,6 +132,17 @@ export default function EmailInterface() {
   const handleViewEmail = async (email: EmailMessage) => {
     if (!graphClientRef.current) return
     
+    // Stop any ongoing generation
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    
+    // Reset states for new email
+    setCurrentSummary('')
+    setCurrentDraft('')
+    setIsSummarizing(false)
+    setIsDrafting(false)
+    
     try {
       // Fetch full email details including body
       const fullEmail = await graphClientRef.current.getEmailById(email.id)
@@ -264,6 +275,9 @@ export default function EmailInterface() {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
     }
+    // Reset the loading states
+    setIsSummarizing(false)
+    setIsDrafting(false)
   }
 
   const handleModelChange = (model: string) => {

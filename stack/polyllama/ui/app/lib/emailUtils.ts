@@ -16,6 +16,7 @@ export async function streamEmailSummarize(
   model: string,
   options: StreamEmailOptions
 ): Promise<void> {
+  let isDone = false
   try {
     const response = await fetchWithAuth('/ui/api/email/summarize', {
       method: 'POST',
@@ -51,16 +52,12 @@ export async function streamEmailSummarize(
         if (line.startsWith('data: ')) {
           const data = line.slice(6).trim()
           if (data === '[DONE]') {
+            isDone = true
             options.onDone()
             return
           }
 
           try {
-            // Handle [DONE] signal
-            if (data === '[DONE]') {
-              return
-            }
-            
             const json = JSON.parse(data)
             
             // Handle OpenAI format
@@ -94,6 +91,11 @@ export async function streamEmailSummarize(
     } else {
       options.onError(error instanceof Error ? error.message : 'Unknown error')
     }
+  } finally {
+    // Always call onDone to reset loading states
+    if (!isDone) {
+      options.onDone()
+    }
   }
 }
 
@@ -104,6 +106,7 @@ export async function streamEmailDraft(
   context: string | undefined,
   options: StreamEmailOptions
 ): Promise<void> {
+  let isDone = false
   try {
     const response = await fetchWithAuth('/ui/api/email/draft', {
       method: 'POST',
@@ -139,16 +142,12 @@ export async function streamEmailDraft(
         if (line.startsWith('data: ')) {
           const data = line.slice(6).trim()
           if (data === '[DONE]') {
+            isDone = true
             options.onDone()
             return
           }
 
           try {
-            // Handle [DONE] signal
-            if (data === '[DONE]') {
-              return
-            }
-            
             const json = JSON.parse(data)
             
             // Handle OpenAI format
@@ -181,6 +180,11 @@ export async function streamEmailDraft(
       console.log('Stream aborted')
     } else {
       options.onError(error instanceof Error ? error.message : 'Unknown error')
+    }
+  } finally {
+    // Always call onDone to reset loading states
+    if (!isDone) {
+      options.onDone()
     }
   }
 }

@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { EmailMessage } from '../types'
-import { formatEmailDate, sanitizeHtml } from '../lib/emailUtils'
+import { sanitizeHtml } from '../lib/emailUtils'
+import LLMOutput from './LLMOutput'
 
 interface EmailDetailModalProps {
   email: EmailMessage
@@ -168,11 +169,12 @@ export default function EmailDetailModal({
           {activeTab === 'summary' && (
             <div>
               {currentSummary ? (
-                <div className="prose max-w-none">
-                  <pre className="whitespace-pre-wrap font-sans">
-                    {currentSummary}
-                  </pre>
-                </div>
+                <LLMOutput 
+                  content={currentSummary}
+                  isStreaming={isSummarizing}
+                  messageIndex={0}
+                  timestamp={email.receivedDateTime}
+                />
               ) : (
                 <div className="text-center py-8 text-gray-500">
                   <p>No summary generated yet.</p>
@@ -198,7 +200,7 @@ export default function EmailDetailModal({
                     </label>
                     <select
                       value={draftType}
-                      onChange={(e) => setDraftType(e.target.value as any)}
+                      onChange={(e) => setDraftType(e.target.value as 'reply' | 'replyAll' | 'forward')}
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                     >
                       <option value="reply">Reply</option>
@@ -229,14 +231,17 @@ export default function EmailDetailModal({
               )}
 
               {currentDraft && (
-                <div className="prose max-w-none">
+                <div>
                   <div className="mb-4 p-4 bg-gray-50 rounded-lg">
                     <div className="text-sm font-medium text-gray-700 mb-2">
                       Generated {draftType === 'forward' ? 'Forward' : 'Reply'}:
                     </div>
-                    <pre className="whitespace-pre-wrap font-sans">
-                      {currentDraft}
-                    </pre>
+                    <LLMOutput 
+                      content={currentDraft}
+                      isStreaming={isDrafting}
+                      messageIndex={1}
+                      timestamp={email.receivedDateTime}
+                    />
                   </div>
                 </div>
               )}

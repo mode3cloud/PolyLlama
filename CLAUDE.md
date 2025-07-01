@@ -265,6 +265,7 @@ Implementation details:
 
 ## Development Guidelines
 - We use pnpm NOT npm
+- **IMPORTANT**: Always maintain a todo list of at least 20 items using the TodoWrite tool. This helps track progress, organize complex tasks, and ensure nothing is forgotten. Update the list frequently as tasks are completed and new ones arise.
 
 # PolyLlama Multi-Agent Implementation Plan
 

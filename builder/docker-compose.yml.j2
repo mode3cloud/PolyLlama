@@ -54,6 +54,31 @@ services:
     depends_on:
       - router
 
+  agent-controller:
+    build:
+      context: ../../stack/agent-controller
+      dockerfile: Dockerfile
+    container_name: agent-controller
+    hostname: agent-controller
+    ports:
+      - "11436:11436"
+    environment:
+      - LLM_PROXY_URL=http://llm-proxy:11435
+      - REDIS_URL=redis://redis:6379
+      - LOG_LEVEL=INFO
+    depends_on:
+      - llm-proxy
+      - redis
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    hostname: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
   llm-proxy:
     build:
       context: ../..
@@ -146,3 +171,4 @@ volumes:
   olah_data_repos:
   olah_data_mirrors:
   kokoro_models:
+  redis_data:

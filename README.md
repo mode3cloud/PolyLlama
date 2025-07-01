@@ -223,7 +223,7 @@ HF_TOKEN=<your_hf_token>  # HuggingFace token for model access
 ```bash
 ./polyllama.sh --status
 ./polyllama.sh --logs
-docker-compose logs polyllama1    # View logs for a specific instance
+docker compose logs polyllama1    # View logs for a specific instance
 docker run --rm --gpus all nvidia/cuda:11.0-base nvidia-smi
 docker exec polyllama1 nvidia-smi # Check GPU access in running instance
 ```

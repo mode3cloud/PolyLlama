@@ -29,6 +29,19 @@ init_by_lua_block {
     else
         ngx.log(ngx.INFO, "API key authentication disabled (no POLYLLAMA_API_KEY set)")
     end
+    
+    -- Store webhook configuration
+    local webhook_url = os.getenv("WEBHOOK_PROXY_URL")
+    if webhook_url and webhook_url ~= "" then
+        env_vars:set("WEBHOOK_PROXY_URL", webhook_url)
+        ngx.log(ngx.INFO, "Webhook proxy URL configured")
+    end
+    
+    local webhook_api_key = os.getenv("WEBHOOK_PROXY_API_KEY")
+    if webhook_api_key and webhook_api_key ~= "" then
+        env_vars:set("WEBHOOK_PROXY_API_KEY", webhook_api_key)
+        ngx.log(ngx.INFO, "Webhook API key configured")
+    end
 }
 
 # Start background timer in each worker to refresh model mappings
@@ -1522,6 +1535,76 @@ server {
             
             -- Return all pull statuses
             ngx.say(cjson.encode(statuses_result))
+        }
+    }
+    
+    # Webhook proxy endpoint
+    location /webhook/run {
+        # Validate API key authentication
+        access_by_lua_block {
+            check_api_auth()
+        }
+        
+        # Set up proxy to webhook URL
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local http = require "resty.http"
+            
+            -- Get webhook configuration from shared memory
+            local env_vars = ngx.shared.env_vars
+            local webhook_url = env_vars:get("WEBHOOK_PROXY_URL")
+            local webhook_api_key = env_vars:get("WEBHOOK_PROXY_API_KEY")
+            
+            if not webhook_url or webhook_url == "" then
+                ngx.status = 503
+                ngx.header["Content-Type"] = "application/json"
+                ngx.say(cjson.encode({error = "Webhook proxy URL not configured"}))
+                return ngx.exit(503)
+            end
+            
+            -- Read request body
+            ngx.req.read_body()
+            local body_data = ngx.req.get_body_data()
+            
+            -- Copy request headers
+            local headers = ngx.req.get_headers()
+            headers["Host"] = nil  -- Remove Host header to avoid issues
+            
+            -- Add webhook API key if configured
+            if webhook_api_key and webhook_api_key ~= "" then
+                headers["X-API-Key"] = webhook_api_key
+            end
+            
+            -- Create HTTP client
+            local httpc = http.new()
+            httpc:set_timeout(30000)  -- 30 second timeout
+            
+            -- Make request to webhook URL
+            local res, err = httpc:request_uri(webhook_url, {
+                method = ngx.var.request_method,
+                body = body_data,
+                headers = headers
+            })
+            
+            if not res then
+                ngx.status = 502
+                ngx.header["Content-Type"] = "application/json"
+                ngx.say(cjson.encode({error = "Failed to proxy webhook request: " .. (err or "unknown error")}))
+                return ngx.exit(502)
+            end
+            
+            -- Return the response from the webhook
+            ngx.status = res.status
+            
+            -- Copy response headers
+            for k, v in pairs(res.headers) do
+                if k:lower() ~= "connection" and k:lower() ~= "transfer-encoding" then
+                    ngx.header[k] = v
+                end
+            end
+            
+            -- Return response body
+            ngx.say(res.body)
         }
     }
 }

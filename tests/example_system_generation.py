@@ -70,7 +70,7 @@ def template_generation():
     # The test config has 2 GPU groups: 3x RTX 4090 + 1x RTX 6000
     # This should create 2 instances (one per group)
 
-    # Check docker-compose structure
+    # Check docker compose structure
     assert "polyllama1:" in generated_compose, "Missing polyllama1 service"
     assert "polyllama2:" in generated_compose, "Missing polyllama2 service"
     assert "polyllama3:" not in generated_compose, "Should only have 2 instances"

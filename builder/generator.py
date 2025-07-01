@@ -66,47 +66,51 @@ class ComposeGenerator:
         """
         instances = []
         instance_number = 1
-        
+
         # Check if we should create CPU instances
         cpu_instances_env = os.environ.get("POLYLLAMA_CPU_INSTANCES", "0")
         cpu_instance_count = int(cpu_instances_env) if cpu_instances_env else 0
         mixed_mode_env = os.environ.get("POLYLLAMA_MIXED_MODE", "false")
         mixed_mode = mixed_mode_env.lower() == "true" if mixed_mode_env else False
-        
+
         if not gpu_groups:
             # CPU-only configuration - create at least one CPU instance
             cpu_instance_count = max(1, cpu_instance_count)
-            
+
         # Create GPU instances first
         for i, group in enumerate(gpu_groups):
             # Calculate memory limit based on GPU count
             gpu_count = len(group["indices"])
             memory_limit = max(16, gpu_count * 32)  # 32GB per GPU as default
 
-            instances.append({
-                "number": instance_number,
-                "gpu_indices": ",".join(map(str, group["indices"])),
-                "memory_limit": memory_limit,
-                "gpu_name": group["name"],
-                "gpu_count": gpu_count,
-                "gpu_group_index": i,  # 0-based index for matching with gpu_groups
-            })
+            instances.append(
+                {
+                    "number": instance_number,
+                    "gpu_indices": ",".join(map(str, group["indices"])),
+                    "memory_limit": memory_limit,
+                    "gpu_name": group["name"],
+                    "gpu_count": gpu_count,
+                    "gpu_group_index": i,  # 0-based index for matching with gpu_groups
+                }
+            )
             instance_number += 1
-            
+
         # Add CPU instances if requested or in mixed mode
         if cpu_instance_count > 0 or (mixed_mode and gpu_groups):
             # In mixed mode with GPUs, ensure at least 1 CPU instance
             if mixed_mode and gpu_groups and cpu_instance_count == 0:
                 cpu_instance_count = 1
-                
+
             for i in range(cpu_instance_count):
-                instances.append({
-                    "number": instance_number,
-                    "gpu_indices": None,
-                    "memory_limit": 16,  # Default 16GB for CPU instances
-                    "gpu_name": "CPU-only",
-                    "gpu_count": 0,
-                })
+                instances.append(
+                    {
+                        "number": instance_number,
+                        "gpu_indices": None,
+                        "memory_limit": 16,  # Default 16GB for CPU instances
+                        "gpu_name": "CPU-only",
+                        "gpu_count": 0,
+                    }
+                )
                 instance_number += 1
 
         return instances
@@ -121,7 +125,7 @@ class ComposeGenerator:
 
     def _generate_nginx_conf(self, context: Dict, output_dir: Path):
         """Generate nginx.conf from template"""
-        # Load nginx template from builder directory (same as docker-compose template)
+        # Load nginx template from builder directory (same as docker compose template)
         template = self.env.get_template("nginx.conf.j2")
         content = template.render(**context)
 
@@ -148,10 +152,11 @@ def main():
     root_dir = Path(__file__).parent.parent
     generator = ComposeGenerator(root_dir)
     built_dir = Path(__file__).parent / "built"
-    
+
     generator.generate(gpu_config, built_dir)
 
 
 if __name__ == "__main__":
     import sys
+
     main()

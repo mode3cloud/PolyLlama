@@ -171,9 +171,9 @@ uv sync
 ### Direct Service Management
 ```bash
 # Use generated compose file for manual control
-docker-compose -f builder/built/docker-compose.yml up -d
-docker-compose -f builder/built/docker-compose.yml logs polyllama1
-docker-compose -f builder/built/docker-compose.yml ps
+docker compose -f builder/built/docker-compose.yml up -d
+docker compose -f builder/built/docker-compose.yml logs polyllama1
+docker compose -f builder/built/docker-compose.yml ps
 ```
 
 ## Instance Count Propagation

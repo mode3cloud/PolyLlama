@@ -6,3 +6,4 @@ pydantic-settings==2.1.0
 python-multipart==0.0.18
 redis==5.0.1
 structlog==23.2.0
+markdown==3.5.1

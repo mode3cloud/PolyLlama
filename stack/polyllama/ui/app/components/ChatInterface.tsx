@@ -34,6 +34,7 @@ export default function ChatInterface() {
   const [temperature, setTemperature] = useState(0.2)
   const [audioEnabled, setAudioEnabled] = useState(false)
   const { playAudio, stopAudio, isPlaying: isAudioPlaying } = useAudioPlayer()
+  const isStreamingRef = useRef(false)
 
   // Fetch available models
   const fetchModels = useCallback(async () => {
@@ -192,7 +193,15 @@ export default function ChatInterface() {
   }, [messages])
 
   const sendMessage = async (images?: ChatImage[]) => {
-    if ((!input.trim() && !images?.length) || isLoading || !selectedModel) return
+    if ((!input.trim() && !images?.length) || isLoading || !selectedModel || isStreamingRef.current) return
+    
+    // Abort any existing request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    // Set streaming flag
+    isStreamingRef.current = true;
 
     const userMessage: ChatMessage = {
       role: 'user',
@@ -216,6 +225,7 @@ export default function ChatInterface() {
     // Don't create assistant message upfront - let the streaming handlers create it
 
     try {
+      
       if (audioEnabled) {
         // Use audio streaming
         await streamChatWithAudio({
@@ -358,6 +368,7 @@ export default function ChatInterface() {
             });
           },
           onToolResult: (name, result, toolCallId) => {
+            
             // Handle result which might be an array or string
             let formattedResult = result;
             
@@ -545,6 +556,7 @@ export default function ChatInterface() {
             });
           },
           onToolResult: (name, result, toolCallId) => {
+            
             // Handle result which might be an array or string
             let formattedResult = result;
             
@@ -610,6 +622,7 @@ export default function ChatInterface() {
     } finally {
       setIsLoading(false)
       abortControllerRef.current = null
+      isStreamingRef.current = false
     }
   }
 
@@ -675,6 +688,7 @@ export default function ChatInterface() {
     // Don't create assistant message upfront - let the streaming handlers create it
 
     try {
+      
       if (audioEnabled) {
         // Use audio streaming
         await streamChatWithAudio({
@@ -737,6 +751,134 @@ export default function ChatInterface() {
           onAudio: (audioData) => {
             // Play audio chunk
             playAudio(audioData.audio, audioData.sample_rate)
+          },
+          onToolCallStreaming: (toolCall) => {
+            // Show tool is being prepared
+            if (toolCall.status === 'started') {
+              setMessages(prev => {
+                // Check if we need to create a new assistant message
+                const lastMessage = prev[prev.length - 1];
+                const needNewMessage = !lastMessage || 
+                                     lastMessage.role !== 'assistant' ||
+                                     (lastMessage.tool_calls && lastMessage.tool_calls.length > 0);
+                
+                if (needNewMessage) {
+                  // Create new assistant message for tool preparation
+                  const toolStreamMessage: ChatMessage = {
+                    role: 'assistant',
+                    content: `🔧 Preparing to call tool: **${toolCall.name}**...`,
+                    timestamp: new Date().toISOString()
+                  };
+                  return [...prev, toolStreamMessage];
+                } else {
+                  // Update existing assistant message
+                  const updatedMessages = [...prev];
+                  const lastIdx = prev.length - 1;
+                  const toolInfo = `🔧 Preparing to call tool: **${toolCall.name}**...\n`;
+                  
+                  if (updatedMessages[lastIdx].content && !updatedMessages[lastIdx].content.includes(toolInfo)) {
+                    updatedMessages[lastIdx] = {
+                      ...updatedMessages[lastIdx],
+                      content: updatedMessages[lastIdx].content + '\n\n' + toolInfo
+                    };
+                  } else if (!updatedMessages[lastIdx].content) {
+                    updatedMessages[lastIdx] = {
+                      ...updatedMessages[lastIdx],
+                      content: toolInfo
+                    };
+                  }
+                  return updatedMessages;
+                }
+              });
+            }
+          },
+          onToolCall: (toolCall) => {
+            // Update the current assistant message to include tool_calls
+            setMessages(prev => {
+              // Find the last assistant message that doesn't already have completed tool_calls
+              const lastMessage = prev[prev.length - 1];
+              if (lastMessage && lastMessage.role === 'assistant') {
+                const updatedMessages = [...prev];
+                const lastIdx = prev.length - 1;
+                
+                // Add or append to tool_calls array
+                const newToolCall = {
+                  id: toolCall.id,
+                  type: 'function' as const,
+                  function: {
+                    name: toolCall.name,
+                    arguments: JSON.stringify(toolCall.arguments)
+                  }
+                };
+                
+                if (updatedMessages[lastIdx].tool_calls) {
+                  // Append to existing tool_calls
+                  updatedMessages[lastIdx] = {
+                    ...updatedMessages[lastIdx],
+                    tool_calls: [...updatedMessages[lastIdx].tool_calls!, newToolCall]
+                  };
+                } else {
+                  // Create new tool_calls array
+                  updatedMessages[lastIdx] = {
+                    ...updatedMessages[lastIdx],
+                    tool_calls: [newToolCall]
+                  };
+                }
+                
+                return updatedMessages;
+              }
+              return prev;
+            });
+          },
+          onToolResult: (name, result, toolCallId) => {
+            
+            // Handle result which might be an array or string
+            let formattedResult = result;
+            
+            // If result is an array, extract text content
+            if (Array.isArray(result)) {
+              // Extract text from array format [{type: "text", text: "..."}]
+              const textContent = result
+                .filter(item => item.type === 'text')
+                .map(item => item.text)
+                .join('\n');
+              formattedResult = textContent || JSON.stringify(result, null, 2);
+            } else if (typeof result === 'string') {
+              // Try to parse as JSON for better display
+              try {
+                const parsed = JSON.parse(result);
+                formattedResult = '```json\n' + JSON.stringify(parsed, null, 2) + '\n```';
+              } catch {
+                // Not JSON, use as-is
+                formattedResult = result;
+              }
+            } else {
+              // For any other type, stringify it
+              formattedResult = JSON.stringify(result, null, 2);
+            }
+            
+            // Add a tool result message
+            const toolResultMessage: ChatMessage = {
+              role: 'tool',
+              content: formattedResult,
+              tool_name: name,
+              tool_call_id: toolCallId,
+              timestamp: new Date().toISOString()
+            }
+            setMessages(prev => [...prev, toolResultMessage])
+            
+            // The onChunk handler will create a new assistant message when needed
+          },
+          onToolError: (name, error, toolCallId) => {
+            // Add a tool error message
+            const toolErrorMessage: ChatMessage = {
+              role: 'tool',
+              content: `Error executing tool ${name}: ${error}`,
+              tool_name: name,
+              tool_call_id: toolCallId,
+              timestamp: new Date().toISOString()
+            }
+            setMessages(prev => [...prev, toolErrorMessage])
           }
         })
       } else {
@@ -797,6 +939,134 @@ export default function ChatInterface() {
           },
           onDone: () => {
             // Stream completed
+          },
+          onToolCallStreaming: (toolCall) => {
+            // Show tool is being prepared
+            if (toolCall.status === 'started') {
+              setMessages(prev => {
+                // Check if we need to create a new assistant message
+                const lastMessage = prev[prev.length - 1];
+                const needNewMessage = !lastMessage || 
+                                     lastMessage.role !== 'assistant' ||
+                                     (lastMessage.tool_calls && lastMessage.tool_calls.length > 0);
+                
+                if (needNewMessage) {
+                  // Create new assistant message for tool preparation
+                  const toolStreamMessage: ChatMessage = {
+                    role: 'assistant',
+                    content: `🔧 Preparing to call tool: **${toolCall.name}**...`,
+                    timestamp: new Date().toISOString()
+                  };
+                  return [...prev, toolStreamMessage];
+                } else {
+                  // Update existing assistant message
+                  const updatedMessages = [...prev];
+                  const lastIdx = prev.length - 1;
+                  const toolInfo = `🔧 Preparing to call tool: **${toolCall.name}**...\n`;
+                  
+                  if (updatedMessages[lastIdx].content && !updatedMessages[lastIdx].content.includes(toolInfo)) {
+                    updatedMessages[lastIdx] = {
+                      ...updatedMessages[lastIdx],
+                      content: updatedMessages[lastIdx].content + '\n\n' + toolInfo
+                    };
+                  } else if (!updatedMessages[lastIdx].content) {
+                    updatedMessages[lastIdx] = {
+                      ...updatedMessages[lastIdx],
+                      content: toolInfo
+                    };
+                  }
+                  return updatedMessages;
+                }
+              });
+            }
+          },
+          onToolCall: (toolCall) => {
+            // Update the current assistant message to include tool_calls
+            setMessages(prev => {
+              // Find the last assistant message that doesn't already have completed tool_calls
+              const lastMessage = prev[prev.length - 1];
+              if (lastMessage && lastMessage.role === 'assistant') {
+                const updatedMessages = [...prev];
+                const lastIdx = prev.length - 1;
+                
+                // Add or append to tool_calls array
+                const newToolCall = {
+                  id: toolCall.id,
+                  type: 'function' as const,
+                  function: {
+                    name: toolCall.name,
+                    arguments: JSON.stringify(toolCall.arguments)
+                  }
+                };
+                
+                if (updatedMessages[lastIdx].tool_calls) {
+                  // Append to existing tool_calls
+                  updatedMessages[lastIdx] = {
+                    ...updatedMessages[lastIdx],
+                    tool_calls: [...updatedMessages[lastIdx].tool_calls!, newToolCall]
+                  };
+                } else {
+                  // Create new tool_calls array
+                  updatedMessages[lastIdx] = {
+                    ...updatedMessages[lastIdx],
+                    tool_calls: [newToolCall]
+                  };
+                }
+                
+                return updatedMessages;
+              }
+              return prev;
+            });
+          },
+          onToolResult: (name, result, toolCallId) => {
+            
+            // Handle result which might be an array or string
+            let formattedResult = result;
+            
+            // If result is an array, extract text content
+            if (Array.isArray(result)) {
+              // Extract text from array format [{type: "text", text: "..."}]
+              const textContent = result
+                .filter(item => item.type === 'text')
+                .map(item => item.text)
+                .join('\n');
+              formattedResult = textContent || JSON.stringify(result, null, 2);
+            } else if (typeof result === 'string') {
+              // Try to parse as JSON for better display
+              try {
+                const parsed = JSON.parse(result);
+                formattedResult = '```json\n' + JSON.stringify(parsed, null, 2) + '\n```';
+              } catch {
+                // Not JSON, use as-is
+                formattedResult = result;
+              }
+            } else {
+              // For any other type, stringify it
+              formattedResult = JSON.stringify(result, null, 2);
+            }
+            
+            // Add a tool result message
+            const toolResultMessage: ChatMessage = {
+              role: 'tool',
+              content: formattedResult,
+              tool_name: name,
+              tool_call_id: toolCallId,
+              timestamp: new Date().toISOString()
+            }
+            setMessages(prev => [...prev, toolResultMessage])
+            
+            // The onChunk handler will create a new assistant message when needed
+          },
+          onToolError: (name, error, toolCallId) => {
+            // Add a tool error message
+            const toolErrorMessage: ChatMessage = {
+              role: 'tool',
+              content: `Error executing tool ${name}: ${error}`,
+              tool_name: name,
+              tool_call_id: toolCallId,
+              timestamp: new Date().toISOString()
+            }
+            setMessages(prev => [...prev, toolErrorMessage])
           }
         })
       }
@@ -815,6 +1085,7 @@ export default function ChatInterface() {
     } finally {
       setIsLoading(false)
       abortControllerRef.current = null
+      isStreamingRef.current = false
     }
   }
 

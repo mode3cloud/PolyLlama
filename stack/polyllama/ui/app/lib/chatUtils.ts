@@ -117,20 +117,52 @@ export async function streamChat({
               
               // Handle content
               if (delta?.content) {
-                // Check if this is a tool result in the format [Tool: name]\nresult
-                // This regex matches both formats:
-                // 1. \n[Tool: name]\nresult
-                // 2. [Tool: name]\nresult (at start of content)
-                const toolResultMatch = delta.content.match(/^(\n)?\[Tool: ([^\]]+)\]\n([\s\S]*)$/)
-                if (toolResultMatch && onToolResult) {
-                  const [, newline, toolName, result] = toolResultMatch
-                  // Extract tool call ID if we can (for now, we'll use a placeholder)
-                  onToolResult(toolName, result, `tool_result_${Date.now()}`)
-                  // If there was a newline before [Tool:, send it as regular content
-                  if (newline) {
-                    onChunk(newline)
+                // Check if this content contains tool results in the format [Tool: name]\nresult
+                // Handle multiple tool results in a single chunk
+                let remainingContent = delta.content
+                let foundToolResult = false
+                
+                // Process all tool results in the content
+                while (remainingContent) {
+                  const toolResultMatch = remainingContent.match(/^(\n)?\[Tool: ([^\]]+)\]\n/)
+                  
+                  if (toolResultMatch && onToolResult) {
+                    foundToolResult = true
+                    const [fullMatch, newline, toolName] = toolResultMatch
+                    
+                    // If there was a newline before [Tool:, send it as regular content
+                    if (newline) {
+                      onChunk(newline)
+                    }
+                    
+                    // Find the end of this tool result (next [Tool: or end of content)
+                    const startOfResult = fullMatch.length - (newline ? 1 : 0)
+                    const nextToolIndex = remainingContent.indexOf('\n[Tool:', startOfResult)
+                    
+                    let result: string
+                    if (nextToolIndex !== -1) {
+                      // There's another tool result after this one
+                      result = remainingContent.substring(startOfResult, nextToolIndex)
+                      remainingContent = remainingContent.substring(nextToolIndex)
+                    } else {
+                      // This is the last tool result
+                      result = remainingContent.substring(startOfResult)
+                      remainingContent = ''
+                    }
+                    
+                    // Call onToolResult with the extracted result
+                    onToolResult(toolName, result.trim(), `tool_result_${Date.now()}_${toolName}`)
+                  } else {
+                    // No more tool results, send remaining content as regular content
+                    if (remainingContent) {
+                      onChunk(remainingContent)
+                    }
+                    break
                   }
-                } else {
+                }
+                
+                // If no tool results were found, send the entire content as regular content
+                if (!foundToolResult && delta.content) {
                   onChunk(delta.content)
                 }
               }

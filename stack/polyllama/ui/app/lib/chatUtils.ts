@@ -25,6 +25,9 @@ interface StreamChatAudioOptions extends StreamChatOptions {
   onAudio?: (audioData: { audio: string; sample_rate: number; text: string; format: string }) => void
 }
 
+// Track active streams to prevent duplicates - map sessionId to streamId
+const activeStreams = new Map<string, string>();
+
 export async function streamChat({
   messages,
   model,
@@ -39,6 +42,35 @@ export async function streamChat({
   onToolError,
   onToolCallStreaming
 }: StreamChatOptions) {
+  // Generate a unique ID for this stream
+  const streamId = `${sessionId}_${Date.now()}_${Math.random()}`;
+  
+  // If this session already has an active stream, abort
+  const existingStreamId = activeStreams.get(sessionId);
+  if (existingStreamId) {
+    console.warn('[streamChat] Aborting duplicate stream for session:', sessionId, 'existing:', existingStreamId, 'new:', streamId);
+    return;
+  }
+  
+  activeStreams.set(sessionId, streamId);
+  console.log('[streamChat] Starting stream:', streamId);
+  
+  // Handle abort signal
+  if (signal?.aborted) {
+    activeStreams.delete(sessionId);
+    return;
+  }
+  
+  const cleanup = () => {
+    const currentStreamId = activeStreams.get(sessionId);
+    if (currentStreamId === streamId) {
+      activeStreams.delete(sessionId);
+      console.log('[streamChat] Cleaned up stream:', streamId);
+    }
+  };
+  
+  signal?.addEventListener('abort', cleanup);
+  
   // Convert messages to include attachments for images
   const processedMessages = messages.map(msg => {
     const processedMsg: {
@@ -105,6 +137,7 @@ export async function streamChat({
             // Handle OpenAI format
             if (data === '[DONE]') {
               onDone()
+              cleanup()
               return
             }
             
@@ -208,6 +241,7 @@ export async function streamChat({
     }
   } finally {
     reader.releaseLock()
+    cleanup()
   }
 }
 
@@ -229,6 +263,35 @@ export async function streamChatWithAudio({
   onToolError,
   onToolCallStreaming
 }: StreamChatAudioOptions) {
+  // Generate a unique ID for this stream
+  const streamId = `${sessionId}_${Date.now()}_${Math.random()}`;
+  
+  // If this session already has an active stream, abort
+  const existingStreamId = activeStreams.get(sessionId);
+  if (existingStreamId) {
+    console.warn('[streamChatWithAudio] Aborting duplicate stream for session:', sessionId, 'existing:', existingStreamId, 'new:', streamId);
+    return;
+  }
+  
+  activeStreams.set(sessionId, streamId);
+  console.log('[streamChatWithAudio] Starting stream:', streamId);
+  
+  // Handle abort signal
+  if (signal?.aborted) {
+    activeStreams.delete(sessionId);
+    return;
+  }
+  
+  const cleanup = () => {
+    const currentStreamId = activeStreams.get(sessionId);
+    if (currentStreamId === streamId) {
+      activeStreams.delete(sessionId);
+      console.log('[streamChatWithAudio] Cleaned up stream:', streamId);
+    }
+  };
+  
+  signal?.addEventListener('abort', cleanup);
+  
   // Convert messages to include attachments for images
   const processedMessages = messages.map(msg => {
     const processedMsg: {
@@ -295,39 +358,109 @@ export async function streamChatWithAudio({
           if (data === '') continue
 
           try {
-            const event = JSON.parse(data)
-
-            if (event.type === 'text') {
-              // Handle text chunks same as before
-              const chunk = event.data
-              if (chunk.type === 'content' && chunk.content) {
-                onChunk(chunk.content)
-              } else if (chunk.type === 'tool_call' && chunk.tool_call && onToolCall) {
-                // Ensure arguments is present before calling onToolCall
-                if (chunk.tool_call.arguments !== undefined) {
-                  onToolCall(chunk.tool_call as { id: string; name: string; arguments: Record<string, unknown> })
-                }
-              } else if (chunk.type === 'tool_call_streaming' && chunk.tool_call && onToolCallStreaming) {
-                onToolCallStreaming(chunk.tool_call)
-              } else if (chunk.type === 'tool_result' && chunk.name && chunk.result && onToolResult) {
-                onToolResult(chunk.name, chunk.result)
-              } else if (chunk.type === 'tool_error' && chunk.name && chunk.error && onToolError) {
-                onToolError(chunk.name, chunk.error)
-              } else if (chunk.type === 'error') {
-                console.error('Stream error:', chunk.error)
-                onError(chunk.error || 'Unknown error')
-              }
-            } else if (event.type === 'audio' && event.data && onAudio) {
-              // Handle audio chunks
-              onAudio(event.data)
-            } else if (event.type === 'error') {
-              console.error('Stream error:', event.error)
-              onError(event.error || 'Unknown error')
-            } else if (event.type === 'done') {
+            // Handle OpenAI format
+            if (data === '[DONE]') {
               onDone()
+              cleanup()
               return
-            } else if (event.type === 'connected') {
-              // Connection established
+            }
+            
+            const chunk = JSON.parse(data)
+            
+            // Check if it's OpenAI format
+            if (chunk.choices && Array.isArray(chunk.choices) && chunk.choices.length > 0) {
+              const choice = chunk.choices[0]
+              const delta = choice.delta
+              
+              // Handle content
+              if (delta?.content) {
+                // Check if this content contains tool results in the format [Tool: name]\nresult
+                // Handle multiple tool results in a single chunk
+                let remainingContent = delta.content
+                let foundToolResult = false
+                
+                // Process all tool results in the content
+                while (remainingContent) {
+                  const toolResultMatch = remainingContent.match(/^(\n)?\[Tool: ([^\]]+)\]\n/)
+                  
+                  if (toolResultMatch && onToolResult) {
+                    foundToolResult = true
+                    const [fullMatch, newline, toolName] = toolResultMatch
+                    
+                    // If there was a newline before [Tool:, send it as regular content
+                    if (newline) {
+                      onChunk(newline)
+                    }
+                    
+                    // Find the end of this tool result (next [Tool: or end of content)
+                    const startOfResult = fullMatch.length - (newline ? 1 : 0)
+                    const nextToolIndex = remainingContent.indexOf('\n[Tool:', startOfResult)
+                    
+                    let result: string
+                    if (nextToolIndex !== -1) {
+                      // There's another tool result after this one
+                      result = remainingContent.substring(startOfResult, nextToolIndex)
+                      remainingContent = remainingContent.substring(nextToolIndex)
+                    } else {
+                      // This is the last tool result
+                      result = remainingContent.substring(startOfResult)
+                      remainingContent = ''
+                    }
+                    
+                    // Call onToolResult with the extracted result
+                    onToolResult(toolName, result.trim(), `tool_result_${Date.now()}_${toolName}`)
+                  } else {
+                    // No more tool results, send remaining content as regular content
+                    if (remainingContent) {
+                      onChunk(remainingContent)
+                    }
+                    break
+                  }
+                }
+                
+                // If no tool results were found, send the entire content as regular content
+                if (!foundToolResult && delta.content) {
+                  onChunk(delta.content)
+                }
+              }
+              
+              // Handle tool calls
+              if (delta?.tool_calls && onToolCall) {
+                for (const toolCall of delta.tool_calls) {
+                  if (toolCall.function && toolCall.id) {
+                    // Only call onToolCall when we have complete arguments
+                    if (toolCall.function.arguments && toolCall.function.arguments !== '') {
+                      try {
+                        const args = JSON.parse(toolCall.function.arguments)
+                        onToolCall({
+                          id: toolCall.id,
+                          name: toolCall.function.name,
+                          arguments: args
+                        })
+                      } catch (e) {
+                        // Arguments might still be streaming, skip for now
+                      }
+                    } else if (onToolCallStreaming && toolCall.function.name) {
+                      // Initial tool call with just name
+                      onToolCallStreaming({
+                        id: toolCall.id,
+                        name: toolCall.function.name,
+                        status: 'started'
+                      })
+                    }
+                  }
+                }
+              }
+              
+              // Handle audio data if present
+              if (delta?.audio && onAudio) {
+                onAudio(delta.audio)
+              }
+              
+              // Handle finish reason
+              if (choice.finish_reason === 'stop') {
+                // Normal completion handled by [DONE]
+              }
             }
           } catch (parseError) {
             console.error('Failed to parse event:', data, parseError)
@@ -337,6 +470,7 @@ export async function streamChatWithAudio({
     }
   } finally {
     reader.releaseLock()
+    cleanup()
   }
 }
 

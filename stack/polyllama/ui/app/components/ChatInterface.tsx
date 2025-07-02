@@ -35,6 +35,7 @@ export default function ChatInterface() {
   const [audioEnabled, setAudioEnabled] = useState(false)
   const { playAudio, stopAudio, isPlaying: isAudioPlaying } = useAudioPlayer()
   const isStreamingRef = useRef(false)
+  const currentStreamIdRef = useRef<string | null>(null)
 
   // Fetch available models
   const fetchModels = useCallback(async () => {
@@ -199,6 +200,10 @@ export default function ChatInterface() {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
+    
+    // Generate a unique stream ID for this request
+    const streamId = `${sessionId}_${Date.now()}_${Math.random()}`;
+    currentStreamIdRef.current = streamId;
     
     // Set streaming flag
     isStreamingRef.current = true;
@@ -623,6 +628,7 @@ export default function ChatInterface() {
       setIsLoading(false)
       abortControllerRef.current = null
       isStreamingRef.current = false
+      currentStreamIdRef.current = null
     }
   }
 
@@ -1086,6 +1092,7 @@ export default function ChatInterface() {
       setIsLoading(false)
       abortControllerRef.current = null
       isStreamingRef.current = false
+      currentStreamIdRef.current = null
     }
   }
 

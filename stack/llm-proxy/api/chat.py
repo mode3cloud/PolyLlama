@@ -486,9 +486,6 @@ async def _stream_chat_completion_with_audio(
 ):
     """Generator for streaming chat completions with audio."""
     try:
-        # Send initial connection event
-        yield 'data: {"type": "connected"}\n\n'
-
         logger.info(f"Starting audio chat stream with model: {llm_service.model}")
 
         # Create queues for text accumulation
@@ -525,14 +522,22 @@ async def _stream_chat_completion_with_audio(
                             if text_content:
                                 await text_queue.put(text_content)
 
-                    # Also yield the original chunk as text event
-                    chunk_data = json.dumps({"type": "text", "data": chunk})
-                    await audio_queue.put(("text", chunk_data))
+                    # Convert to OpenAI format and queue
+                    openai_chunk = _convert_to_openai_format(chunk)
+                    if openai_chunk:
+                        await audio_queue.put(("text", openai_chunk))
 
             except Exception as e:
                 logger.error(f"Error in text collection: {e}")
-                error_data = json.dumps({"type": "error", "error": str(e)})
-                await audio_queue.put(("error", error_data))
+                # Send error in OpenAI format
+                error_chunk = {
+                    "choices": [{
+                        "delta": {"content": f"Error: {str(e)}"},
+                        "finish_reason": None,
+                        "index": 0
+                    }]
+                }
+                await audio_queue.put(("error", error_chunk))
             finally:
                 text_complete = True
                 await text_queue.put(None)  # Signal completion
@@ -560,20 +565,23 @@ async def _stream_chat_completion_with_audio(
                     # Convert audio to base64
                     audio_base64 = audio_service.audio_to_base64(audio_data)
 
-                    # Create audio event
-                    audio_data = json.dumps(
-                        {
-                            "type": "audio",
-                            "data": {
-                                "audio": audio_base64,
-                                "sample_rate": sample_rate,
-                                "text": text_chunk,
-                                "format": "wav",
+                    # Create audio event in OpenAI format with audio extension
+                    audio_chunk = {
+                        "choices": [{
+                            "delta": {
+                                "audio": {
+                                    "audio": audio_base64,
+                                    "sample_rate": sample_rate,
+                                    "text": text_chunk,
+                                    "format": "wav"
+                                }
                             },
-                        }
-                    )
+                            "finish_reason": None,
+                            "index": 0
+                        }]
+                    }
 
-                    await audio_queue.put(("audio", audio_data))
+                    await audio_queue.put(("audio", audio_chunk))
 
             except Exception as e:
                 logger.error(f"Error in audio generation: {e}")
@@ -596,18 +604,25 @@ async def _stream_chat_completion_with_audio(
                     break
                 continue
 
-            _, event_data = item
-            yield f"data: {event_data}\n\n"
+            event_type, chunk_data = item
+            yield f"data: {json.dumps(chunk_data)}\n\n"
 
         # Wait for tasks to complete
         await text_task
         await audio_task
 
-        # Signal completion
-        yield 'data: {"type": "done"}\n\n'
+        # Signal completion in OpenAI format
+        yield 'data: [DONE]\n\n'
 
     except Exception as e:
         logger.error(f"Error in streaming audio chat completion: {e}", exc_info=True)
-        error_data = json.dumps({"type": "error", "error": str(e)})
-        yield f"data: {error_data}\n\n"
-        yield 'data: {"type": "done"}\n\n'
+        # Send error in OpenAI format
+        error_chunk = {
+            "choices": [{
+                "delta": {"content": f"Error: {str(e)}"},
+                "finish_reason": None,
+                "index": 0
+            }]
+        }
+        yield f"data: {json.dumps(error_chunk)}\n\n"
+        yield 'data: [DONE]\n\n'

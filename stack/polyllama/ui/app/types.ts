@@ -60,7 +60,6 @@ export interface ChatMessage {
       arguments: string;
     };
   }>;
-  _streamId?: string; // Internal ID for tracking streaming messages
 }
 
 export interface ChatImage {

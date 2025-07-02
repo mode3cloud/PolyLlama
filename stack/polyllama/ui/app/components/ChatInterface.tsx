@@ -26,9 +26,11 @@ export default function ChatInterface() {
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [pendingModelSelection, setPendingModelSelection] = useState<string | null>(null)
   const [hasLoadedSession, setHasLoadedSession] = useState(false)
+  const [isLoadingSessionData, setIsLoadingSessionData] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null)
+  const selectedModelRef = useRef<string>('')
   const [temperature, setTemperature] = useState(0.2)
   const [audioEnabled, setAudioEnabled] = useState(false)
   const { playAudio, stopAudio, isPlaying: isAudioPlaying } = useAudioPlayer()
@@ -40,28 +42,17 @@ export default function ChatInterface() {
       if (response.ok) {
         const data = await response.json()
         setModels(data.models || [])
-        // Only set default model if:
-        // 1. No model is currently selected
-        // 2. No pending model selection from a loaded session
-        // 3. We haven't loaded a session with saved preferences
-        if (data.models?.length > 0 && !selectedModel && !pendingModelSelection && !hasLoadedSession) {
-          // Only set default for new sessions without any messages
-          if (messages.length === 0) {
-            // Default to first Ollama model if available, otherwise first model
-            const ollamaModel = data.models.find((m: ChatModel) => m.provider === 'ollama')
-            setSelectedModel(ollamaModel?.id || data.models[0].id)
-          }
-        }
       }
     } catch (error) {
       console.error('Failed to fetch models:', error)
     }
-  }, [pendingModelSelection, selectedModel, hasLoadedSession, messages.length])
+  }, [])
 
   // Load session messages
   const loadSession = useCallback(async (sessionId: string) => {
     try {
       setIsLoadingSession(true)
+      setIsLoadingSessionData(true)
       const response = await fetchWithAuth(`${API_BASE_URL}/sessions/${sessionId}`)
       if (response.ok) {
         const data = await response.json()
@@ -116,6 +107,7 @@ export default function ChatInterface() {
             const modelExists = models.some(m => m.id === data.metadata.model)
             if (modelExists) {
               setSelectedModel(data.metadata.model)
+              selectedModelRef.current = data.metadata.model
             }
           } else {
             // Models not loaded yet, store for later
@@ -129,6 +121,7 @@ export default function ChatInterface() {
       console.error('Failed to load session:', error)
     } finally {
       setIsLoadingSession(false)
+      setIsLoadingSessionData(false)
     }
   }, [models])
 
@@ -144,6 +137,7 @@ export default function ChatInterface() {
     // Clear current model to allow session's saved model to be loaded
     setSelectedModel('')
     setPendingModelSelection(null)
+    setHasLoadedSession(false) // Reset this flag before loading new session
     setSessionId(newSessionId)
     loadSession(newSessionId)
   }, [sessionId, loadSession])
@@ -170,10 +164,28 @@ export default function ChatInterface() {
       const modelExists = models.some(m => m.id === pendingModelSelection)
       if (modelExists) {
         setSelectedModel(pendingModelSelection)
+        selectedModelRef.current = pendingModelSelection
       }
       setPendingModelSelection(null)
     }
   }, [models, pendingModelSelection])
+
+  // Set default model only for new sessions
+  useEffect(() => {
+    if (models.length > 0 && 
+        !selectedModel && 
+        !pendingModelSelection && 
+        !hasLoadedSession &&
+        !isLoadingSessionData &&
+        messages.length === 0) {
+      // Default to gpt-4o-mini if available, otherwise first Ollama model, otherwise first model
+      const gpt4oMini = models.find((m: ChatModel) => m.id === 'openai/gpt-4o-mini')
+      const ollamaModel = models.find((m: ChatModel) => m.provider === 'ollama')
+      const defaultModel = gpt4oMini?.id || ollamaModel?.id || models[0].id
+      setSelectedModel(defaultModel)
+      selectedModelRef.current = defaultModel
+    }
+  }, [models, selectedModel, pendingModelSelection, hasLoadedSession, isLoadingSessionData, messages.length])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -844,7 +856,10 @@ export default function ChatInterface() {
           showSidebar={showSidebar}
           temperature={temperature}
           audioEnabled={audioEnabled}
-          onModelChange={setSelectedModel}
+          onModelChange={(model: string) => {
+            setSelectedModel(model)
+            selectedModelRef.current = model
+          }}
           onToggleSidebar={() => setShowSidebar(!showSidebar)}
           onClearChat={clearChat}
           onExportChat={exportChat}

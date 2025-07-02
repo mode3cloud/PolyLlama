@@ -276,6 +276,8 @@ app.get('/tools', async (req, res) => {
 // Execute a tool
 app.post('/execute', async (req, res) => {
   const { toolName, arguments: args, server } = req.body;
+  
+  console.log(`Execute request - toolName: ${toolName}, server: ${server}, args:`, args);
 
   // Handle prefixed tool names (server__toolName)
   let actualToolName = toolName;
@@ -284,20 +286,26 @@ app.post('/execute', async (req, res) => {
   if (toolName.includes('__')) {
     const [prefix, ...nameParts] = toolName.split('__');
     // Try to find the actual server name (with hyphens) from the safe name (with underscores)
+    let foundServer = false;
     for (const [serverName] of mcpConnections.entries()) {
       if (serverName.replace(/-/g, '_') === prefix) {
         targetServer = serverName;
+        foundServer = true;
         break;
       }
     }
-    // If not found, use the prefix as-is (might be a server without hyphens)
-    if (targetServer === server) {
+    // If not found by underscore conversion, try the prefix as-is
+    if (!foundServer && mcpConnections.has(prefix)) {
       targetServer = prefix;
     }
     actualToolName = nameParts.join('__'); // Handle tool names that might contain __
   }
+  
+  console.log(`Resolved - actualToolName: ${actualToolName}, targetServer: ${targetServer}`);
+  console.log(`Available connections:`, Array.from(mcpConnections.keys()));
 
   if (!targetServer || !mcpConnections.has(targetServer)) {
+    console.error(`Server not found: ${targetServer}`);
     return res.status(400).json({ error: `Invalid or missing server: ${targetServer}` });
   }
 

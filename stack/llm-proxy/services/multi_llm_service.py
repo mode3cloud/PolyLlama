@@ -731,6 +731,7 @@ class MultiLLMService:
                                         "type": "tool_result",
                                         "name": buf["name"],
                                         "result": result,
+                                        "tool_call_id": tool_id,
                                     }
                                 except json.JSONDecodeError as e:
                                     logger.error(

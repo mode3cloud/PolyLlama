@@ -9,6 +9,7 @@ import EmailHeader from './EmailHeader'
 import EmailList from './EmailList'
 import EmailDetailModal from './EmailDetailModal'
 import EmailActionButtons from './EmailActionButtons'
+import FolderTree from './FolderTree'
 
 export default function EmailInterface() {
   const [emails, setEmails] = useState<EmailMessage[]>([])
@@ -32,6 +33,10 @@ export default function EmailInterface() {
   const [currentDraft, setCurrentDraft] = useState<string>('')
   const [conversationMessages, setConversationMessages] = useState<ChatMessage[]>([])
   const [isConversationLoading, setIsConversationLoading] = useState(false)
+  const [folders, setFolders] = useState<any[]>([])
+  const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)
+  const [isFoldersLoading, setIsFoldersLoading] = useState(false)
+  const [showFolderTree, setShowFolderTree] = useState(true)
   const graphClientRef = useRef<GraphClient | null>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const conversationAbortControllerRef = useRef<AbortController | null>(null)
@@ -43,14 +48,14 @@ export default function EmailInterface() {
       if (response.ok) {
         const data = await response.json()
         setModels(data.models || [])
-        
+
         // Check if saved model still exists
         const savedModel = localStorage.getItem('email-selected-model')
         if (savedModel && data.models?.some((m: ChatModel) => m.id === savedModel)) {
           // Saved model is still available, keep it
           return
         }
-        
+
         // Otherwise set default if no model selected
         if (data.models?.length > 0 && !selectedModel) {
           // Default to first Ollama model if available
@@ -84,6 +89,24 @@ export default function EmailInterface() {
     }
   }, [])
 
+  // Fetch folders
+  const fetchFolders = useCallback(async () => {
+    if (!graphClientRef.current) {
+      const initialized = await initGraphClient()
+      if (!initialized) return
+    }
+
+    setIsFoldersLoading(true)
+    try {
+      const folderData = await graphClientRef.current!.getMailFolders()
+      setFolders(folderData)
+    } catch (error) {
+      console.error('Failed to fetch folders:', error)
+    } finally {
+      setIsFoldersLoading(false)
+    }
+  }, [initGraphClient])
+
   // Fetch emails
   const fetchEmails = useCallback(async (pageToken?: string) => {
     if (!graphClientRef.current) {
@@ -93,7 +116,7 @@ export default function EmailInterface() {
 
     setIsLoading(true)
     try {
-      const response = await graphClientRef.current!.getEmails(20, pageToken)
+      const response = await graphClientRef.current!.getEmails(20, pageToken, undefined, selectedFolderId || undefined)
       if (pageToken) {
         setEmails(prev => [...prev, ...response.messages])
       } else {
@@ -105,12 +128,26 @@ export default function EmailInterface() {
     } finally {
       setIsLoading(false)
     }
-  }, [initGraphClient])
+  }, [initGraphClient, selectedFolderId])
 
   useEffect(() => {
     fetchModels()
-    fetchEmails()
-  }, [fetchModels, fetchEmails])
+    const init = async () => {
+      await fetchEmails()
+      await fetchFolders()
+    }
+    init()
+  }, [])
+
+  // Refetch emails when folder selection changes
+  useEffect(() => {
+    if (graphClientRef.current && selectedFolderId !== undefined) {
+      setEmails([])
+      setNextPageToken(undefined)
+      setCurrentPage(1)
+      fetchEmails()
+    }
+  }, [selectedFolderId, fetchEmails])
 
   const handleSelectEmail = (emailId: string) => {
     setSelectedEmails(prev => {
@@ -134,7 +171,7 @@ export default function EmailInterface() {
 
   const handleViewEmail = async (email: EmailMessage) => {
     if (!graphClientRef.current) return
-    
+
     // Stop any ongoing generation
     if (abortControllerRef.current) {
       abortControllerRef.current.abort()
@@ -142,7 +179,7 @@ export default function EmailInterface() {
     if (conversationAbortControllerRef.current) {
       conversationAbortControllerRef.current.abort()
     }
-    
+
     // Reset states for new email
     setCurrentSummary('')
     setCurrentDraft('')
@@ -150,17 +187,17 @@ export default function EmailInterface() {
     setIsDrafting(false)
     setConversationMessages([])
     setIsConversationLoading(false)
-    
+
     try {
       // Fetch full email details including body
       const fullEmail = await graphClientRef.current.getEmailById(email.id)
       setSelectedEmail(fullEmail)
       setShowDetailModal(true)
-      
+
       // Mark as read
       if (!fullEmail.isRead) {
         await graphClientRef.current.markAsRead(email.id)
-        setEmails(prev => prev.map(e => 
+        setEmails(prev => prev.map(e =>
           e.id === email.id ? { ...e, isRead: true } : e
         ))
       }
@@ -171,7 +208,7 @@ export default function EmailInterface() {
 
   const handleArchive = async (emailIds?: string[]) => {
     if (!graphClientRef.current) return
-    
+
     const ids = emailIds || Array.from(selectedEmails)
     if (ids.length === 0) return
 
@@ -181,7 +218,7 @@ export default function EmailInterface() {
       } else {
         await graphClientRef.current.batchArchiveEmails(ids)
       }
-      
+
       // Remove from list
       setEmails(prev => prev.filter(e => !ids.includes(e.id)))
       setSelectedEmails(new Set())
@@ -193,7 +230,7 @@ export default function EmailInterface() {
 
   const handleDelete = async (emailIds?: string[]) => {
     if (!graphClientRef.current) return
-    
+
     const ids = emailIds || Array.from(selectedEmails)
     if (ids.length === 0) return
 
@@ -205,7 +242,7 @@ export default function EmailInterface() {
       } else {
         await graphClientRef.current.batchDeleteEmails(ids)
       }
-      
+
       // Remove from list
       setEmails(prev => prev.filter(e => !ids.includes(e.id)))
       setSelectedEmails(new Set())
@@ -220,7 +257,7 @@ export default function EmailInterface() {
 
     setIsSummarizing(true)
     setCurrentSummary('')
-    
+
     // Create abort controller
     abortControllerRef.current = new AbortController()
 
@@ -240,7 +277,7 @@ export default function EmailInterface() {
   }
 
   const handleDraft = async (
-    email: EmailMessage, 
+    email: EmailMessage,
     replyType: 'reply' | 'replyAll' | 'forward',
     context?: string
   ) => {
@@ -248,7 +285,7 @@ export default function EmailInterface() {
 
     setIsDrafting(true)
     setCurrentDraft('')
-    
+
     // Create abort controller
     abortControllerRef.current = new AbortController()
 
@@ -422,29 +459,69 @@ export default function EmailInterface() {
         selectedCount={selectedEmails.size}
       />
 
-      <div className="flex-1 overflow-hidden">
-        <div className="h-full flex flex-col">
-          {/* Action buttons for bulk operations */}
-          {selectedEmails.size > 0 && (
+      <div className="flex-1 overflow-hidden flex">
+        {/* Folder tree sidebar */}
+        {showFolderTree && (
+          <div className="w-64 border-r bg-gray-50 overflow-y-auto">
+            <div className="p-4 border-b bg-white flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-gray-700">Folders</h2>
+              <button
+                onClick={() => setShowFolderTree(false)}
+                className="text-gray-400 hover:text-gray-600"
+                title="Hide folders"
+              >
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
+                </svg>
+              </button>
+            </div>
+            <FolderTree
+              folders={folders}
+              selectedFolderId={selectedFolderId}
+              onFolderSelect={setSelectedFolderId}
+              isLoading={isFoldersLoading}
+            />
+          </div>
+        )}
+
+        {/* Email list */}
+        <div className="flex-1 overflow-hidden">
+          <div className="h-full flex flex-col">
+            {/* Show folders button when hidden */}
+            {!showFolderTree && (
+              <div className="px-4 py-2 border-b">
+                <button
+                  onClick={() => setShowFolderTree(true)}
+                  className="text-sm text-gray-600 hover:text-gray-900 flex items-center gap-2"
+                >
+                  <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                  Show folders
+                </button>
+              </div>
+            )}
+
+            {/* Action buttons for bulk operations */}
             <EmailActionButtons
               selectedCount={selectedEmails.size}
               onArchive={() => handleArchive()}
               onDelete={() => handleDelete()}
-              disabled={isLoading}
+              disabled={isLoading || selectedEmails.size === 0}
             />
-          )}
 
-          {/* Email list */}
-          <EmailList
-            emails={emails}
-            selectedEmails={selectedEmails}
-            isLoading={isLoading}
-            onSelectEmail={handleSelectEmail}
-            onSelectAll={handleSelectAll}
-            onViewEmail={handleViewEmail}
-            onLoadMore={handleLoadMore}
-            hasMore={!!nextPageToken}
-          />
+            {/* Email list */}
+            <EmailList
+              emails={emails}
+              selectedEmails={selectedEmails}
+              isLoading={isLoading}
+              onSelectEmail={handleSelectEmail}
+              onSelectAll={handleSelectAll}
+              onViewEmail={handleViewEmail}
+              onLoadMore={handleLoadMore}
+              hasMore={!!nextPageToken}
+            />
+          </div>
         </div>
       </div>
 

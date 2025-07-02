@@ -60,12 +60,41 @@ export class GraphClient {
     return response
   }
 
+  async getMailFolders(): Promise<any[]> {
+    const response = await this.graphFetch('/me/mailFolders?$top=100')
+    const data = await response.json()
+    
+    // Get child folders for each folder
+    const foldersWithChildren = await Promise.all(
+      data.value.map(async (folder: any) => {
+        try {
+          const childResponse = await this.graphFetch(`/me/mailFolders/${folder.id}/childFolders?$top=50`)
+          const childData = await childResponse.json()
+          return {
+            ...folder,
+            childFolders: childData.value || []
+          }
+        } catch {
+          return {
+            ...folder,
+            childFolders: []
+          }
+        }
+      })
+    )
+    
+    return foldersWithChildren
+  }
+
   async getEmails(
     pageSize: number = 10,
     pageToken?: string,
-    filter?: string
+    filter?: string,
+    folderId?: string
   ): Promise<EmailListResponse> {
-    let url = `/me/messages?$top=${pageSize}&$orderby=receivedDateTime desc`
+    let url = folderId 
+      ? `/me/mailFolders/${folderId}/messages?$top=${pageSize}&$orderby=receivedDateTime desc`
+      : `/me/messages?$top=${pageSize}&$orderby=receivedDateTime desc`
     
     // Add fields selection to optimize response
     url += '&$select=id,conversationId,subject,bodyPreview,from,toRecipients,ccRecipients,receivedDateTime,hasAttachments,importance,isRead,isDraft,webLink'

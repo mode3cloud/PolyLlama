@@ -5,6 +5,7 @@ Uses HTTP bridge to communicate with MCP servers instead of direct stdio.
 """
 
 import asyncio
+import json
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -152,7 +153,41 @@ class MCPBridgeManager:
             
             result = response.json()
             if result.get("success"):
-                return result.get("result")
+                raw_result = result.get("result")
+                # Handle structured content responses from MCP
+                if isinstance(raw_result, list) and len(raw_result) > 0:
+                    # Extract text from structured content like [{"type": "text", "text": "..."}]
+                    text_parts = []
+                    for item in raw_result:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            text_parts.append(item.get("text", ""))
+                    if text_parts:
+                        return "\n".join(text_parts)
+                    # If no text items found, try to parse nested JSON
+                    elif len(raw_result) == 1 and isinstance(raw_result[0], dict):
+                        # Handle nested structure like [{"type": "text", "text": '{"content": [...]}'}]
+                        nested_text = raw_result[0].get("text", "")
+                        if nested_text:
+                            try:
+                                nested_json = json.loads(nested_text)
+                                if isinstance(nested_json, dict) and "content" in nested_json:
+                                    # Extract from nested content array
+                                    content_texts = []
+                                    for content_item in nested_json.get("content", []):
+                                        if isinstance(content_item, dict) and content_item.get("type") == "text":
+                                            content_texts.append(content_item.get("text", ""))
+                                    if content_texts:
+                                        return "\n".join(content_texts)
+                                return json.dumps(nested_json, indent=2)
+                            except json.JSONDecodeError:
+                                return nested_text
+                    # Fallback to string representation
+                    return str(raw_result)
+                elif isinstance(raw_result, str):
+                    return raw_result
+                else:
+                    # For other types, convert to string
+                    return json.dumps(raw_result, indent=2) if raw_result else ""
             else:
                 # Return error as result instead of raising exception
                 error_msg = result.get('error', 'Unknown error')

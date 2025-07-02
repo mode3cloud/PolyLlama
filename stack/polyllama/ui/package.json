@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@azure/msal-node": "^3.6.0",
+    "@heroicons/react": "^2.2.0",
     "@types/jsonwebtoken": "^9.0.10",
     "jsonwebtoken": "^9.0.2",
     "next": "15.3.3",

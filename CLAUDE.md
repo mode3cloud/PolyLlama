@@ -740,6 +740,52 @@ const transformedStream = response.body.pipeThrough(stream)
 return new Response(transformedStream, { headers: streamHeaders })
 ```
 
+## OpenAI Format Consistency
+
+The system uses standard OpenAI streaming format throughout for compatibility:
+
+### Streaming Format
+All streaming responses follow OpenAI's Server-Sent Events (SSE) format:
+```
+data: {"choices": [{"delta": {...}, "finish_reason": null, "index": 0}]}
+data: {"choices": [{"delta": {...}, "finish_reason": null, "index": 0}]}
+data: {"choices": [{"delta": {}, "finish_reason": "stop", "index": 0}]}
+data: [DONE]
+```
+
+### Content Streaming
+Regular assistant content is streamed as:
+```json
+{"choices": [{"delta": {"content": "Hello, how can I help?"}, "finish_reason": null, "index": 0}]}
+```
+
+### Tool Call Streaming
+Tool calls are streamed in OpenAI format:
+1. Initial tool call (when detected):
+```json
+{"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call_123", "type": "function", "function": {"name": "search_web", "arguments": ""}}]}, "finish_reason": null, "index": 0}]}
+```
+
+2. Complete tool call (with arguments):
+```json
+{"choices": [{"delta": {"tool_calls": [{"id": "call_123", "type": "function", "function": {"name": "search_web", "arguments": "{\"query\": \"weather\"}"}}]}, "finish_reason": null, "index": 0}]}
+```
+
+### Tool Results
+Tool results are currently streamed as content (not as separate tool messages):
+```json
+{"choices": [{"delta": {"content": "\n[Tool: search_web]\nFound 5 results for weather...\n"}, "finish_reason": null, "index": 0}]}
+```
+
+### Frontend Handling
+The frontend (`chatUtils.ts`) parses OpenAI format and:
+- Displays content chunks immediately
+- Shows "Preparing to call tool..." when tool calls start
+- Updates to show full tool details when arguments are complete
+- Displays tool results as part of the assistant's message content
+
+**Note**: Tool results appearing as raw JSON arrays (e.g., `[{'type': 'text', 'text': '...'}]`) indicate the MCP bridge is returning structured responses that need to be properly formatted before display.
+
 ## Security Considerations
 
 - All agent→LLM calls use LLM proxy with proper authentication

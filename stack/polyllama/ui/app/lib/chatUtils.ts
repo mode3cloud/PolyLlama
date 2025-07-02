@@ -117,18 +117,48 @@ export async function streamChat({
               
               // Handle content
               if (delta?.content) {
-                onChunk(delta.content)
+                // Check if this is a tool result in the format [Tool: name]\nresult
+                // This regex matches both formats:
+                // 1. \n[Tool: name]\nresult
+                // 2. [Tool: name]\nresult (at start of content)
+                const toolResultMatch = delta.content.match(/^(\n)?\[Tool: ([^\]]+)\]\n([\s\S]*)$/)
+                if (toolResultMatch && onToolResult) {
+                  const [, newline, toolName, result] = toolResultMatch
+                  // Extract tool call ID if we can (for now, we'll use a placeholder)
+                  onToolResult(toolName, result, `tool_result_${Date.now()}`)
+                  // If there was a newline before [Tool:, send it as regular content
+                  if (newline) {
+                    onChunk(newline)
+                  }
+                } else {
+                  onChunk(delta.content)
+                }
               }
               
               // Handle tool calls
               if (delta?.tool_calls && onToolCall) {
                 for (const toolCall of delta.tool_calls) {
-                  if (toolCall.function) {
-                    onToolCall({
-                      id: toolCall.id,
-                      name: toolCall.function.name,
-                      arguments: JSON.parse(toolCall.function.arguments || '{}')
-                    })
+                  if (toolCall.function && toolCall.id) {
+                    // Only call onToolCall when we have complete arguments
+                    if (toolCall.function.arguments && toolCall.function.arguments !== '') {
+                      try {
+                        const args = JSON.parse(toolCall.function.arguments)
+                        onToolCall({
+                          id: toolCall.id,
+                          name: toolCall.function.name,
+                          arguments: args
+                        })
+                      } catch (e) {
+                        // Arguments might still be streaming, skip for now
+                      }
+                    } else if (onToolCallStreaming && toolCall.function.name) {
+                      // Initial tool call with just name
+                      onToolCallStreaming({
+                        id: toolCall.id,
+                        name: toolCall.function.name,
+                        status: 'started'
+                      })
+                    }
                   }
                 }
               }

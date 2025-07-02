@@ -146,6 +146,42 @@ def _convert_to_openai_format(chunk: Dict[str, Any]) -> Optional[Dict[str, Any]]
                 "index": 0
             }]
         }
+    elif chunk.get("type") == "tool_call_streaming":
+        # Convert streaming tool call to OpenAI format
+        tool_call = chunk.get("tool_call", {})
+        if tool_call.get("status") == "started":
+            # Send initial tool call with empty arguments
+            return {
+                "choices": [{
+                    "delta": {
+                        "tool_calls": [{
+                            "index": 0,
+                            "id": tool_call.get("id"),
+                            "type": "function",
+                            "function": {
+                                "name": tool_call.get("name"),
+                                "arguments": ""
+                            }
+                        }]
+                    },
+                    "finish_reason": None,
+                    "index": 0
+                }]
+            }
+        # Skip other streaming statuses for now
+        return None
+    elif chunk.get("type") == "tool_result":
+        # Include tool results as content in OpenAI format
+        result = chunk.get("result", "")
+        name = chunk.get("name", "unknown")
+        # Format tool result as a content message showing the tool execution
+        return {
+            "choices": [{
+                "delta": {"content": f"\n[Tool: {name}]\n{result}\n"},
+                "finish_reason": None,
+                "index": 0
+            }]
+        }
     elif chunk.get("type") == "complete":
         # Send final content with finish reason
         return {
@@ -155,7 +191,7 @@ def _convert_to_openai_format(chunk: Dict[str, Any]) -> Optional[Dict[str, Any]]
                 "index": 0
             }]
         }
-    # Skip other types like "connected", "tool_result", "tool_error", "done"
+    # Skip other types like "connected", "tool_error", "done"
     return None
 
 

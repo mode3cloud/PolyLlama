@@ -194,7 +194,14 @@ app.get('/status', async (req, res) => {
     if (includeTools && connection && state?.connected) {
       try {
         const tools = await connection.client.listTools();
-        serverStatus.tools = tools.tools || [];
+        // Prefix tool names with server name
+        const safeName = name.replace(/-/g, '_');
+        serverStatus.tools = (tools.tools || []).map(tool => ({
+          ...tool,
+          name: `${safeName}__${tool.name}`,
+          originalName: tool.name,
+          server: name
+        }));
       } catch (error) {
         console.error(`Failed to list tools for status from ${name}:`, error);
         serverStatus.tools = [];
@@ -234,10 +241,14 @@ app.get('/tools', async (req, res) => {
         state.toolCount = toolCount;
       }
       
-      // Add server name to each tool
+      // Add server name to each tool and prefix tool name
       for (const tool of tools.tools || []) {
+        // Replace hyphens in server name with underscores for OpenAI compatibility
+        const safeServerName = serverName.replace(/-/g, '_');
         allTools.push({
           ...tool,
+          name: `${safeServerName}__${tool.name}`,
+          originalName: tool.name,
           server: serverName
         });
       }
@@ -266,15 +277,35 @@ app.get('/tools', async (req, res) => {
 app.post('/execute', async (req, res) => {
   const { toolName, arguments: args, server } = req.body;
 
-  if (!server || !mcpConnections.has(server)) {
-    return res.status(400).json({ error: 'Invalid or missing server' });
+  // Handle prefixed tool names (server__toolName)
+  let actualToolName = toolName;
+  let targetServer = server;
+  
+  if (toolName.includes('__')) {
+    const [prefix, ...nameParts] = toolName.split('__');
+    // Try to find the actual server name (with hyphens) from the safe name (with underscores)
+    for (const [serverName] of mcpConnections.entries()) {
+      if (serverName.replace(/-/g, '_') === prefix) {
+        targetServer = serverName;
+        break;
+      }
+    }
+    // If not found, use the prefix as-is (might be a server without hyphens)
+    if (targetServer === server) {
+      targetServer = prefix;
+    }
+    actualToolName = nameParts.join('__'); // Handle tool names that might contain __
   }
 
-  const connection = mcpConnections.get(server);
+  if (!targetServer || !mcpConnections.has(targetServer)) {
+    return res.status(400).json({ error: `Invalid or missing server: ${targetServer}` });
+  }
+
+  const connection = mcpConnections.get(targetServer);
 
   try {
     const result = await connection.client.callTool({
-      name: toolName,
+      name: actualToolName,
       arguments: args
     });
 
@@ -283,7 +314,7 @@ app.post('/execute', async (req, res) => {
       result: result.content
     });
   } catch (error) {
-    console.error(`Failed to execute tool ${toolName}:`, error);
+    console.error(`Failed to execute tool ${actualToolName} on ${targetServer}:`, error);
     res.status(500).json({
       success: false,
       error: error.message

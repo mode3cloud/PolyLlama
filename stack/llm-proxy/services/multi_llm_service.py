@@ -139,9 +139,8 @@ class MultiLLMService:
 
         logger.info("Initialized MultiLLMService with default model: %s", self.model)
 
-        from .message_manager import MessageManager
-
-        self.message_manager = MessageManager()
+        # Message manager will be injected from main.py
+        self.message_manager = None
 
         # Cache for Ollama model capabilities
         self._ollama_capabilities_cache: Dict[str, Tuple[bool, bool, float]] = {}

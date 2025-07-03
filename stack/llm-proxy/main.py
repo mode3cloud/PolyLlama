@@ -65,7 +65,7 @@ async def startup_event():
     logger.info("Starting PolyLlama LLM Proxy Service...")
 
     # Initialize services
-    message_manager = MessageManager()
+    message_manager = MessageManager(redis_url=LLMProxyConfig.REDIS_URL)
     llm_service = MultiLLMService()  # No Neo4j for now
     llm_service.message_manager = message_manager  # Set message manager directly
     mcp_manager = MCPBridgeManager()
@@ -102,6 +102,8 @@ async def shutdown_event():
 
     if llm_service:
         await llm_service.close()
+    if message_manager:
+        await message_manager.close()
     if mcp_manager:
         await mcp_manager.shutdown()
     if audio_service:

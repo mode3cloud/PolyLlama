@@ -23,6 +23,9 @@ class LLMProxyConfig:
     NEO4J_URI: str = os.getenv("NEO4J_URI", "bolt://localhost:7687")
     NEO4J_USERNAME: str = os.getenv("NEO4J_USERNAME", "neo4j")
     NEO4J_PASSWORD: str = os.getenv("NEO4J_PASSWORD", "neo4jpwd")
+    
+    # Redis Configuration (for message persistence)
+    REDIS_URL: str = os.getenv("REDIS_URL", "redis://redis:6379")
 
     # LLM Provider API Keys
     OPENAI_API_KEY: Optional[str] = os.getenv("OPENAI_API_KEY")

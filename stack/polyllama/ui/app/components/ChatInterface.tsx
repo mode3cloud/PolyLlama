@@ -36,6 +36,8 @@ export default function ChatInterface() {
   const { playAudio, stopAudio, isPlaying: isAudioPlaying } = useAudioPlayer()
   const isStreamingRef = useRef(false)
   const currentStreamIdRef = useRef<string | null>(null)
+  const streamingContentRef = useRef<{ [messageIndex: number]: string }>({})
+  const lastMessageIndexRef = useRef<number>(-1)
 
   // Fetch available models
   const fetchModels = useCallback(async () => {
@@ -228,199 +230,210 @@ export default function ChatInterface() {
     }
 
     // Don't create assistant message upfront - let the streaming handlers create it
+    
+    // Clear streaming content ref for new stream
+    streamingContentRef.current = {};
+    
+    // Create shared handlers for both audio and non-audio streaming
+    const sharedHandlers = {
+      onChunk: (content: string) => {
+        setMessages(prev => {
+          // Check if we need a new assistant message after tool results
+          const lastMessage = prev[prev.length - 1];
+          const needNewMessage = !lastMessage || 
+                               lastMessage.role === 'tool' || 
+                               lastMessage.role === 'user' ||
+                               (lastMessage.role === 'assistant' && lastMessage.tool_calls && lastMessage.tool_calls.length > 0);
+          
+          if (needNewMessage) {
+            // Create a new assistant message after tool results or if no assistant message exists
+            const messageIndex = prev.length;
+            lastMessageIndexRef.current = messageIndex;
+            streamingContentRef.current[messageIndex] = content;
+            
+            const newAssistantMessage: ChatMessage = {
+              role: 'assistant',
+              content: content,
+              timestamp: new Date().toISOString()
+            };
+            return [...prev, newAssistantMessage];
+          } else {
+            // Update the last assistant message using ref-based content tracking
+            const updatedMessages = [...prev];
+            const lastIdx = prev.length - 1;
+            
+            // Accumulate content in ref
+            if (lastMessageIndexRef.current === lastIdx) {
+              streamingContentRef.current[lastIdx] = (streamingContentRef.current[lastIdx] || '') + content;
+            } else {
+              // New message index, reset tracking
+              lastMessageIndexRef.current = lastIdx;
+              streamingContentRef.current[lastIdx] = updatedMessages[lastIdx].content + content;
+            }
+            
+            updatedMessages[lastIdx] = {
+              ...updatedMessages[lastIdx],
+              content: streamingContentRef.current[lastIdx]
+            };
+            return updatedMessages;
+          }
+        });
+      },
+      onError: (error: string) => {
+        setMessages(prev => {
+          const lastAssistantIdx = prev.findLastIndex(msg => msg.role === 'assistant');
+          if (lastAssistantIdx >= 0) {
+            const updatedMessages = [...prev];
+            updatedMessages[lastAssistantIdx] = {
+              ...updatedMessages[lastAssistantIdx],
+              content: updatedMessages[lastAssistantIdx].content + `\n\n*Error: ${error}*`
+            };
+            return updatedMessages;
+          }
+          // If no assistant message, add error as new message
+          return [...prev, {
+            role: 'assistant',
+            content: `*Error: ${error}*`,
+            timestamp: new Date().toISOString()
+          }];
+        })
+      },
+      onDone: () => {
+        // Stream completed - clear refs
+        streamingContentRef.current = {};
+        lastMessageIndexRef.current = -1;
+      },
+      onToolCallStreaming: (toolCall: { id: string; name: string; status?: 'started' | 'completed' }) => {
+        // Show tool is being prepared
+        if (toolCall.status === 'started') {
+          setMessages(prev => {
+            // Check if we need to create a new assistant message
+            const lastMessage = prev[prev.length - 1];
+            const needNewMessage = !lastMessage || 
+                                 lastMessage.role !== 'assistant' ||
+                                 (lastMessage.tool_calls && lastMessage.tool_calls.length > 0);
+            
+            if (needNewMessage) {
+              // Create new assistant message for tool preparation
+              const toolStreamMessage: ChatMessage = {
+                role: 'assistant',
+                content: `🔧 Preparing to call tool: **${toolCall.name}**...`,
+                timestamp: new Date().toISOString()
+              };
+              return [...prev, toolStreamMessage];
+            } else {
+              // Update existing assistant message
+              const updatedMessages = [...prev];
+              const lastIdx = prev.length - 1;
+              const toolInfo = `🔧 Preparing to call tool: **${toolCall.name}**...\n`;
+              
+              if (updatedMessages[lastIdx].content && !updatedMessages[lastIdx].content.includes(toolInfo)) {
+                updatedMessages[lastIdx] = {
+                  ...updatedMessages[lastIdx],
+                  content: updatedMessages[lastIdx].content + '\n\n' + toolInfo
+                };
+              } else if (!updatedMessages[lastIdx].content) {
+                updatedMessages[lastIdx] = {
+                  ...updatedMessages[lastIdx],
+                  content: toolInfo
+                };
+              }
+              return updatedMessages;
+            }
+          });
+        }
+      },
+      onToolCall: (toolCall: { id: string; name: string; arguments: Record<string, unknown> }) => {
+        // Update the current assistant message to include tool_calls
+        setMessages(prev => {
+          // Find the last assistant message that doesn't already have completed tool_calls
+          const lastMessage = prev[prev.length - 1];
+          if (lastMessage && lastMessage.role === 'assistant') {
+            const updatedMessages = [...prev];
+            const lastIdx = prev.length - 1;
+            
+            // Add or append to tool_calls array
+            const newToolCall = {
+              id: toolCall.id,
+              type: 'function' as const,
+              function: {
+                name: toolCall.name,
+                arguments: JSON.stringify(toolCall.arguments)
+              }
+            };
+            
+            if (updatedMessages[lastIdx].tool_calls) {
+              // Append to existing tool_calls
+              updatedMessages[lastIdx] = {
+                ...updatedMessages[lastIdx],
+                tool_calls: [...updatedMessages[lastIdx].tool_calls!, newToolCall]
+              };
+            } else {
+              // Create new tool_calls array
+              updatedMessages[lastIdx] = {
+                ...updatedMessages[lastIdx],
+                tool_calls: [newToolCall]
+              };
+            }
+            return updatedMessages;
+          }
+          return prev;
+        });
+      },
+      onToolResult: (name: string, result: string, toolCallId?: string) => {
+        let formattedResult = result;
+        // Check if the result looks like JSON array from MCP
+        if (result.trim().startsWith('[') && result.trim().endsWith(']')) {
+          try {
+            const parsed = JSON.parse(result);
+            if (Array.isArray(parsed) && parsed.length > 0 && parsed[0].type === 'text') {
+              // Extract text content from MCP response format
+              formattedResult = parsed.map((item: any) => item.text || '').join('\n\n');
+            }
+          } catch (e) {
+            // Not JSON or parsing failed, use as-is
+          }
+        }
+        
+        // Add a tool result message
+        const toolResultMessage: ChatMessage = {
+          role: 'tool',
+          content: formattedResult,
+          tool_name: name,
+          tool_call_id: toolCallId,
+          timestamp: new Date().toISOString()
+        }
+        setMessages(prev => [...prev, toolResultMessage])
+        
+        // The onChunk handler will create a new assistant message when needed
+      },
+      onToolError: (name: string, error: string, toolCallId?: string) => {
+        // Add a tool error message
+        const toolErrorMessage: ChatMessage = {
+          role: 'tool',
+          content: `Error executing tool ${name}: ${error}`,
+          tool_name: name,
+          tool_call_id: toolCallId,
+          timestamp: new Date().toISOString()
+        }
+        setMessages(prev => [...prev, toolErrorMessage])
+      }
+    };
 
     try {
       
       if (audioEnabled) {
-        // Use audio streaming
+        // Use audio streaming with shared handlers
         await streamChatWithAudio({
           messages: [...messages, userMessage],
           model: selectedModel,
           sessionId: sessionId,
           temperature: temperature,
           signal: abortControllerRef.current.signal,
-          onChunk: (content) => {
-            setMessages(prev => {
-              // Check if we need a new assistant message after tool results
-              const lastMessage = prev[prev.length - 1];
-              const needNewMessage = !lastMessage || 
-                                   lastMessage.role === 'tool' || 
-                                   lastMessage.role === 'user' ||
-                                   (lastMessage.role === 'assistant' && lastMessage.tool_calls && lastMessage.tool_calls.length > 0);
-              
-              if (needNewMessage) {
-                // Create a new assistant message after tool results or if no assistant message exists
-                const newAssistantMessage: ChatMessage = {
-                  role: 'assistant',
-                  content: content,
-                  timestamp: new Date().toISOString()
-                };
-                return [...prev, newAssistantMessage];
-              } else {
-                // Update the last assistant message (that doesn't have tool_calls)
-                const updatedMessages = [...prev];
-                const lastIdx = prev.length - 1;
-                updatedMessages[lastIdx] = {
-                  ...updatedMessages[lastIdx],
-                  content: updatedMessages[lastIdx].content + content
-                };
-                return updatedMessages;
-              }
-            });
-          },
-          onError: (error) => {
-            setMessages(prev => {
-              const lastAssistantIdx = prev.findLastIndex(msg => msg.role === 'assistant');
-              if (lastAssistantIdx >= 0) {
-                const updatedMessages = [...prev];
-                updatedMessages[lastAssistantIdx] = {
-                  ...updatedMessages[lastAssistantIdx],
-                  content: updatedMessages[lastAssistantIdx].content + `\n\n*Error: ${error}*`
-                };
-                return updatedMessages;
-              }
-              // If no assistant message, add error as new message
-              return [...prev, {
-                role: 'assistant',
-                content: `*Error: ${error}*`,
-                timestamp: new Date().toISOString()
-              }];
-            })
-          },
-          onDone: () => {
-            // Stream completed
-          },
+          ...sharedHandlers,
           onAudio: (audioData) => {
             // Play audio chunk
             playAudio(audioData.audio, audioData.sample_rate)
-          },
-          onToolCallStreaming: (toolCall) => {
-            // Show tool is being prepared
-            if (toolCall.status === 'started') {
-              setMessages(prev => {
-                // Check if we need to create a new assistant message
-                const lastMessage = prev[prev.length - 1];
-                const needNewMessage = !lastMessage || 
-                                     lastMessage.role !== 'assistant' ||
-                                     (lastMessage.tool_calls && lastMessage.tool_calls.length > 0);
-                
-                if (needNewMessage) {
-                  // Create new assistant message for tool preparation
-                  const toolStreamMessage: ChatMessage = {
-                    role: 'assistant',
-                    content: `🔧 Preparing to call tool: **${toolCall.name}**...`,
-                    timestamp: new Date().toISOString()
-                  };
-                  return [...prev, toolStreamMessage];
-                } else {
-                  // Update existing assistant message
-                  const updatedMessages = [...prev];
-                  const lastIdx = prev.length - 1;
-                  const toolInfo = `🔧 Preparing to call tool: **${toolCall.name}**...\n`;
-                  
-                  if (updatedMessages[lastIdx].content && !updatedMessages[lastIdx].content.includes(toolInfo)) {
-                    updatedMessages[lastIdx] = {
-                      ...updatedMessages[lastIdx],
-                      content: updatedMessages[lastIdx].content + '\n\n' + toolInfo
-                    };
-                  } else if (!updatedMessages[lastIdx].content) {
-                    updatedMessages[lastIdx] = {
-                      ...updatedMessages[lastIdx],
-                      content: toolInfo
-                    };
-                  }
-                  return updatedMessages;
-                }
-              });
-            }
-          },
-          onToolCall: (toolCall) => {
-            // Update the current assistant message to include tool_calls
-            setMessages(prev => {
-              // Find the last assistant message that doesn't already have completed tool_calls
-              const lastMessage = prev[prev.length - 1];
-              if (lastMessage && lastMessage.role === 'assistant') {
-                const updatedMessages = [...prev];
-                const lastIdx = prev.length - 1;
-                
-                // Add or append to tool_calls array
-                const newToolCall = {
-                  id: toolCall.id,
-                  type: 'function' as const,
-                  function: {
-                    name: toolCall.name,
-                    arguments: JSON.stringify(toolCall.arguments)
-                  }
-                };
-                
-                if (updatedMessages[lastIdx].tool_calls) {
-                  // Append to existing tool_calls
-                  updatedMessages[lastIdx] = {
-                    ...updatedMessages[lastIdx],
-                    tool_calls: [...updatedMessages[lastIdx].tool_calls!, newToolCall]
-                  };
-                } else {
-                  // Create new tool_calls array
-                  updatedMessages[lastIdx] = {
-                    ...updatedMessages[lastIdx],
-                    tool_calls: [newToolCall]
-                  };
-                }
-                
-                return updatedMessages;
-              }
-              return prev;
-            });
-          },
-          onToolResult: (name, result, toolCallId) => {
-            
-            // Handle result which might be an array or string
-            let formattedResult = result;
-            
-            // If result is an array, extract text content
-            if (Array.isArray(result)) {
-              // Extract text from array format [{type: "text", text: "..."}]
-              const textContent = result
-                .filter(item => item.type === 'text')
-                .map(item => item.text)
-                .join('\n');
-              formattedResult = textContent || JSON.stringify(result, null, 2);
-            } else if (typeof result === 'string') {
-              // Try to parse as JSON for better display
-              try {
-                const parsed = JSON.parse(result);
-                formattedResult = '```json\n' + JSON.stringify(parsed, null, 2) + '\n```';
-              } catch {
-                // Not JSON, use as-is
-                formattedResult = result;
-              }
-            } else {
-              // For any other type, stringify it
-              formattedResult = JSON.stringify(result, null, 2);
-            }
-            
-            // Add a tool result message
-            const toolResultMessage: ChatMessage = {
-              role: 'tool',
-              content: formattedResult,
-              tool_name: name,
-              tool_call_id: toolCallId,
-              timestamp: new Date().toISOString()
-            }
-            setMessages(prev => [...prev, toolResultMessage])
-            
-            // The onChunk handler will create a new assistant message when needed
-          },
-          onToolError: (name, error, toolCallId) => {
-            // Add a tool error message
-            const toolErrorMessage: ChatMessage = {
-              role: 'tool',
-              content: `Error executing tool ${name}: ${error}`,
-              tool_name: name,
-              tool_call_id: toolCallId,
-              timestamp: new Date().toISOString()
-            }
-            setMessages(prev => [...prev, toolErrorMessage])
           }
         })
       } else {
@@ -431,185 +444,7 @@ export default function ChatInterface() {
           sessionId: sessionId,
           temperature: temperature,
           signal: abortControllerRef.current.signal,
-          onChunk: (content) => {
-            setMessages(prev => {
-              // Check if we need a new assistant message after tool results
-              const lastMessage = prev[prev.length - 1];
-              const needNewMessage = !lastMessage || 
-                                   lastMessage.role === 'tool' || 
-                                   lastMessage.role === 'user' ||
-                                   (lastMessage.role === 'assistant' && lastMessage.tool_calls && lastMessage.tool_calls.length > 0);
-              
-              if (needNewMessage) {
-                // Create a new assistant message after tool results or if no assistant message exists
-                const newAssistantMessage: ChatMessage = {
-                  role: 'assistant',
-                  content: content,
-                  timestamp: new Date().toISOString()
-                };
-                return [...prev, newAssistantMessage];
-              } else {
-                // Update the last assistant message (that doesn't have tool_calls)
-                const updatedMessages = [...prev];
-                const lastIdx = prev.length - 1;
-                updatedMessages[lastIdx] = {
-                  ...updatedMessages[lastIdx],
-                  content: updatedMessages[lastIdx].content + content
-                };
-                return updatedMessages;
-              }
-            });
-          },
-          onError: (error) => {
-            setMessages(prev => {
-              const lastAssistantIdx = prev.findLastIndex(msg => msg.role === 'assistant');
-              if (lastAssistantIdx >= 0) {
-                const updatedMessages = [...prev];
-                updatedMessages[lastAssistantIdx] = {
-                  ...updatedMessages[lastAssistantIdx],
-                  content: updatedMessages[lastAssistantIdx].content + `\n\n*Error: ${error}*`
-                };
-                return updatedMessages;
-              }
-              // If no assistant message, add error as new message
-              return [...prev, {
-                role: 'assistant',
-                content: `*Error: ${error}*`,
-                timestamp: new Date().toISOString()
-              }];
-            })
-          },
-          onDone: () => {
-            // Stream completed
-          },
-          onToolCallStreaming: (toolCall) => {
-            // Show tool is being prepared
-            if (toolCall.status === 'started') {
-              setMessages(prev => {
-                // Check if we need to create a new assistant message
-                const lastMessage = prev[prev.length - 1];
-                const needNewMessage = !lastMessage || 
-                                     lastMessage.role !== 'assistant' ||
-                                     (lastMessage.tool_calls && lastMessage.tool_calls.length > 0);
-                
-                if (needNewMessage) {
-                  // Create new assistant message for tool preparation
-                  const toolStreamMessage: ChatMessage = {
-                    role: 'assistant',
-                    content: `🔧 Preparing to call tool: **${toolCall.name}**...`,
-                    timestamp: new Date().toISOString()
-                  };
-                  return [...prev, toolStreamMessage];
-                } else {
-                  // Update existing assistant message
-                  const updatedMessages = [...prev];
-                  const lastIdx = prev.length - 1;
-                  const toolInfo = `🔧 Preparing to call tool: **${toolCall.name}**...\n`;
-                  
-                  if (updatedMessages[lastIdx].content && !updatedMessages[lastIdx].content.includes(toolInfo)) {
-                    updatedMessages[lastIdx] = {
-                      ...updatedMessages[lastIdx],
-                      content: updatedMessages[lastIdx].content + '\n\n' + toolInfo
-                    };
-                  } else if (!updatedMessages[lastIdx].content) {
-                    updatedMessages[lastIdx] = {
-                      ...updatedMessages[lastIdx],
-                      content: toolInfo
-                    };
-                  }
-                  return updatedMessages;
-                }
-              });
-            }
-          },
-          onToolCall: (toolCall) => {
-            // Update the current assistant message to include tool_calls
-            setMessages(prev => {
-              // Find the last assistant message that doesn't already have completed tool_calls
-              const lastMessage = prev[prev.length - 1];
-              if (lastMessage && lastMessage.role === 'assistant') {
-                const updatedMessages = [...prev];
-                const lastIdx = prev.length - 1;
-                
-                // Add or append to tool_calls array
-                const newToolCall = {
-                  id: toolCall.id,
-                  type: 'function' as const,
-                  function: {
-                    name: toolCall.name,
-                    arguments: JSON.stringify(toolCall.arguments)
-                  }
-                };
-                
-                if (updatedMessages[lastIdx].tool_calls) {
-                  // Append to existing tool_calls
-                  updatedMessages[lastIdx] = {
-                    ...updatedMessages[lastIdx],
-                    tool_calls: [...updatedMessages[lastIdx].tool_calls!, newToolCall]
-                  };
-                } else {
-                  // Create new tool_calls array
-                  updatedMessages[lastIdx] = {
-                    ...updatedMessages[lastIdx],
-                    tool_calls: [newToolCall]
-                  };
-                }
-                
-                return updatedMessages;
-              }
-              return prev;
-            });
-          },
-          onToolResult: (name, result, toolCallId) => {
-            
-            // Handle result which might be an array or string
-            let formattedResult = result;
-            
-            // If result is an array, extract text content
-            if (Array.isArray(result)) {
-              // Extract text from array format [{type: "text", text: "..."}]
-              const textContent = result
-                .filter(item => item.type === 'text')
-                .map(item => item.text)
-                .join('\n');
-              formattedResult = textContent || JSON.stringify(result, null, 2);
-            } else if (typeof result === 'string') {
-              // Try to parse as JSON for better display
-              try {
-                const parsed = JSON.parse(result);
-                formattedResult = '```json\n' + JSON.stringify(parsed, null, 2) + '\n```';
-              } catch {
-                // Not JSON, use as-is
-                formattedResult = result;
-              }
-            } else {
-              // For any other type, stringify it
-              formattedResult = JSON.stringify(result, null, 2);
-            }
-            
-            // Add a tool result message
-            const toolResultMessage: ChatMessage = {
-              role: 'tool',
-              content: formattedResult,
-              tool_name: name,
-              tool_call_id: toolCallId,
-              timestamp: new Date().toISOString()
-            }
-            setMessages(prev => [...prev, toolResultMessage])
-            
-            // The onChunk handler will create a new assistant message when needed
-          },
-          onToolError: (name, error, toolCallId) => {
-            // Add a tool error message
-            const toolErrorMessage: ChatMessage = {
-              role: 'tool',
-              content: `Error executing tool ${name}: ${error}`,
-              tool_name: name,
-              tool_call_id: toolCallId,
-              timestamp: new Date().toISOString()
-            }
-            setMessages(prev => [...prev, toolErrorMessage])
-          }
+          ...sharedHandlers
         })
       }
     } catch (error) {

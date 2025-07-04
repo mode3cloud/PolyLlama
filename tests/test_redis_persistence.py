@@ -6,6 +6,7 @@ import sys
 import os
 from pathlib import Path
 import pytest
+import redis.asyncio as redis
 
 # Add llm-proxy directory to path
 llm_proxy_path = Path(__file__).parent.parent / "stack" / "llm-proxy"
@@ -23,6 +24,14 @@ async def test_redis_persistence():
     # Test with Redis URL from environment or default
     redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
     print(f"📍 Using Redis URL: {redis_url}")
+    
+    # Check if Redis is available
+    try:
+        test_client = await redis.from_url(redis_url)
+        await test_client.ping()
+        await test_client.aclose()
+    except Exception as e:
+        pytest.skip(f"Redis not available at {redis_url} - skipping persistence test ({e})")
     
     # First instance - create session and add messages
     print("\n📝 Creating first message manager instance...")
@@ -99,4 +108,22 @@ async def test_redis_persistence():
 
 
 if __name__ == "__main__":
-    asyncio.run(test_redis_persistence())
+    import traceback
+    
+    async def main():
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379")
+        try:
+            test_client = await redis.from_url(redis_url)
+            await test_client.ping()
+            await test_client.aclose()
+        except Exception as e:
+            print(f"⚠️  Redis not available at {redis_url} - skipping test ({e})")
+            return
+            
+        try:
+            await test_redis_persistence()
+        except Exception as e:
+            print(f"\n❌ Test failed: {e}")
+            traceback.print_exc()
+            
+    asyncio.run(main())

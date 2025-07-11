@@ -95,6 +95,18 @@ class MessageManager:
         session["metadata"].update(metadata)
         await self._save_session(session_id, session)
 
+    async def update_tool_selection(
+        self, session_id: str, tool_selection: Dict[str, Dict[str, bool]]
+    ) -> None:
+        """Update tool selection for a session."""
+        await self.update_session_metadata(session_id, {"tool_selection": tool_selection})
+        logger.info(f"Updated tool selection for session {session_id}")
+
+    async def get_tool_selection(self, session_id: str) -> Dict[str, Dict[str, bool]]:
+        """Get tool selection for a session."""
+        session = await self.get_session_messages(session_id)
+        return session.get("metadata", {}).get("tool_selection", {})
+
     async def add_system_message(self, session_id: str, content: str) -> None:
         """Add a system message to the session."""
         session = await self.get_session_messages(session_id)

@@ -54,6 +54,77 @@ export default function ChatInterface() {
     }
   }, [])
 
+  // Tool priority scoring (same as MCPStatus)
+  const getToolPriority = (tool: any): number => {
+    let score = 0
+    
+    // Shorter names often indicate more common tools
+    score += Math.max(0, 50 - tool.name.length)
+    
+    // Prioritize certain keywords
+    const highPriorityWords = ['search', 'get', 'list', 'read', 'fetch', 'query', 'find']
+    const mediumPriorityWords = ['create', 'update', 'delete', 'write', 'execute', 'run']
+    
+    const name = tool.name.toLowerCase()
+    if (highPriorityWords.some(word => name.includes(word))) score += 20
+    if (mediumPriorityWords.some(word => name.includes(word))) score += 10
+    
+    return score
+  }
+
+  // Initialize tool selection with smart defaults when MCP status is available
+  const initializeToolSelection = useCallback(async () => {
+    if (hasInitializedToolSelection) return
+    
+    try {
+      const response = await fetchWithAuth('/ui/api/mcp/proxy-status?includeTools=true')
+      if (response.ok) {
+        const data = await response.json()
+        if (data.servers && data.total_tools > 128) {
+          // Auto-select first 128 tools using smart selection logic
+          const allTools: Array<{ serverName: string; toolName: string; tool: any }> = []
+          
+          Object.entries(data.servers).forEach(([serverName, serverData]: [string, any]) => {
+            if (serverData.tools) {
+              serverData.tools.forEach((tool: any) => {
+                allTools.push({ serverName, toolName: tool.name, tool })
+              })
+            }
+          })
+          
+          // Sort by priority (same logic as MCPStatus)
+          allTools.sort((a, b) => {
+            const aScore = getToolPriority(a.tool)
+            const bScore = getToolPriority(b.tool)
+            return bScore - aScore
+          })
+          
+          // Select top 128 tools
+          const selectedTools = allTools.slice(0, 128)
+          
+          const newSelection: ToolSelection = {}
+          selectedTools.forEach(({ serverName, toolName }) => {
+            if (!newSelection[serverName]) {
+              newSelection[serverName] = {}
+            }
+            newSelection[serverName][toolName] = true
+          })
+          
+          // Validate the selection count
+          const selectedCount = Object.values(newSelection).reduce((total, serverTools) => {
+            return total + Object.values(serverTools).filter(Boolean).length
+          }, 0)
+          
+          console.log(`Initialized tool selection with ${selectedCount} tools (limit: 128)`)
+          setToolSelection(newSelection)
+        }
+        setHasInitializedToolSelection(true)
+      }
+    } catch (error) {
+      console.error('Failed to initialize tool selection:', error)
+    }
+  }, [hasInitializedToolSelection])
+
   // Load session messages
   const loadSession = useCallback(async (sessionId: string) => {
     try {
@@ -120,6 +191,26 @@ export default function ChatInterface() {
             setPendingModelSelection(data.metadata.model)
           }
         }
+        
+        // Load tool selection for this session if it exists
+        try {
+          const toolResponse = await fetchWithAuth(`${API_BASE_URL}/sessions/${sessionId}/tool-selection`)
+          if (toolResponse.ok) {
+            const toolData = await toolResponse.json()
+            if (toolData.tool_selection && Object.keys(toolData.tool_selection).length > 0) {
+              setToolSelection(toolData.tool_selection)
+              console.log(`Loaded tool selection for session ${sessionId}:`, toolData.tool_selection)
+            } else {
+              // If no tool selection saved, initialize with defaults
+              await initializeToolSelection()
+            }
+          }
+        } catch (toolError) {
+          console.warn('Failed to load tool selection for session:', toolError)
+          // Fall back to default tool selection
+          await initializeToolSelection()
+        }
+        
         // Mark that we've loaded a session with data
         setHasLoadedSession(true)
       }
@@ -129,7 +220,7 @@ export default function ChatInterface() {
       setIsLoadingSession(false)
       setIsLoadingSessionData(false)
     }
-  }, [models])
+  }, [models, API_BASE_URL, initializeToolSelection])
 
   // Handle session selection
   const handleSessionSelect = useCallback((newSessionId: string) => {
@@ -160,90 +251,49 @@ export default function ChatInterface() {
     setMessages([])
   }, [])
 
-  // Initialize tool selection with smart defaults when MCP status is available
-  const initializeToolSelection = useCallback(async () => {
-    if (hasInitializedToolSelection) return
+
+
+  // Save tool selection to session
+  const saveToolSelection = useCallback(async (selection: ToolSelection) => {
+    if (!sessionId) return
     
     try {
-      const response = await fetchWithAuth('/ui/api/mcp/proxy-status?includeTools=true')
+      const response = await fetchWithAuth(`${API_BASE_URL}/sessions/${sessionId}/tool-selection`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ tool_selection: selection })
+      })
+      
       if (response.ok) {
-        const data = await response.json()
-        if (data.servers && data.total_tools > 128) {
-          // Auto-select first 128 tools using smart selection logic
-          const allTools: Array<{ serverName: string; toolName: string; tool: any }> = []
-          
-          Object.entries(data.servers).forEach(([serverName, serverData]: [string, any]) => {
-            if (serverData.tools) {
-              serverData.tools.forEach((tool: any) => {
-                allTools.push({ serverName, toolName: tool.name, tool })
-              })
-            }
-          })
-          
-          // Sort by priority (same logic as MCPStatus)
-          allTools.sort((a, b) => {
-            const aScore = getToolPriority(a.tool)
-            const bScore = getToolPriority(b.tool)
-            return bScore - aScore
-          })
-          
-          // Select top 128 tools
-          const selectedTools = allTools.slice(0, 128)
-          
-          const newSelection: ToolSelection = {}
-          selectedTools.forEach(({ serverName, toolName }) => {
-            if (!newSelection[serverName]) {
-              newSelection[serverName] = {}
-            }
-            newSelection[serverName][toolName] = true
-          })
-          
-          // Validate the selection count
-          const selectedCount = Object.values(newSelection).reduce((total, serverTools) => {
-            return total + Object.values(serverTools).filter(Boolean).length
-          }, 0)
-          
-          console.log(`Initialized tool selection with ${selectedCount} tools (limit: 128)`)
-          setToolSelection(newSelection)
+        console.log(`Saved tool selection for session ${sessionId}`)
+      } else {
+        const errorText = await response.text()
+        console.warn(`Failed to save tool selection for session ${sessionId}:`, errorText)
+        
+        // If it's a new session, the backend might not have created it yet
+        // This is normal behavior and we can safely ignore it
+        if (errorText.includes('Not Found')) {
+          console.log('Session not created yet, tool selection will be saved when session is created')
         }
-        setHasInitializedToolSelection(true)
       }
     } catch (error) {
-      console.error('Failed to initialize tool selection:', error)
+      console.warn('Error saving tool selection (this is normal for new sessions):', error)
     }
-  }, [hasInitializedToolSelection])
+  }, [sessionId])
 
-  // Tool priority scoring (same as MCPStatus)
-  const getToolPriority = (tool: any): number => {
-    let score = 0
-    
-    // Shorter names often indicate more common tools
-    score += Math.max(0, 50 - tool.name.length)
-    
-    // Prioritize certain keywords
-    const highPriorityWords = ['search', 'get', 'list', 'read', 'fetch', 'query', 'find']
-    const mediumPriorityWords = ['create', 'update', 'delete', 'write', 'execute', 'run']
-    
-    const name = tool.name.toLowerCase()
-    if (highPriorityWords.some(word => name.includes(word))) score += 20
-    if (mediumPriorityWords.some(word => name.includes(word))) score += 10
-    
-    return score
-  }
-
-  // Validate tool selection doesn't exceed 128 tools
-  const validateToolSelection = (selection: ToolSelection): boolean => {
-    const totalSelected = Object.values(selection).reduce((total, serverTools) => {
-      return total + Object.values(serverTools).filter(Boolean).length
-    }, 0)
-    
-    if (totalSelected > 128) {
-      console.warn(`Tool selection exceeds OpenAI limit: ${totalSelected} > 128`)
-      return false
+  // Save tool selection whenever it changes (with debounce)
+  useEffect(() => {
+    if (Object.keys(toolSelection).length > 0 && sessionId) {
+      // Debounce saves to avoid excessive API calls
+      const timeoutId = setTimeout(() => {
+        saveToolSelection(toolSelection)
+      }, 500)
+      
+      return () => clearTimeout(timeoutId)
     }
-    
-    return true
-  }
+  }, [toolSelection, sessionId, saveToolSelection])
 
   useEffect(() => {
     fetchModels()
@@ -286,7 +336,12 @@ export default function ChatInterface() {
   // Create shared handlers for streaming that can be reused
   const createStreamHandlers = useCallback(() => ({
     onChunk: (content: string) => {
+      const timestamp = Date.now();
+      console.log(`[onChunk ${timestamp}] Called with: "${content}"`);
+      
       setMessages(prev => {
+        console.log(`[onChunk ${timestamp}] State update - current messages count: ${prev.length}`);
+        
         // Check if we need a new assistant message after tool results
         const lastMessage = prev[prev.length - 1];
         const needNewMessage = !lastMessage || 
@@ -300,6 +355,8 @@ export default function ChatInterface() {
           lastMessageIndexRef.current = messageIndex;
           streamingContentRef.current[messageIndex] = content;
           
+          console.log(`[onChunk ${timestamp}] NEW MESSAGE: content="${content}"`);
+          
           const newAssistantMessage: ChatMessage = {
             role: 'assistant',
             content: content,
@@ -307,23 +364,20 @@ export default function ChatInterface() {
           };
           return [...prev, newAssistantMessage];
         } else {
-          // Update the last assistant message using ref-based content tracking
+          // Update the last assistant message - SIMPLIFIED APPROACH
           const updatedMessages = [...prev];
           const lastIdx = prev.length - 1;
+          const currentContent = updatedMessages[lastIdx].content;
           
-          // Initialize or reset tracking for this message index
-          if (lastMessageIndexRef.current !== lastIdx) {
-            lastMessageIndexRef.current = lastIdx;
-            streamingContentRef.current[lastIdx] = updatedMessages[lastIdx].content;
-          }
+          console.log(`[onChunk ${timestamp}] UPDATE: currentContent="${currentContent}", adding="${content}"`);
           
-          // Accumulate content in ref (avoid double addition)
-          streamingContentRef.current[lastIdx] = (streamingContentRef.current[lastIdx] || '') + content;
-          
+          // Simply append to the existing content
           updatedMessages[lastIdx] = {
             ...updatedMessages[lastIdx],
-            content: streamingContentRef.current[lastIdx]
+            content: currentContent + content
           };
+          
+          console.log(`[onChunk ${timestamp}] RESULT: "${updatedMessages[lastIdx].content}"`);
           return updatedMessages;
         }
       });
@@ -498,9 +552,13 @@ export default function ChatInterface() {
     // Create abort controller for this request
     abortControllerRef.current = new AbortController()
 
-    // Trigger sidebar refresh after first message
+    // Trigger sidebar refresh and save tool selection after first message
     if (messages.length === 0) {
       setTimeout(() => setRefreshTrigger(Date.now()), 500)
+      // Save tool selection now that session will be created with first message
+      if (Object.keys(toolSelection).length > 0) {
+        setTimeout(() => saveToolSelection(toolSelection), 1000)
+      }
     }
 
     // Don't create assistant message upfront - let the streaming handlers create it

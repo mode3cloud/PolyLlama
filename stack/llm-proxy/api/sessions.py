@@ -40,6 +40,16 @@ class UpdateSessionRequest(BaseModel):
     messages: List[Dict[str, Any]]
 
 
+class ToolSelectionRequest(BaseModel):
+    """Request model for updating tool selection."""
+    tool_selection: Dict[str, Dict[str, bool]]
+
+
+class ToolSelectionResponse(BaseModel):
+    """Response model for tool selection."""
+    tool_selection: Dict[str, Dict[str, bool]]
+
+
 @sessions_router.get("", response_model=SessionListResponse)
 async def list_sessions(request: Request):
     """List all chat sessions."""
@@ -132,3 +142,46 @@ async def update_session(session_id: str, update_request: UpdateSessionRequest, 
     except Exception as e:
         logger.error(f"Error updating session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to update session: {str(e)}")
+
+
+@sessions_router.get("/{session_id}/tool-selection", response_model=ToolSelectionResponse)
+async def get_session_tool_selection(session_id: str, request: Request):
+    """Get tool selection for a chat session."""
+    try:
+        message_manager = request.app.state.message_manager
+        
+        if not message_manager:
+            raise HTTPException(status_code=404, detail="Message manager not found")
+        
+        # Ensure session exists (creates it if it doesn't exist)
+        await message_manager.get_session_messages(session_id)
+        
+        tool_selection = await message_manager.get_tool_selection(session_id)
+        
+        return ToolSelectionResponse(tool_selection=tool_selection)
+        
+    except Exception as e:
+        logger.error(f"Error getting tool selection for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get tool selection: {str(e)}")
+
+
+@sessions_router.put("/{session_id}/tool-selection")
+async def update_session_tool_selection(session_id: str, tool_request: ToolSelectionRequest, request: Request):
+    """Update tool selection for a chat session."""
+    try:
+        message_manager = request.app.state.message_manager
+        
+        if not message_manager:
+            raise HTTPException(status_code=404, detail="Message manager not found")
+        
+        # Ensure session exists before updating tool selection
+        # This will create the session if it doesn't exist
+        await message_manager.get_session_messages(session_id)
+        
+        await message_manager.update_tool_selection(session_id, tool_request.tool_selection)
+        
+        return {"message": "Tool selection updated successfully"}
+        
+    except Exception as e:
+        logger.error(f"Error updating tool selection for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to update tool selection: {str(e)}")

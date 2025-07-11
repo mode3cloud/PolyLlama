@@ -163,6 +163,7 @@ export async function streamChat({
                 // Handle multiple tool results in a single chunk
                 let remainingContent = delta.content
                 let foundToolResult = false
+                let contentProcessed = false
                 
                 // Process all tool results in the content
                 while (remainingContent) {
@@ -170,6 +171,7 @@ export async function streamChat({
                   
                   if (toolResultMatch && onToolResult) {
                     foundToolResult = true
+                    contentProcessed = true
                     const [fullMatch, newline, toolName] = toolResultMatch
                     
                     // If there was a newline before [Tool:, send it as regular content
@@ -198,13 +200,14 @@ export async function streamChat({
                     // No more tool results, send remaining content as regular content
                     if (remainingContent) {
                       onChunk(remainingContent)
+                      contentProcessed = true
                     }
                     break
                   }
                 }
                 
-                // If no tool results were found, send the entire content as regular content
-                if (!foundToolResult && delta.content) {
+                // Only call onChunk if we haven't already processed the content
+                if (!contentProcessed && delta.content) {
                   onChunk(delta.content)
                 }
               }
@@ -389,6 +392,7 @@ export async function streamChatWithAudio({
                 // Handle multiple tool results in a single chunk
                 let remainingContent = delta.content
                 let foundToolResult = false
+                let contentProcessed = false
                 
                 // Process all tool results in the content
                 while (remainingContent) {
@@ -396,6 +400,7 @@ export async function streamChatWithAudio({
                   
                   if (toolResultMatch && onToolResult) {
                     foundToolResult = true
+                    contentProcessed = true
                     const [fullMatch, newline, toolName] = toolResultMatch
                     
                     // If there was a newline before [Tool:, send it as regular content
@@ -424,13 +429,14 @@ export async function streamChatWithAudio({
                     // No more tool results, send remaining content as regular content
                     if (remainingContent) {
                       onChunk(remainingContent)
+                      contentProcessed = true
                     }
                     break
                   }
                 }
                 
-                // If no tool results were found, send the entire content as regular content
-                if (!foundToolResult && delta.content) {
+                // Only call onChunk if we haven't already processed the content
+                if (!contentProcessed && delta.content) {
                   onChunk(delta.content)
                 }
               }

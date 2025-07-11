@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
+import { verifyToken } from './app/lib/auth/jwt'
 
 export function middleware(request: NextRequest) {
   // Skip auth check for auth endpoints themselves
@@ -18,7 +19,7 @@ export function middleware(request: NextRequest) {
   // Check for auth token
   const token = request.cookies.get('auth_token_server')?.value
 
-  // For API routes, check if token exists (actual verification happens in the API routes)
+  // For API routes, verify token validity
   if (request.nextUrl.pathname.startsWith('/ui/api/')) {
     if (!token) {
       return NextResponse.json(
@@ -26,6 +27,26 @@ export function middleware(request: NextRequest) {
         { status: 401 }
       )
     }
+
+    // Verify token validity
+    const tokenPayload = verifyToken(token)
+    if (!tokenPayload) {
+      return NextResponse.json(
+        { error: 'Invalid or expired token' },
+        { status: 401 }
+      )
+    }
+
+    // Add user info to headers for API routes
+    const requestHeaders = new Headers(request.headers)
+    requestHeaders.set('x-user-email', tokenPayload.email)
+    requestHeaders.set('x-user-name', tokenPayload.name)
+
+    return NextResponse.next({
+      request: {
+        headers: requestHeaders
+      }
+    })
   }
 
   // For page routes, let the client-side handle auth

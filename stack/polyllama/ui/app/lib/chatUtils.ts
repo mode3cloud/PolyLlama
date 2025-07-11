@@ -3,6 +3,12 @@ import { fetchWithAuth } from './fetchWithAuth'
 
 const API_BASE_URL = '/ui/api/chat'
 
+interface ToolSelection {
+  [serverName: string]: {
+    [toolName: string]: boolean
+  }
+}
+
 interface StreamChatOptions {
   messages: ChatMessage[]
   model: string
@@ -16,6 +22,7 @@ interface StreamChatOptions {
   onToolResult?: (name: string, result: string, toolCallId?: string) => void
   onToolError?: (name: string, error: string, toolCallId?: string) => void
   onToolCallStreaming?: (toolCall: { id: string; name: string; status?: 'started' | 'completed' }) => void
+  toolSelection?: ToolSelection
 }
 
 interface StreamChatAudioOptions extends StreamChatOptions {
@@ -40,7 +47,8 @@ export async function streamChat({
   onToolCall,
   onToolResult,
   onToolError,
-  onToolCallStreaming
+  onToolCallStreaming,
+  toolSelection
 }: StreamChatOptions) {
   // Generate a unique ID for this stream
   const streamId = `${sessionId}_${Date.now()}_${Math.random()}`;
@@ -102,7 +110,8 @@ export async function streamChat({
       model,
       session_id: sessionId,
       stream: true,
-      temperature
+      temperature,
+      tool_selection: toolSelection
     }),
     signal
   })
@@ -261,7 +270,8 @@ export async function streamChatWithAudio({
   onToolCall,
   onToolResult,
   onToolError,
-  onToolCallStreaming
+  onToolCallStreaming,
+  toolSelection
 }: StreamChatAudioOptions) {
   // Generate a unique ID for this stream
   const streamId = `${sessionId}_${Date.now()}_${Math.random()}`;
@@ -326,7 +336,8 @@ export async function streamChatWithAudio({
       temperature,
       voice,
       speech_speed: speechSpeed,
-      speech_lang: speechLang
+      speech_lang: speechLang,
+      tool_selection: toolSelection
     }),
     signal
   })

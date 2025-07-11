@@ -112,6 +112,9 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: int = 8192
     system_prompt: Optional[str] = None
 
+    # Tool selection options
+    tool_selection: Optional[Dict[str, Dict[str, bool]]] = None  # Server -> Tool -> enabled
+
     # Audio-specific options
     voice: Optional[str] = None
     speech_speed: Optional[float] = None
@@ -292,6 +295,7 @@ async def chat_completion(request: ChatCompletionRequest, req: Request):
                 temperature=request.temperature,
                 max_tokens=request.max_tokens,
                 tool_manager=mcp_manager,
+                tool_selection=request.tool_selection,
             ),
             media_type="text/event-stream",
             headers={
@@ -316,6 +320,7 @@ async def _stream_chat_completion(
     temperature: float,
     max_tokens: int,
     tool_manager,
+    tool_selection: Optional[Dict[str, Dict[str, bool]]] = None,
 ):
     """Generator for streaming chat completions."""
     try:
@@ -333,6 +338,7 @@ async def _stream_chat_completion(
             temperature=temperature,
             max_tokens=max_tokens,
             tool_manager=tool_manager,
+            tool_selection=tool_selection,
         )
 
         # Stream chunks
@@ -456,6 +462,7 @@ async def chat_completion_audio(request: ChatCompletionRequest, req: Request):
                 tool_manager=mcp_manager,
                 voice=voice,
                 speed=speed,
+                tool_selection=request.tool_selection,
             ),
             media_type="text/event-stream",
             headers={
@@ -483,6 +490,7 @@ async def _stream_chat_completion_with_audio(
     tool_manager,
     voice: str,
     speed: float,
+    tool_selection: Optional[Dict[str, Dict[str, bool]]] = None,
 ):
     """Generator for streaming chat completions with audio."""
     try:
@@ -509,6 +517,7 @@ async def _stream_chat_completion_with_audio(
                     temperature=temperature,
                     max_tokens=max_tokens,
                     tool_manager=tool_manager,
+                    tool_selection=tool_selection,
                 )
 
                 # Stream chunks

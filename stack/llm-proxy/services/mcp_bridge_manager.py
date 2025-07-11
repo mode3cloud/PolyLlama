@@ -229,9 +229,48 @@ class MCPBridgeManager:
             logger.error(f"Failed to get bridge status: {e}")
             return {"error": str(e)}
     
-    def format_tools_for_llm(self) -> List[Dict[str, Any]]:
-        """Format tools for LLM function calling."""
-        return [
+    def format_tools_for_llm(self, tool_selection: Optional[Dict[str, Dict[str, bool]]] = None) -> List[Dict[str, Any]]:
+        """Format tools for LLM function calling with optional filtering."""
+        tools_to_format = self.tools_cache
+        
+        # Debug: Log tool structure to understand why filtering fails
+        if tool_selection and logger.isEnabledFor(logging.DEBUG):
+            logger.debug(f"Tool selection provided: {tool_selection}")
+            logger.debug(f"Sample tool structure: {self.tools_cache[0] if self.tools_cache else 'No tools'}")
+        
+        # Filter tools if selection is provided
+        if tool_selection:
+            filtered_tools = []
+            filtered_count = 0
+            
+            for tool in self.tools_cache:
+                tool_name = tool.get("name", "")
+                server_name = tool.get("server", "")
+                
+                # Debug logging for first few tools
+                if filtered_count < 3:
+                    logger.debug(f"Checking tool: {tool_name} from server: {server_name}")
+                
+                # Check if this tool is selected
+                if (server_name in tool_selection and 
+                    tool_name in tool_selection[server_name] and 
+                    tool_selection[server_name][tool_name]):
+                    filtered_tools.append(tool)
+                    filtered_count += 1
+            
+            tools_to_format = filtered_tools
+            logger.info(f"Filtered tools from {len(self.tools_cache)} to {len(tools_to_format)} based on selection")
+            
+            # If filtering resulted in too few tools, something is wrong
+            if len(tools_to_format) < 10 and len(self.tools_cache) > 50:
+                logger.warning(f"Tool filtering may have failed - only {len(tools_to_format)} tools selected from {len(self.tools_cache)} available")
+        
+        # Apply OpenAI 128 tool limit as safety net
+        if len(tools_to_format) > 128:
+            logger.warning(f"Tool count {len(tools_to_format)} exceeds OpenAI limit of 128. Truncating to first 128 tools.")
+            tools_to_format = tools_to_format[:128]
+        
+        formatted_tools = [
             {
                 "type": "function",
                 "function": {
@@ -240,8 +279,11 @@ class MCPBridgeManager:
                     "parameters": tool.get("inputSchema", {})
                 }
             }
-            for tool in self.tools_cache
+            for tool in tools_to_format
         ]
+        
+        logger.info(f"Formatted {len(formatted_tools)} tools for LLM")
+        return formatted_tools
     
     async def reinitialize(self):
         """Reinitialize the bridge connection and MCP servers."""

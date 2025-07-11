@@ -14,13 +14,19 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     
+    // Process tool selection if provided
+    let processedBody = { ...body }
+    if (body.tool_selection) {
+      processedBody.tool_selection = body.tool_selection
+    }
+    
     // Proxy to LLM proxy service
     const response = await fetch('http://llm-proxy:11435/api/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify(processedBody),
     })
 
     // Handle streaming responses
@@ -43,6 +49,19 @@ export async function POST(request: NextRequest) {
     // Handle non-streaming responses
     if (!response.ok) {
       const error = await response.text()
+      
+      // Check for specific tool limit error
+      if (error.includes('array too long') && error.includes('maximum length 128')) {
+        return NextResponse.json(
+          { 
+            error: 'Too many tools selected. Please reduce your tool selection to 128 or fewer tools.',
+            details: error,
+            code: 'TOOL_LIMIT_EXCEEDED'
+          },
+          { status: 400 }
+        )
+      }
+      
       return NextResponse.json(
         { error: `LLM proxy error: ${error}` },
         { status: response.status }

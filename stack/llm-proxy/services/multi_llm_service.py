@@ -176,6 +176,7 @@ class MultiLLMService:
         max_tokens: int = 8192,
         tool_manager: Optional[ToolManagerProtocol] = None,
         attachments: Optional[List[str]] = None,
+        tool_selection: Optional[Dict[str, Dict[str, bool]]] = None,
         **kwargs: Any,
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
@@ -318,10 +319,11 @@ class MultiLLMService:
             try:
                 # Check if tool_manager has the format_tools_for_llm method (MCPManager)
                 if hasattr(tool_manager, "format_tools_for_llm"):
-                    tools_spec = tool_manager.format_tools_for_llm()
+                    tools_spec = tool_manager.format_tools_for_llm(tool_selection)
                     logger.info(
-                        "Loaded %d tools from MCP manager",
+                        "Loaded %d tools from MCP manager (filtered: %s)",
                         len(tools_spec) if tools_spec else 0,
+                        bool(tool_selection)
                     )
             except Exception as e:
                 logger.warning("Failed to load tools from MCP manager: %s", e)
@@ -346,6 +348,16 @@ class MultiLLMService:
                 
                 logger.info("Reduced tools from %d to %d after removing duplicates", len(tools_spec), len(unique_tools))
                 tools_spec = unique_tools
+            
+            # DEFENSIVE: Enforce OpenAI 128 tool limit as final safety net
+            if len(tools_spec) > 128:
+                logger.warning("Tool count %d exceeds OpenAI limit of 128. Truncating to first 128 tools.", len(tools_spec))
+                logger.warning("This indicates tool selection filtering may have failed. Tool names: %s", 
+                             [tool.get("function", {}).get("name", "") for tool in tools_spec[:5]] + 
+                             (["..."] if len(tools_spec) > 5 else []))
+                tools_spec = tools_spec[:128]
+            
+            logger.info("Final tool count being sent to LLM: %d", len(tools_spec))
 
         # Filter supported parameters for this model
         filtered_kwargs = self._filter_supported_kwargs(self.model, kwargs)

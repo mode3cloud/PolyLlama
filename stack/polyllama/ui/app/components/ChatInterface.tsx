@@ -21,12 +21,13 @@ export default function ChatInterface() {
   const [isLoadingSession, setIsLoadingSession] = useState(false)
   const [models, setModels] = useState<ChatModel[]>([])
   const [selectedModel, setSelectedModel] = useState<string>('')
-  const [sessionId, setSessionId] = useState(() => `session-${Date.now()}`)
+  const [sessionId, setSessionId] = useState<string>('')
   const [showSidebar, setShowSidebar] = useState(true)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [pendingModelSelection, setPendingModelSelection] = useState<string | null>(null)
   const [hasLoadedSession, setHasLoadedSession] = useState(false)
   const [isLoadingSessionData, setIsLoadingSessionData] = useState(false)
+  const [hasInitializedSession, setHasInitializedSession] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const abortControllerRef = useRef<AbortController | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null)
@@ -53,6 +54,7 @@ export default function ChatInterface() {
       console.error('Failed to fetch models:', error)
     }
   }, [])
+
 
   // Tool priority scoring (same as MCPStatus)
   const getToolPriority = (tool: any): number => {
@@ -222,6 +224,51 @@ export default function ChatInterface() {
     }
   }, [models, API_BASE_URL, initializeToolSelection])
 
+  // Initialize session - fetch most recent session or create new one
+  const initializeSession = useCallback(async () => {
+    if (hasInitializedSession) return
+    
+    try {
+      setIsLoadingSession(true)
+      const response = await fetchWithAuth(`${API_BASE_URL}/sessions`)
+      if (response.ok) {
+        const data = await response.json()
+        const sessions = data.sessions || []
+        
+        if (sessions.length > 0) {
+          // Sort sessions by creation date (most recent first)
+          const sortedSessions = sessions.sort((a: any, b: any) => 
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+          )
+          const mostRecentSession = sortedSessions[0]
+          
+          // Load the most recent session
+          setSessionId(mostRecentSession.id)
+          await loadSession(mostRecentSession.id)
+        } else {
+          // No existing sessions, create a new one
+          const newSessionId = `session-${Date.now()}`
+          setSessionId(newSessionId)
+          setMessages([])
+        }
+      } else {
+        // Fallback to new session if fetch fails
+        const newSessionId = `session-${Date.now()}`
+        setSessionId(newSessionId)
+        setMessages([])
+      }
+    } catch (error) {
+      console.error('Failed to initialize session:', error)
+      // Fallback to new session
+      const newSessionId = `session-${Date.now()}`
+      setSessionId(newSessionId)
+      setMessages([])
+    } finally {
+      setIsLoadingSession(false)
+      setHasInitializedSession(true)
+    }
+  }, [hasInitializedSession, loadSession])
+
   // Handle session selection
   const handleSessionSelect = useCallback((newSessionId: string) => {
     if (newSessionId === sessionId) return
@@ -249,7 +296,13 @@ export default function ChatInterface() {
     const newSessionId = `session-${Date.now()}`
     setSessionId(newSessionId)
     setMessages([])
-  }, [])
+    setHasLoadedSession(false) // Reset this flag for new session
+    // Clear tool selection for new session - let it initialize with defaults
+    setToolSelection({})
+    setHasInitializedToolSelection(false)
+    // Re-initialize tool selection for new session
+    setTimeout(() => initializeToolSelection(), 100)
+  }, [initializeToolSelection])
 
 
 
@@ -298,7 +351,8 @@ export default function ChatInterface() {
   useEffect(() => {
     fetchModels()
     initializeToolSelection()
-  }, [fetchModels, initializeToolSelection])
+    initializeSession()
+  }, [fetchModels, initializeToolSelection, initializeSession])
 
   // Apply pending model selection when models are loaded
   useEffect(() => {
@@ -319,6 +373,7 @@ export default function ChatInterface() {
         !pendingModelSelection && 
         !hasLoadedSession &&
         !isLoadingSessionData &&
+        hasInitializedSession &&
         messages.length === 0) {
       // Default to gpt-4o-mini if available, otherwise first Ollama model, otherwise first model
       const gpt4oMini = models.find((m: ChatModel) => m.id === 'openai/gpt-4o-mini')
@@ -327,7 +382,7 @@ export default function ChatInterface() {
       setSelectedModel(defaultModel)
       selectedModelRef.current = defaultModel
     }
-  }, [models, selectedModel, pendingModelSelection, hasLoadedSession, isLoadingSessionData, messages.length])
+  }, [models, selectedModel, pendingModelSelection, hasLoadedSession, isLoadingSessionData, hasInitializedSession, messages.length])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })

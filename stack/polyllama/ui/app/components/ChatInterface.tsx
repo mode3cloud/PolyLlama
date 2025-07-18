@@ -267,7 +267,7 @@ export default function ChatInterface() {
       setIsLoadingSession(false)
       setHasInitializedSession(true)
     }
-  }, [hasInitializedSession, loadSession])
+  }, [hasInitializedSession])
 
   // Handle session selection
   const handleSessionSelect = useCallback((newSessionId: string) => {
@@ -284,7 +284,7 @@ export default function ChatInterface() {
     setHasLoadedSession(false) // Reset this flag before loading new session
     setSessionId(newSessionId)
     loadSession(newSessionId)
-  }, [sessionId, loadSession])
+  }, [sessionId])
 
   // Handle new session
   const handleNewSession = useCallback(() => {
@@ -302,7 +302,7 @@ export default function ChatInterface() {
     setHasInitializedToolSelection(false)
     // Re-initialize tool selection for new session
     setTimeout(() => initializeToolSelection(), 100)
-  }, [initializeToolSelection])
+  }, [])
 
 
 
@@ -346,13 +346,13 @@ export default function ChatInterface() {
       
       return () => clearTimeout(timeoutId)
     }
-  }, [toolSelection, sessionId, saveToolSelection])
+  }, [toolSelection, sessionId])
 
   useEffect(() => {
     fetchModels()
     initializeToolSelection()
     initializeSession()
-  }, [fetchModels, initializeToolSelection, initializeSession])
+  }, [])
 
   // Apply pending model selection when models are loaded
   useEffect(() => {
@@ -382,7 +382,7 @@ export default function ChatInterface() {
       setSelectedModel(defaultModel)
       selectedModelRef.current = defaultModel
     }
-  }, [models, selectedModel, pendingModelSelection, hasLoadedSession, isLoadingSessionData, hasInitializedSession, messages.length])
+  }, [models, pendingModelSelection, hasLoadedSession, isLoadingSessionData, hasInitializedSession, messages.length])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })

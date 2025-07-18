@@ -25,7 +25,16 @@ export default function LoadModelModal({
   onClose,
   onConfirm
 }: LoadModelModalProps) {
+  const formatNumber = (num: number): string => {
+    if (num >= 1000000) {
+      return `${(num / 1000000).toFixed(1)}M`
+    } else if (num >= 1000) {
+      return `${(num / 1000).toFixed(1)}K`
+    }
+    return num.toString()
+  }
   const [contextLength, setContextLength] = useState('')
+  const [contextPercentage, setContextPercentage] = useState('100')
   const [defaultContext, setDefaultContext] = useState<number | null>(null)
   const [loadingInstances, setLoadingInstances] = useState<Set<string>>(new Set())
   const [loadingErrors, setLoadingErrors] = useState<Record<string, string>>({})
@@ -72,7 +81,12 @@ export default function LoadModelModal({
     })
 
     try {
-      await onConfirm(modelName, instanceName, contextLength)
+      // Calculate actual context length based on percentage
+      const actualContextLength = defaultContext && contextPercentage !== '100' 
+        ? Math.floor((defaultContext * parseInt(contextPercentage)) / 100).toString()
+        : contextLength
+
+      await onConfirm(modelName, instanceName, actualContextLength)
     } catch (error) {
       setLoadingErrors(prev => ({
         ...prev,
@@ -90,6 +104,7 @@ export default function LoadModelModal({
   const handleClose = () => {
     if (loadingInstances.size === 0) {
       setContextLength('')
+      setContextPercentage('100')
       setDefaultContext(null)
       setLoadingErrors({})
       onClose()
@@ -132,16 +147,30 @@ export default function LoadModelModal({
         <div className="p-8">
           <div className="mb-6">
             <label className="block mb-2 font-medium text-gray-700 text-sm">Context Length (optional):</label>
-            <input
-              type="number"
+            <select
               className="w-full p-3 border border-gray-300 rounded-md text-sm disabled:bg-gray-50 disabled:cursor-not-allowed"
-              placeholder={defaultContext ? `Default: ${defaultContext}` : 'e.g., 32768'}
-              value={contextLength}
-              onChange={(e) => setContextLength(e.target.value)}
+              value={contextPercentage}
+              onChange={(e) => setContextPercentage(e.target.value)}
               disabled={hasAnyLoading}
-            />
+            >
+              <option value="100">
+                100% {defaultContext ? `(${formatNumber(defaultContext)})` : '(default)'}
+              </option>
+              {[90, 80, 70, 60, 50, 40, 30, 20, 10].map(percentage => (
+                <option key={percentage} value={percentage.toString()}>
+                  {percentage}% {defaultContext ? `(${formatNumber(Math.floor((defaultContext * percentage) / 100))})` : ''}
+                </option>
+              ))}
+              {defaultContext && Math.floor((defaultContext * 10) / 100) > 200000 && 
+                [9, 8, 7, 6, 5, 4, 3, 2, 1].map(percentage => (
+                  <option key={percentage} value={percentage.toString()}>
+                    {percentage}% {defaultContext ? `(${formatNumber(Math.floor((defaultContext * percentage) / 100))})` : ''}
+                  </option>
+                ))
+              }
+            </select>
             {defaultContext && (
-              <small className="block mt-1 text-gray-600 text-xs">Model default context: {defaultContext}</small>
+              <small className="block mt-1 text-gray-600 text-xs">Model default context: {formatNumber(defaultContext)}</small>
             )}
           </div>
 

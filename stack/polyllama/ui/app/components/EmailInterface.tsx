@@ -57,7 +57,8 @@ export default function EmailInterface() {
         }
 
         // Otherwise set default if no model selected
-        if (data.models?.length > 0 && !selectedModel) {
+        const currentModel = selectedModel || localStorage.getItem('email-selected-model')
+        if (data.models?.length > 0 && !currentModel) {
           // Default to first Ollama model if available
           const ollamaModel = data.models.find((m: ChatModel) => m.provider === 'ollama')
           const defaultModel = ollamaModel?.id || data.models[0].id
@@ -68,7 +69,7 @@ export default function EmailInterface() {
     } catch (error) {
       console.error('Failed to fetch models:', error)
     }
-  }, [selectedModel])
+  }, [])
 
   // Initialize Graph client
   const initGraphClient = useCallback(async () => {
@@ -145,9 +146,10 @@ export default function EmailInterface() {
       setEmails([])
       setNextPageToken(undefined)
       setCurrentPage(1)
+      // Call fetchEmails directly to avoid circular dependency
       fetchEmails()
     }
-  }, [selectedFolderId, fetchEmails])
+  }, [selectedFolderId])
 
   const handleSelectEmail = (emailId: string) => {
     setSelectedEmails(prev => {

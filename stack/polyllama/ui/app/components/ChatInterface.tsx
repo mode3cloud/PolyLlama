@@ -222,7 +222,7 @@ export default function ChatInterface() {
       setIsLoadingSession(false)
       setIsLoadingSessionData(false)
     }
-  }, [models, API_BASE_URL, initializeToolSelection])
+  }, [models, API_BASE_URL])
 
   // Initialize session - fetch most recent session or create new one
   const initializeSession = useCallback(async () => {

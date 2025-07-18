@@ -5,12 +5,12 @@ const LLM_PROXY_URL = process.env.LLM_PROXY_URL || 'http://llm-proxy:11435'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { sessionId: string } }
+  { params }: { params: Promise<{ sessionId: string }> }
 ) {
   try {
     await verifyAuth(request)
     
-    const sessionId = params.sessionId
+    const { sessionId } = await params
     
     const response = await fetch(`${LLM_PROXY_URL}/api/sessions/${sessionId}/tool-selection`, {
       method: 'GET',
@@ -40,12 +40,12 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { sessionId: string } }
+  { params }: { params: Promise<{ sessionId: string }> }
 ) {
   try {
     await verifyAuth(request)
     
-    const sessionId = params.sessionId
+    const { sessionId } = await params
     const body = await request.json()
     
     const response = await fetch(`${LLM_PROXY_URL}/api/sessions/${sessionId}/tool-selection`, {

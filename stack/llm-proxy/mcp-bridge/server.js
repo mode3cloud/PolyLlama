@@ -20,6 +20,103 @@ const mcpConnections = new Map();
 // Store initialization state and tool counts per server
 const serverState = new Map();
 
+// Beautiful console formatter for initialization results
+function displayInitializationResults(results) {
+  console.log('\n' + '═'.repeat(60));
+  console.log('🚀 MCP SERVERS INITIALIZATION RESULTS');
+  console.log('═'.repeat(60) + '\n');
+  
+  const servers = Object.entries(results);
+  const totalServers = servers.length;
+  const successfulServers = servers.filter(([_, success]) => success).length;
+  const failedServers = totalServers - successfulServers;
+  
+  // Create a formatted table
+  console.log('┌─────────────────────────┬──────────┬────────────────────┐');
+  console.log('│ Server Name             │ Status   │ Tools              │');
+  console.log('├─────────────────────────┼──────────┼────────────────────┤');
+  
+  for (const [name, success] of servers) {
+    const state = serverState.get(name);
+    const toolCount = state?.toolCount || 0;
+    const statusEmoji = success ? '✅' : '❌';
+    const statusText = success ? 'Online' : 'Failed';
+    const toolsText = success ? `${toolCount} tools` : state?.lastError || 'Error';
+    
+    // Pad strings for alignment
+    const paddedName = name.padEnd(23);
+    const paddedStatus = `${statusEmoji} ${statusText}`.padEnd(8);
+    const paddedTools = toolsText.padEnd(18);
+    
+    console.log(`│ ${paddedName} │ ${paddedStatus} │ ${paddedTools} │`);
+  }
+  
+  console.log('└─────────────────────────┴──────────┴────────────────────┘');
+  
+  // Summary statistics
+  console.log('\n📊 SUMMARY:');
+  console.log('─'.repeat(40));
+  console.log(`  Total Servers:      ${totalServers}`);
+  console.log(`  ✅ Successful:      ${successfulServers}`);
+  console.log(`  ❌ Failed:          ${failedServers}`);
+  console.log(`  Success Rate:       ${((successfulServers/totalServers) * 100).toFixed(1)}%`);
+  
+  // Show failed server details if any
+  if (failedServers > 0) {
+    console.log('\n⚠️  FAILED SERVERS:');
+    console.log('─'.repeat(40));
+    for (const [name, success] of servers) {
+      if (!success) {
+        const state = serverState.get(name);
+        console.log(`  • ${name}: ${state?.lastError || 'Unknown error'}`);
+      }
+    }
+  }
+  
+  // Show successful servers with tool details
+  if (successfulServers > 0) {
+    console.log('\n✨ READY SERVERS:');
+    console.log('─'.repeat(40));
+    for (const [name, success] of servers) {
+      if (success) {
+        const state = serverState.get(name);
+        const toolCount = state?.toolCount || 0;
+        const emoji = getServerEmoji(name);
+        console.log(`  ${emoji} ${name}: ${toolCount} tool${toolCount !== 1 ? 's' : ''} available`);
+      }
+    }
+  }
+  
+  console.log('\n' + '═'.repeat(60) + '\n');
+}
+
+// Get emoji for server based on name
+function getServerEmoji(serverName) {
+  const emojiMap = {
+    'github': '🐙',
+    'gitlab': '🦊',
+    'docker': '🐳',
+    'kubernetes': '☸️',
+    'aws': '☁️',
+    'azure': '☁️',
+    'google': '🔍',
+    'database': '🗄️',
+    'api': '🔌',
+    'web': '🌐',
+    'file': '📁',
+    'system': '⚙️',
+    'default': '🔧'
+  };
+  
+  const lowerName = serverName.toLowerCase();
+  for (const [key, emoji] of Object.entries(emojiMap)) {
+    if (lowerName.includes(key)) {
+      return emoji;
+    }
+  }
+  return emojiMap.default;
+}
+
 // Configuration constants
 const INIT_RETRY_DELAY = 2000; // 2 seconds
 const INIT_MAX_RETRIES = 3;
@@ -219,7 +316,7 @@ app.get('/status', async (req, res) => {
 });
 
 // List all available tools
-app.get('/tools', async (req, res) => {
+app.get('/tools', async (_, res) => {
   const allTools = [];
   const errors = {};
 
@@ -331,7 +428,7 @@ app.post('/execute', async (req, res) => {
 });
 
 // Reinitialize servers
-app.post('/reinitialize', async (req, res) => {
+app.post('/reinitialize', async (_, res) => {
   // Close existing connections
   for (const [name, connection] of mcpConnections.entries()) {
     try {
@@ -360,7 +457,7 @@ app.listen(PORT, async () => {
   
   // Initialize MCP servers on startup
   const results = await initializeAllServers();
-  console.log('MCP servers initialization results:', results);
+  displayInitializationResults(results);
   
   // Start periodic health checks
   healthCheckInterval = setInterval(() => {

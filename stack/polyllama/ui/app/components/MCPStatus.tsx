@@ -46,7 +46,6 @@ export default function MCPStatus({
   const [loading, setLoading] = useState(true)
   const [isExpanded, setIsExpanded] = useState(false)
   const [expandedServers, setExpandedServers] = useState<Set<string>>(new Set())
-  const [showToolSelection, setShowToolSelection] = useState(false)
 
   useEffect(() => {
     fetchMCPStatus()
@@ -247,102 +246,47 @@ export default function MCPStatus({
               )
             ) : 'Not configured'}
           </span>
-          {toolSelection && onToolSelectionChange && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation()
-                setShowToolSelection(!showToolSelection)
-              }}
-              className="text-xs bg-blue-600 hover:bg-blue-700 text-white px-2 py-1 rounded"
-            >
-              {showToolSelection ? 'Hide Selection' : 'Select Tools'}
-            </button>
-          )}
         </div>
         <svg className={`w-5 h-5 text-gray-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
         </svg>
       </div>
 
-      {/* Tool Selection UI */}
-      {showToolSelection && toolSelection && onToolSelectionChange && (
-        <div className="mt-4 p-4 bg-gray-700 rounded-lg">
-          <div className="flex items-center justify-between mb-3">
-            <h4 className="text-white font-medium">Tool Selection</h4>
-            <div className="flex gap-2">
-              <button
-                onClick={enableSmartSelection}
-                className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded"
-              >
-                Smart Select ({maxTools})
-              </button>
-              <button
-                onClick={() => onToolSelectionChange({})}
-                className="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded"
-              >
-                Clear All
-              </button>
-            </div>
+      {/* Global Tool Selection Controls */}
+      {toolSelection && onToolSelectionChange && (
+        <div className="mt-4 flex items-center justify-between">
+          <div className="flex gap-2">
+            <button
+              onClick={enableSmartSelection}
+              className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded"
+            >
+              Smart Select ({maxTools})
+            </button>
+            <button
+              onClick={() => onToolSelectionChange({})}
+              className="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded"
+            >
+              Clear All
+            </button>
           </div>
           
           {selectedToolsCount > maxTools && (
-            <div className="bg-red-900 text-red-200 text-xs p-2 rounded mb-3">
-              Warning: {selectedToolsCount} tools selected exceeds OpenAI limit of {maxTools}. 
-              Some tools may be ignored.
+            <div className="bg-red-900 text-red-200 text-xs px-2 py-1 rounded">
+              Warning: {selectedToolsCount} tools selected exceeds limit of {maxTools}
             </div>
           )}
-          
-          <div className="space-y-2 max-h-96 overflow-y-auto">
-            {servers.map((server) => (
-              <div key={server.name} className="bg-gray-800 rounded p-3">
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-white font-medium">{server.name}</span>
-                    <span className="text-gray-400 text-sm">
-                      ({server.tools.filter(tool => toolSelection[server.name]?.[tool.name]).length}/{server.tools.length})
-                    </span>
-                  </div>
-                  <div className="flex gap-1">
-                    <button
-                      onClick={() => toggleServerTools(server.name, true)}
-                      className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded"
-                    >
-                      All
-                    </button>
-                    <button
-                      onClick={() => toggleServerTools(server.name, false)}
-                      className="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded"
-                    >
-                      None
-                    </button>
-                  </div>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-1 max-h-32 overflow-y-auto">
-                  {server.tools.map((tool) => (
-                    <label key={tool.name} className="flex items-center gap-2 text-sm p-1 hover:bg-gray-700 rounded cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={toolSelection[server.name]?.[tool.name] || false}
-                        onChange={() => toggleToolSelection(server.name, tool.name)}
-                        className="w-3 h-3 text-blue-600 rounded focus:ring-blue-500"
-                      />
-                      <span className="text-white font-mono text-xs truncate" title={tool.name}>
-                        {tool.name}
-                      </span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
       )}
 
       {isExpanded && servers.length > 0 && (
         <div className="mt-4 space-y-2">
           {servers.map((server) => {
+            const selectedToolsInServer = toolSelection && toolSelection[server.name] 
+              ? server.tools.filter(tool => toolSelection[server.name]?.[tool.name]).length 
+              : 0
+            const canSelectTools = toolSelection && onToolSelectionChange && server.tools.length > 0
             const isServerExpanded = expandedServers.has(server.name)
+            
             return (
               <div key={server.name} className="bg-gray-700 rounded p-3">
                 <div 
@@ -355,6 +299,11 @@ export default function MCPStatus({
                       {server.connected && server.toolCount > 0 && (
                         <span className="text-gray-400 text-sm">({server.toolCount} tools)</span>
                       )}
+                      {canSelectTools && (
+                        <span className="text-blue-400 text-sm">
+                          {selectedToolsInServer}/{server.tools.length} selected
+                        </span>
+                      )}
                     </div>
                     <div className="text-gray-400 text-sm mt-1">
                       {server.command} {server.args.join(' ')}
@@ -365,12 +314,40 @@ export default function MCPStatus({
                       </div>
                     )}
                   </div>
+                  
                   <div className="flex items-center gap-2">
+                    {/* Server Actions */}
+                    {canSelectTools && (
+                      <div className="flex gap-1">
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            toggleServerTools(server.name, true)
+                          }}
+                          className="text-xs bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded"
+                        >
+                          All
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            toggleServerTools(server.name, false)
+                          }}
+                          className="text-xs bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded"
+                        >
+                          None
+                        </button>
+                      </div>
+                    )}
+                    
+                    {/* Status Badge */}
                     <span className={`text-xs px-2 py-1 rounded ${
                       server.connected ? 'bg-green-900 text-green-300' : 'bg-red-900 text-red-300'
                     }`}>
                       {server.connected ? 'Connected' : 'Disconnected'}
                     </span>
+                    
+                    {/* Expand/Collapse Toggle */}
                     {server.connected && server.toolCount > 0 && (
                       <svg className={`w-4 h-4 text-gray-400 transition-transform ${isServerExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
@@ -379,22 +356,29 @@ export default function MCPStatus({
                   </div>
                 </div>
                 
-                {/* Tool list */}
-                {isServerExpanded && server.tools.length > 0 && (
-                  <div className="mt-3 space-y-1 border-t border-gray-600 pt-3">
-                    <div className="text-gray-400 text-xs font-semibold mb-2">Available Tools:</div>
-                    <div className="max-h-60 overflow-y-auto space-y-1">
-                      {server.tools.map((tool, index) => (
-                        <div key={`${tool.name}-${index}`} className="bg-gray-800 rounded p-2">
-                          <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                              <div className="text-white text-sm font-mono">{tool.name}</div>
-                              {tool.description && (
-                                <div className="text-gray-400 text-xs mt-1">{tool.description}</div>
-                              )}
-                            </div>
+                {/* Tool Selection Interface - Only visible when server is expanded */}
+                {isServerExpanded && canSelectTools && server.tools.length > 0 && (
+                  <div className="mt-3 pt-3 border-t border-gray-600">
+                    <div className="grid grid-cols-2 gap-1 max-h-48 overflow-y-auto">
+                      {server.tools.map((tool) => (
+                        <label key={tool.name} className="flex items-center gap-2 text-sm p-2 hover:bg-gray-600 rounded cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={toolSelection[server.name]?.[tool.name] || false}
+                            onChange={() => toggleToolSelection(server.name, tool.name)}
+                            className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <span className="text-white font-mono text-xs truncate block" title={tool.name}>
+                              {tool.name}
+                            </span>
+                            {tool.description && (
+                              <span className="text-gray-400 text-xs truncate block" title={tool.description}>
+                                {tool.description}
+                              </span>
+                            )}
                           </div>
-                        </div>
+                        </label>
                       ))}
                     </div>
                   </div>

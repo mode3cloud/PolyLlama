@@ -70,6 +70,22 @@ services:
       - llm-proxy
       - redis
 
+  mcp-server:
+    build:
+      context: ../../stack/llm-proxy/mcp-server
+      dockerfile: Dockerfile
+    container_name: mcp-server
+    hostname: mcp-server
+    ports:
+      - "3001:3001"
+    env_file:
+      - ../../.env
+    environment:
+      - MCP_SERVER_PORT=3001
+      - OLLAMA_BASE_URL=http://router:11434
+    depends_on:
+      - router
+
   redis:
     image: redis:7-alpine
     container_name: redis

@@ -21,7 +21,6 @@ export default function Home() {
   const [gpuConfig, setGpuConfig] = useState<GPUConfig | null>(null)
   const [availableModels, setAvailableModels] = useState<Model[]>([])
   const [runningModels, setRunningModels] = useState<RunningModels>({})
-  const [modelContexts, setModelContexts] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [loadModalOpen, setLoadModalOpen] = useState(false)
   const [selectedModel, setSelectedModel] = useState<string>('')
@@ -64,12 +63,11 @@ export default function Home() {
       const nonCriticalPromises = [
         fetchWithAuth('/ui/api/tags'),
         fetchWithAuth('/ui/api/running-models'),
-        fetchWithAuth('/ui/api/model-mappings'),
-        fetchWithAuth('/ui/api/get-contexts')
+        fetchWithAuth('/ui/api/model-mappings')
       ]
 
       const [statusRes, gpuConfigRes, gpuMetricsRes] = await Promise.all(criticalPromises)
-      const [modelsRes, runningRes, mappingsRes, contextsRes] = await Promise.all(nonCriticalPromises)
+      const [modelsRes, runningRes, mappingsRes] = await Promise.all(nonCriticalPromises)
 
       // Check if any critical endpoints failed
       const criticalFailed = !statusRes.ok || !gpuConfigRes.ok || !gpuMetricsRes.ok
@@ -106,35 +104,6 @@ export default function Home() {
         await mappingsRes.json()
       }
 
-      let currentContexts: Record<string, number> = {}
-      if (contextsRes.ok) {
-        const data = await contextsRes.json()
-        currentContexts = data.contexts || {}
-        setModelContexts(currentContexts)
-      }
-
-      // Sync contexts if needed
-      const runningModelNames = Object.keys(runningModelsData)
-      const hasRunningModels = runningModelNames.length > 0
-      const hasMissingContexts = runningModelNames.some(model => !currentContexts[model])
-
-      if (hasRunningModels && hasMissingContexts) {
-        try {
-          const syncResponse = await fetchWithAuth('/ui/api/sync-contexts')
-          if (syncResponse.ok) {
-            const syncData = await syncResponse.json()
-            console.log(`Synced context sizes for ${syncData.synced_count} models`)
-            // Re-fetch contexts after sync
-            const contextsRes2 = await fetchWithAuth('/ui/api/get-contexts')
-            if (contextsRes2.ok) {
-              const data = await contextsRes2.json()
-              setModelContexts(data.contexts || {})
-            }
-          }
-        } catch (error) {
-          console.error('Error syncing contexts:', error)
-        }
-      }
 
       setLoading(false)
       
@@ -260,14 +229,12 @@ export default function Home() {
           instances={instances}
           instanceStatuses={instanceStatuses}
           runningModels={runningModels}
-          modelContexts={modelContexts}
           onRefresh={refreshData}
         />
 
         <ModelManagement
           availableModels={availableModels}
           runningModels={runningModels}
-          modelContexts={modelContexts}
           instances={instances}
           instanceStatuses={instanceStatuses}
           onLoadModel={handleLoadModel}
@@ -284,13 +251,10 @@ export default function Home() {
         gpuConfig={gpuConfig}
         runningModels={runningModels}
         onClose={() => setLoadModalOpen(false)}
-        onConfirm={async (modelName, instanceName, contextLength) => {
+        onConfirm={async (modelName, instanceName) => {
           // Handle model loading
           try {
-            const payload: { model: string; prompt: string; stream: boolean; options?: { num_ctx: number } } = { model: modelName, prompt: "", stream: false }
-            if (contextLength) {
-              payload.options = { num_ctx: parseInt(contextLength) }
-            }
+            const payload = { model: modelName, prompt: "", stream: false }
 
             const response = await fetchWithAuth('/ui/api/generate', {
               method: 'POST',
@@ -302,22 +266,6 @@ export default function Home() {
             })
 
             if (response.ok) {
-              // Store context if specified
-              if (contextLength) {
-                try {
-                  await fetch('/ui/api/store-context', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      model: modelName,
-                      num_ctx: parseInt(contextLength)
-                    })
-                  })
-                } catch (error) {
-                  console.error('Failed to store context length:', error)
-                }
-              }
-
               setLoadModalOpen(false)
               setTimeout(refreshData, 2000)
               // TODO: Add success toast

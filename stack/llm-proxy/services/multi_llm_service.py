@@ -193,6 +193,7 @@ class MultiLLMService:
             max_tokens: Maximum tokens to generate
             tool_manager: Tool manager for function calling
             attachments: List of file paths to process
+            tool_selection: Dict of tool selection filters
             **kwargs: Additional arguments passed to LiteLLM
 
         Yields:
@@ -1228,6 +1229,7 @@ class MultiLLMService:
 
             # Always allow these common parameters
             always_allowed = {"api_base", "api_key", "api_version", "extra_headers"}
+            
             supported_set = set(supported_params) | always_allowed
 
             filtered = {k: v for k, v in kwargs.items() if k in supported_set}

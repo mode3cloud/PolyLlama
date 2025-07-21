@@ -12,7 +12,7 @@ interface LoadModelModalProps {
   gpuConfig: GPUConfig | null;
   runningModels: RunningModels;
   onClose: () => void;
-  onConfirm: (modelName: string, instanceName: string, contextLength?: string) => Promise<void>;
+  onConfirm: (modelName: string, instanceName: string) => Promise<void>;
 }
 
 export default function LoadModelModal({
@@ -33,44 +33,9 @@ export default function LoadModelModal({
     }
     return num.toString()
   }
-  const [contextLength, setContextLength] = useState('')
-  const [contextPercentage, setContextPercentage] = useState('100')
-  const [defaultContext, setDefaultContext] = useState<number | null>(null)
   const [loadingInstances, setLoadingInstances] = useState<Set<string>>(new Set())
   const [loadingErrors, setLoadingErrors] = useState<Record<string, string>>({})
 
-  const fetchModelDetails = async () => {
-    try {
-      const response = await fetch('/ui/api/model-details', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: modelName })
-      })
-
-      if (response.ok) {
-        const data = await response.json()
-
-        // Extract default context size from model info
-        if (data.model_info && data.details && data.details.family) {
-          const contextKey = data.details.family + '.context_length'
-          const contextValue = data.model_info[contextKey]
-          if (contextValue) {
-            setDefaultContext(contextValue)
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching model details:', error)
-    }
-  }
-
-  useEffect(() => {
-    if (isOpen && modelName) {
-      // Fetch model details to get default context
-      fetchModelDetails()
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen, modelName])
 
   const handleInstanceLoad = async (instanceName: string) => {
     setLoadingInstances(prev => new Set([...prev, instanceName]))
@@ -81,12 +46,7 @@ export default function LoadModelModal({
     })
 
     try {
-      // Calculate actual context length based on percentage
-      const actualContextLength = defaultContext && contextPercentage !== '100' 
-        ? Math.floor((defaultContext * parseInt(contextPercentage)) / 100).toString()
-        : contextLength
-
-      await onConfirm(modelName, instanceName, actualContextLength)
+      await onConfirm(modelName, instanceName)
     } catch (error) {
       setLoadingErrors(prev => ({
         ...prev,
@@ -103,9 +63,6 @@ export default function LoadModelModal({
 
   const handleClose = () => {
     if (loadingInstances.size === 0) {
-      setContextLength('')
-      setContextPercentage('100')
-      setDefaultContext(null)
       setLoadingErrors({})
       onClose()
     }
@@ -145,34 +102,6 @@ export default function LoadModelModal({
         </div>
 
         <div className="p-8">
-          <div className="mb-6">
-            <label className="block mb-2 font-medium text-gray-700 text-sm">Context Length (optional):</label>
-            <select
-              className="w-full p-3 border border-gray-300 rounded-md text-sm disabled:bg-gray-50 disabled:cursor-not-allowed"
-              value={contextPercentage}
-              onChange={(e) => setContextPercentage(e.target.value)}
-              disabled={hasAnyLoading}
-            >
-              <option value="100">
-                100% {defaultContext ? `(${formatNumber(defaultContext)})` : '(default)'}
-              </option>
-              {[90, 80, 70, 60, 50, 40, 30, 20, 10].map(percentage => (
-                <option key={percentage} value={percentage.toString()}>
-                  {percentage}% {defaultContext ? `(${formatNumber(Math.floor((defaultContext * percentage) / 100))})` : ''}
-                </option>
-              ))}
-              {defaultContext && Math.floor((defaultContext * 10) / 100) > 200000 && 
-                [9, 8, 7, 6, 5, 4, 3, 2, 1].map(percentage => (
-                  <option key={percentage} value={percentage.toString()}>
-                    {percentage}% {defaultContext ? `(${formatNumber(Math.floor((defaultContext * percentage) / 100))})` : ''}
-                  </option>
-                ))
-              }
-            </select>
-            {defaultContext && (
-              <small className="block mt-1 text-gray-600 text-xs">Model default context: {formatNumber(defaultContext)}</small>
-            )}
-          </div>
 
           <div className="mb-0">
             <label className="block mb-3 font-medium text-gray-700 text-sm">

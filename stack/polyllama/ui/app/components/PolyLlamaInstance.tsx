@@ -26,7 +26,6 @@ interface PolyLlamaInstanceProps {
   instance: Instance;
   status: { status: string; name: string };
   runningModels: RunningModels;
-  modelContexts: Record<string, number>;
   gpuGroupName?: string;
   gpuDevices?: GPUDeviceInfo[];
   gpuMetrics?: GPUMetrics[];
@@ -38,7 +37,6 @@ export default function PolyLlamaInstance({
   instance,
   status,
   runningModels,
-  modelContexts,
   gpuGroupName,
   gpuDevices,
   gpuMetrics,
@@ -84,12 +82,10 @@ export default function PolyLlamaInstance({
             <div className="text-sm text-gray-600 mb-2 font-medium">Loaded Models</div>
             {instanceModels.length > 0 ? (
               instanceModels.map(model => {
-                const contextInfo = modelContexts[model] ? ` (ctx: ${modelContexts[model]})` : ''
                 return (
                   <div key={model} className="inline-flex items-center gap-1 mr-2 mb-2">
                     <span className="inline-block bg-success text-white px-3 py-1.5 rounded-md text-xs font-medium">
                       {model}
-                      <small className="text-white/80 ml-1">{contextInfo}</small>
                     </span>
                     <button
                       className="bg-danger text-white rounded-full w-[18px] h-[18px] text-xs leading-none cursor-pointer flex items-center justify-center transition-all opacity-80 hover:opacity-100 hover:scale-110"

@@ -28,6 +28,8 @@ export interface Model {
   size: number;
   digest: string;
   modified_at: string;
+  supports_vision?: boolean;
+  supports_tools?: boolean;
   details?: {
     format?: string;
     family?: string;

@@ -29,7 +29,6 @@ interface FlowChartProps {
   instances: Instance[];
   instanceStatuses: Record<string, { status: string; name: string }>;
   runningModels: RunningModels;
-  modelContexts: Record<string, number>;
   onRefresh: () => void;
 }
 
@@ -44,7 +43,7 @@ interface GPUConfig {
   instance_mapping: Record<string, number>;
 }
 
-export default function FlowChart({ instances, instanceStatuses, runningModels, modelContexts, onRefresh }: FlowChartProps) {
+export default function FlowChart({ instances, instanceStatuses, runningModels, onRefresh }: FlowChartProps) {
   const [gpuConfig, setGpuConfig] = useState<GPUConfig | null>(null)
   const { metrics } = useGPUMetrics() as { metrics: Record<string, { type: string; cpu_metrics?: unknown; devices?: unknown }>; loading: boolean; error: string | null }
 
@@ -124,7 +123,6 @@ export default function FlowChart({ instances, instanceStatuses, runningModels, 
                 instance={instance}
                 status={status}
                 runningModels={runningModels}
-                modelContexts={modelContexts}
                 gpuGroupName={groupName !== 'CPU-only' ? groupName : undefined}
                 gpuDevices={devices}
                 gpuMetrics={gpuMetrics}

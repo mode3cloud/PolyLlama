@@ -7,22 +7,22 @@ interface ModelRowProps {
   model: Model;
   isLoaded: boolean;
   loadedOn: string[];
-  contextSize?: number;
   isExpanded: boolean;
   onToggleExpand: () => void;
   onLoad: () => void;
   onUnload: () => void;
+  onDelete: () => void;
 }
 
 export default function ModelRow({
   model,
   isLoaded,
   loadedOn,
-  contextSize,
   isExpanded,
   onToggleExpand,
   onLoad,
-  onUnload
+  onUnload,
+  onDelete
 }: ModelRowProps) {
   interface ModelDetails {
     model_info?: Record<string, unknown>
@@ -87,7 +87,11 @@ export default function ModelRow({
                 <span>{isExpanded ? '▼' : '▶'}</span>
               </button>
               <div>
-                <div className="font-medium text-gray-900 text-sm">{model.name}</div>
+                <div className="font-medium text-gray-900 text-sm flex items-center gap-1">
+                  {model.name}
+                  {model.supports_vision && <span title="Supports vision/images">👁️</span>}
+                  {model.supports_tools && <span title="Supports tools/functions">⛏️</span>}
+                </div>
                 <div className="text-gray-600 text-xs">{formatSize(model.size)}</div>
               </div>
             </div>
@@ -96,14 +100,13 @@ export default function ModelRow({
                 <>
                   <span className="inline-block bg-success text-white px-3 py-1.5 rounded-md text-xs font-medium">
                     Loaded on {loadedOn.join(', ')}
-                    {contextSize && <small className="text-white/80"> (ctx: {contextSize})</small>}
                   </span>
                 </>
               ) : (
                 <span className="inline-block bg-gray-100 text-gray-700 px-3 py-1.5 rounded-md text-xs font-medium">Available</span>
               )}
             </div>
-            <div className="flex-shrink-0">
+            <div className="flex-shrink-0 flex items-center gap-2">
               {isLoaded ? (
                 <button
                   className="px-3 py-1.5 rounded-md border-none text-xs font-medium cursor-pointer transition-all bg-danger text-white hover:brightness-90 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -119,6 +122,13 @@ export default function ModelRow({
                   Load
                 </button>
               )}
+              <button
+                className="px-3 py-1.5 rounded-md border-none text-xs font-medium cursor-pointer transition-all bg-red-600 text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                onClick={onDelete}
+                title={`Delete ${model.name}`}
+              >
+                Delete
+              </button>
             </div>
           </div>
 

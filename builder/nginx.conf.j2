@@ -376,27 +376,6 @@ server {
                 ngx.var.target_instance = target_instance_header
                 ngx.ctx.target_instance = target_instance_header
                 
-                -- For UI load requests, store the context length if provided
-                local body_data = ngx.req.get_body_data()
-                if body_data then
-                    local success, body = pcall(cjson.decode, body_data)
-                    if success and body then
-                        local model_name = body.model
-                        local num_ctx = nil
-                        
-                        if body.options and body.options.num_ctx then
-                            num_ctx = tonumber(body.options.num_ctx)
-                        elseif body.num_ctx then
-                            num_ctx = tonumber(body.num_ctx)
-                        end
-                        
-                        if model_name and num_ctx and num_ctx > 0 then
-                            -- Store the context length in shared memory
-                            ngx.shared.model_mappings:set("ctx:" .. model_name, num_ctx)
-                            ngx.log(ngx.INFO, "Stored context length " .. num_ctx .. " for model " .. model_name .. " during load")
-                        end
-                    end
-                end
                 
                 return -- Skip the normal routing logic
             end
@@ -603,9 +582,6 @@ server {
             -- Force reading the request body
             ngx.req.read_body()
             
-            -- Log the request context (num_ctx) for all requests
-            local model_router = require "model_router"
-            model_router.log_request_context()
             
             -- Check if there's a specific target instance header (for UI load buttons)
             local target_instance_header = ngx.req.get_headers()["X-Target-Instance"]
@@ -613,114 +589,9 @@ server {
                 ngx.log(ngx.INFO, "X-Target-Instance header found: " .. target_instance_header)
                 ngx.var.target_instance = target_instance_header
                 ngx.ctx.target_instance = target_instance_header
-                -- For UI load requests, preserve num_ctx for initial model loading
-                ngx.ctx.preserve_num_ctx = true
                 return -- Skip the normal routing logic
             end
             
-            -- For regular API requests (not from UI), handle num_ctx intelligently
-            local body_data = ngx.req.get_body_data()
-            if body_data then
-                local cjson = require "cjson"
-                local success, body = pcall(cjson.decode, body_data)
-                if success and body then
-                    local model_name = body.model
-                    if model_name then
-                        local model_router = require "model_router"
-                        local http = require "resty.http"
-                        
-                        -- Handle incoming num_ctx from regular requests
-                        local incoming_num_ctx = nil
-                        if body.options and body.options.num_ctx then
-                            incoming_num_ctx = tonumber(body.options.num_ctx)
-                            -- For UI requests with X-Target-Instance, preserve the num_ctx
-                            if ngx.req.get_headers()["X-Target-Instance"] then
-                                ngx.log(ngx.INFO, "Preserving num_ctx: " .. incoming_num_ctx .. " for UI request")
-                                -- Store it immediately
-                                ngx.shared.model_mappings:set("ctx:" .. model_name, incoming_num_ctx)
-                            else
-                                -- Strip it for non-UI requests
-                                body.options.num_ctx = nil
-                                ngx.log(ngx.INFO, "Stripped incoming num_ctx: " .. incoming_num_ctx .. " for model: " .. model_name)
-                            end
-                        end
-                        
-                        -- Check if model is currently running on any instance
-                        local running_models = model_router.get_running_models()
-                        local model_is_loaded = running_models[model_name] and #running_models[model_name] > 0
-                        
-                        local replacement_num_ctx = nil
-                        
-                        if model_is_loaded then
-                            -- Model is loaded - try to get the current loaded context size
-                            -- We'll store this in shared memory when models are loaded
-                            local loaded_ctx = ngx.shared.model_mappings:get("ctx:" .. model_name)
-                            if loaded_ctx then
-                                replacement_num_ctx = tonumber(loaded_ctx)
-                                ngx.log(ngx.INFO, "Using loaded context size: " .. replacement_num_ctx .. " for model: " .. model_name)
-                            else
-                                ngx.log(ngx.INFO, "Model " .. model_name .. " is loaded but no stored context size found")
-                            end
-                        else
-                            -- Model is not loaded - get default from model config
-                            ngx.log(ngx.INFO, "Model " .. model_name .. " is not loaded, fetching default context from model info")
-                            -- Try to get model details to extract default context length
-                            local httpc = http.new()
-                            httpc:set_timeout(5000)
-                            
-                            local headers = { ["Content-Type"] = "application/json" }
-                            
-                            -- Add API key if configured
-                            local api_key = ngx.shared.env_vars:get("POLYLLAMA_API_KEY")
-                            if api_key and api_key ~= "" then
-                                headers["Authorization"] = "Bearer " .. api_key
-                            end
-                            
-                            local res, err = httpc:request_uri("http://polyllama1:11434/api/show", {
-                                method = "POST",
-                                body = cjson.encode({ model = model_name }),
-                                headers = headers
-                            })
-                            
-                            if res and res.status == 200 then
-                                local model_success, model_data = pcall(cjson.decode, res.body)
-                                if model_success and model_data and model_data.model_info and model_data.details and model_data.details.family then
-                                    local context_key = model_data.details.family .. ".context_length"
-                                    local default_ctx = model_data.model_info[context_key]
-                                    if default_ctx then
-                                        replacement_num_ctx = tonumber(default_ctx)
-                                        ngx.log(ngx.INFO, "Using model default context size: " .. replacement_num_ctx .. " for model: " .. model_name)
-                                    end
-                                end
-                            end
-                        end
-                        
-                        -- Apply the replacement num_ctx if we found one
-                        if replacement_num_ctx and replacement_num_ctx > 0 then
-                            if not body.options then
-                                body.options = {}
-                            end
-                            body.options.num_ctx = replacement_num_ctx
-                            ngx.log(ngx.INFO, "Set num_ctx to: " .. replacement_num_ctx .. " for model: " .. model_name)
-                            
-                            -- Store the context if model is not loaded (will be loaded now)
-                            if not model_is_loaded then
-                                ngx.shared.model_mappings:set("ctx:" .. model_name, replacement_num_ctx)
-                                ngx.log(ngx.INFO, "Stored context length " .. replacement_num_ctx .. " for model " .. model_name .. " (will be loaded)")
-                            end
-                        else
-                            -- Clean up empty options if no replacement was made
-                            if body.options and next(body.options) == nil then
-                                body.options = nil
-                            end
-                        end
-                        
-                        -- Update the request body
-                        local new_body = cjson.encode(body)
-                        ngx.req.set_body_data(new_body)
-                    end
-                end
-            end
             
             local model_router = require "model_router"
             local model_name = model_router.extract_model_name()
@@ -824,86 +695,6 @@ server {
     }
     
     
-    # Custom endpoint for UI to get stored context lengths
-    location /api/polyllama/get-contexts {
-        default_type application/json;
-        content_by_lua_block {
-            check_api_auth()
-            local cjson = require "cjson"
-            
-            local contexts = {}
-            local keys = ngx.shared.model_mappings:get_keys() or {}
-            
-            for _, key in ipairs(keys) do
-                -- Look for context keys
-                if string.match(key, "^ctx:") then
-                    local model_name = string.sub(key, 5)  -- Remove "ctx:" prefix
-                    local ctx_value = ngx.shared.model_mappings:get(key)
-                    if ctx_value then
-                        contexts[model_name] = tonumber(ctx_value)
-                    end
-                end
-            end
-            
-            ngx.say(cjson.encode({ 
-                contexts = contexts,
-                timestamp = ngx.time()
-            }))
-        }
-    }
-    
-    # Custom endpoint for UI to store context length for loaded models
-    location /api/polyllama/store-context {
-        default_type application/json;
-        content_by_lua_block {
-            check_api_auth()
-            local cjson = require "cjson"
-            
-            -- Read the request body
-            ngx.req.read_body()
-            local body_data = ngx.req.get_body_data()
-            
-            if not body_data then
-                ngx.status = 400
-                ngx.say(cjson.encode({ error = "Missing request body" }))
-                return
-            end
-            
-            local success, body = pcall(cjson.decode, body_data)
-            if not success or not body or not body.model or not body.num_ctx then
-                ngx.status = 400
-                ngx.say(cjson.encode({ error = "Invalid request body or missing model/num_ctx" }))
-                return
-            end
-            
-            local model_name = body.model
-            local num_ctx = tonumber(body.num_ctx)
-            
-            if not num_ctx or num_ctx <= 0 then
-                ngx.status = 400
-                ngx.say(cjson.encode({ error = "Invalid num_ctx value" }))
-                return
-            end
-            
-            -- Store the context length in shared memory
-            local success, err = ngx.shared.model_mappings:set("ctx:" .. model_name, num_ctx)
-            
-            if success then
-                ngx.log(ngx.INFO, "Stored context length " .. num_ctx .. " for model " .. model_name)
-                ngx.say(cjson.encode({ 
-                    success = true, 
-                    model = model_name, 
-                    num_ctx = num_ctx,
-                    timestamp = ngx.time()
-                }))
-            else
-                ngx.log(ngx.ERR, "Failed to store context length for model " .. model_name .. ": " .. (err or "unknown error"))
-                ngx.status = 500
-                ngx.say(cjson.encode({ error = "Failed to store context length" }))
-            end
-        }
-    }
-
     # Custom endpoint for UI to get instance count
     location /api/polyllama/instance-count {
         default_type application/json;
@@ -1220,6 +1011,108 @@ server {
         }
     }
     
+    location /api/create {
+        set $target_instance "";
+        
+        # Check for X-Target-Instance header
+        access_by_lua_block {
+            check_api_auth()
+            local target = ngx.req.get_headers()["X-Target-Instance"]
+            if target then
+                ngx.var.target_instance = target
+            else
+                -- Default to first available instance
+                ngx.var.target_instance = "polyllama1"
+            end
+        }
+        
+        # Proxy to target instance
+        content_by_lua_block {
+            local http = require "resty.http"
+            local target_instance = ngx.var.target_instance
+            
+            -- Read request body
+            ngx.req.read_body()
+            local body_data = ngx.req.get_body_data()
+            
+            -- Create HTTP client
+            local httpc = http.new()
+            httpc:set_timeout(300000)  -- 5 minute timeout for model creation
+            
+            -- Make request to target instance
+            local res, err = httpc:request_uri("http://" .. target_instance .. ":11434/api/create", {
+                method = "POST",
+                body = body_data,
+                headers = {
+                    ["Content-Type"] = "application/json"
+                }
+            })
+            
+            if not res then
+                ngx.status = 502
+                ngx.header["Content-Type"] = "application/json"
+                ngx.say('{"error": "Failed to proxy to ' .. target_instance .. ': ' .. (err or "unknown error") .. '"}')
+                return ngx.exit(502)
+            end
+            
+            -- Return the response from the target instance
+            ngx.status = res.status
+            ngx.header["Content-Type"] = "application/json"
+            ngx.say(res.body)
+        }
+    }
+    
+    location /api/delete {
+        set $target_instance "";
+        
+        # Check for X-Target-Instance header
+        access_by_lua_block {
+            check_api_auth()
+            local target = ngx.req.get_headers()["X-Target-Instance"]
+            if target then
+                ngx.var.target_instance = target
+            else
+                -- Default to first available instance
+                ngx.var.target_instance = "polyllama1"
+            end
+        }
+        
+        # Proxy to target instance
+        content_by_lua_block {
+            local http = require "resty.http"
+            local target_instance = ngx.var.target_instance
+            
+            -- Read request body
+            ngx.req.read_body()
+            local body_data = ngx.req.get_body_data()
+            
+            -- Create HTTP client
+            local httpc = http.new()
+            httpc:set_timeout(30000)  -- 30 second timeout for model deletion
+            
+            -- Make request to target instance
+            local res, err = httpc:request_uri("http://" .. target_instance .. ":11434/api/delete", {
+                method = "DELETE",
+                body = body_data,
+                headers = {
+                    ["Content-Type"] = "application/json"
+                }
+            })
+            
+            if not res then
+                ngx.status = 502
+                ngx.header["Content-Type"] = "application/json"
+                ngx.say('{"error": "Failed to proxy to ' .. target_instance .. ': ' .. (err or "unknown error") .. '"}')
+                return ngx.exit(502)
+            end
+            
+            -- Return the response from the target instance
+            ngx.status = res.status
+            ngx.header["Content-Type"] = "application/json"
+            ngx.say(res.body)
+        }
+    }
+    
     location /api/ps {
         set $target_instance "";
         
@@ -1287,8 +1180,8 @@ server {
             -- Get model mappings with safe error handling
             local keys = ngx.shared.model_mappings:get_keys() or {}
             for _, key in ipairs(keys) do
-                -- Skip lock keys
-                if not string.match(key, "^loading:") then
+                -- Skip lock keys and context keys
+                if not string.match(key, "^loading:") and not string.match(key, "^ctx:") then
                     local mapping_info = model_router.get_model_mapping_info(key)
                     if mapping_info then
                         result[key] = mapping_info
@@ -1352,79 +1245,6 @@ server {
         }
     }
     
-    # Endpoint to sync context sizes from running models
-    location /api/polyllama/sync-contexts {
-        default_type application/json;
-        content_by_lua_block {
-            check_api_auth()
-            local cjson = require "cjson"
-            local model_router = require "model_router"
-            local http = require "resty.http"
-            
-            -- Get running models with details
-            local running_models, model_details = model_router.get_running_models()
-            local synced_count = 0
-            local contexts = {}
-            
-            -- For each running model, get its details and extract context
-            for model_name, instances in pairs(running_models) do
-                if #instances > 0 then
-                    -- Use the first instance to get model details
-                    local instance = instances[1]
-                    local httpc = http.new()
-                    httpc:set_timeout(5000)
-                    
-                    local headers = { ["Content-Type"] = "application/json" }
-                    
-                    -- Add API key if configured
-                    local api_key = ngx.shared.env_vars:get("POLYLLAMA_API_KEY")
-                    if api_key and api_key ~= "" then
-                        headers["Authorization"] = "Bearer " .. api_key
-                    end
-                    
-                    local res, err = httpc:request_uri("http://" .. instance .. ":11434/api/show", {
-                        method = "POST",
-                        body = cjson.encode({ model = model_name }),
-                        headers = headers
-                    })
-                    
-                    if res and res.status == 200 then
-                        local success, data = pcall(cjson.decode, res.body)
-                        if success and data then
-                            -- Extract context from model info
-                            local context_size = nil
-                            
-                            -- Check if there's a specific num_ctx in model_info
-                            if data.model_info then
-                                -- Look for various possible locations of context info
-                                if data.model_info["general.context_length"] then
-                                    context_size = tonumber(data.model_info["general.context_length"])
-                                elseif data.details and data.details.family and data.model_info[data.details.family .. ".context_length"] then
-                                    context_size = tonumber(data.model_info[data.details.family .. ".context_length"])
-                                end
-                            end
-                            
-                            -- If we found a context size, store it
-                            if context_size and context_size > 0 then
-                                ngx.shared.model_mappings:set("ctx:" .. model_name, context_size)
-                                contexts[model_name] = context_size
-                                synced_count = synced_count + 1
-                                ngx.log(ngx.INFO, "Synced context size " .. context_size .. " for model " .. model_name)
-                            end
-                        end
-                    end
-                end
-            end
-            
-            -- Output result
-            ngx.say(cjson.encode({ 
-                success = true,
-                synced_count = synced_count,
-                contexts = contexts,
-                timestamp = ngx.time()
-            }))
-        }
-    }
     
     # Custom endpoint for UI to search models from ollama.com
     location /api/polyllama/search-models {

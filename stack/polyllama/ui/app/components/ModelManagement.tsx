@@ -5,11 +5,12 @@ import { Model, RunningModels, Instance, InstanceStatus } from '../types'
 import ModelRow from './ModelRow'
 import ModelBrowseModal from './ModelBrowseModal'
 import ModelPullManager from './ModelPullManager'
+import ModelCreateModal from './ModelCreateModal'
+import DeleteModelModal from './DeleteModelModal'
 
 interface ModelManagementProps {
   availableModels: Model[];
   runningModels: RunningModels;
-  modelContexts: Record<string, number>;
   instances: Instance[];
   instanceStatuses: Record<string, InstanceStatus>;
   onLoadModel: (modelName: string) => void;
@@ -20,7 +21,6 @@ interface ModelManagementProps {
 export default function ModelManagement({
   availableModels,
   runningModels,
-  modelContexts,
   instances,
   instanceStatuses,
   onLoadModel,
@@ -31,6 +31,9 @@ export default function ModelManagement({
   const [currentFilter, setCurrentFilter] = useState<'all' | 'loaded' | 'available'>('all')
   const [expandedModels, setExpandedModels] = useState<Set<string>>(new Set())
   const [browseModalOpen, setBrowseModalOpen] = useState(false)
+  const [createModalOpen, setCreateModalOpen] = useState(false)
+  const [deleteModalOpen, setDeleteModalOpen] = useState(false)
+  const [modelToDelete, setModelToDelete] = useState<string>('')
   const [pullManagerVisible, setPullManagerVisible] = useState(false)
   const [activePullIds, setActivePullIds] = useState<string[]>([])
 
@@ -86,6 +89,40 @@ export default function ModelManagement({
     setBrowseModalOpen(false)
   }, [])
 
+  // Open create modal
+  const handleOpenCreate = useCallback(() => {
+    setCreateModalOpen(true)
+  }, [])
+
+  // Close create modal
+  const handleCloseCreate = useCallback(() => {
+    setCreateModalOpen(false)
+  }, [])
+
+  // Handle model created
+  const handleModelCreated = useCallback(() => {
+    onRefresh()
+    // TODO: Add toast notification for model created
+  }, [onRefresh])
+
+  // Open delete modal
+  const handleOpenDelete = useCallback((modelName: string) => {
+    setModelToDelete(modelName)
+    setDeleteModalOpen(true)
+  }, [])
+
+  // Close delete modal
+  const handleCloseDelete = useCallback(() => {
+    setDeleteModalOpen(false)
+    setModelToDelete('')
+  }, [])
+
+  // Handle model deleted
+  const handleModelDeleted = useCallback(() => {
+    onRefresh()
+    // TODO: Add toast notification for model deleted
+  }, [onRefresh])
+
   // Close pull manager
   const handleClosePullManager = useCallback(() => {
     setPullManagerVisible(false)
@@ -95,12 +132,20 @@ export default function ModelManagement({
     <section className="my-8">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-2xl font-semibold text-gray-900">Model Management</h2>
-        <button
-          onClick={handleOpenBrowse}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
-        >
-          Browse Models
-        </button>
+        <div className="flex gap-3">
+          <button
+            onClick={handleOpenCreate}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-medium"
+          >
+            Create Model
+          </button>
+          <button
+            onClick={handleOpenBrowse}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium"
+          >
+            Browse Models
+          </button>
+        </div>
       </div>
       <div className="bg-white rounded-xl p-8 shadow-sm">
         <div className="flex gap-4 mb-6 flex-wrap">
@@ -152,17 +197,24 @@ export default function ModelManagement({
                   model={model}
                   isLoaded={runningModels.hasOwnProperty(model.name)}
                   loadedOn={runningModels[model.name] || []}
-                  contextSize={modelContexts[model.name]}
                   isExpanded={expandedModels.has(model.name)}
                   onToggleExpand={() => handleToggleExpand(model.name)}
                   onLoad={() => onLoadModel(model.name)}
                   onUnload={() => onUnloadModel(model.name)}
+                  onDelete={() => handleOpenDelete(model.name)}
                 />
               ))
             )}
           </tbody>
         </table>
       </div>
+
+      {/* Create Model Modal */}
+      <ModelCreateModal
+        isOpen={createModalOpen}
+        onClose={handleCloseCreate}
+        onCreated={handleModelCreated}
+      />
 
       {/* Browse Models Modal */}
       <ModelBrowseModal
@@ -179,6 +231,14 @@ export default function ModelManagement({
         onClose={handleClosePullManager}
         activePullIds={activePullIds}
         onPullCompleted={handlePullCompleted}
+      />
+
+      {/* Delete Model Modal */}
+      <DeleteModelModal
+        isOpen={deleteModalOpen}
+        modelName={modelToDelete}
+        onClose={handleCloseDelete}
+        onDeleted={handleModelDeleted}
       />
     </section>
   )

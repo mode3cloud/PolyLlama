@@ -1428,4 +1428,89 @@ server {
         }
     }
 
+    # MCP Server SSE endpoint - protected with API key authentication
+    # Handles both GET (SSE) and POST (MCP messages)
+    location /sse {
+        # Require API key authentication
+        access_by_lua_block {
+            check_api_auth()
+        }
+        
+        # Proxy to MCP server with SSE-specific configuration
+        proxy_pass http://mcp-server:3001/sse;
+        proxy_http_version 1.1;
+        
+        # Handle both GET and POST methods
+        proxy_method $request_method;
+        
+        # SSE requires these specific settings for GET requests
+        proxy_set_header Connection '';
+        proxy_set_header Cache-Control 'no-cache';
+        proxy_set_header X-Accel-Buffering 'no';
+        proxy_buffering off;
+        chunked_transfer_encoding off;
+        
+        # Forward client information
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Forward authentication headers to MCP server
+        proxy_set_header api-key $http_api_key;
+        proxy_set_header x-api-key $http_x_api_key;
+        proxy_set_header Authorization $http_authorization;
+        
+        # Forward original method and content type
+        proxy_set_header X-Original-Method $request_method;
+        proxy_set_header Content-Type $content_type;
+        
+        # Long timeout for persistent connections
+        proxy_read_timeout 3600;  # 1 hour
+        proxy_connect_timeout 60;
+        proxy_send_timeout 60;
+        
+        # Send timeout for the client connection
+        send_timeout 3600;
+    }
+
+    # MCP Server info endpoint - also protected
+    location /mcp-server/info {
+        # Require API key authentication
+        access_by_lua_block {
+            check_api_auth()
+        }
+        
+        proxy_pass http://mcp-server:3001/info;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Forward authentication headers
+        proxy_set_header api-key $http_api_key;
+        proxy_set_header x-api-key $http_x_api_key;
+        proxy_set_header Authorization $http_authorization;
+    }
+
+    # MCP Server health endpoint - also protected
+    location /mcp-server/health {
+        # Require API key authentication
+        access_by_lua_block {
+            check_api_auth()
+        }
+        
+        proxy_pass http://mcp-server:3001/health;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        
+        # Forward authentication headers
+        proxy_set_header api-key $http_api_key;
+        proxy_set_header x-api-key $http_x_api_key;
+        proxy_set_header Authorization $http_authorization;
+    }
 }

@@ -17,96 +17,54 @@ app.use(express.json());
 // Configuration
 const PORT = process.env.MCP_SERVER_PORT || 3001;
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://polyllama:11434';
+const MCP_BRIDGE_URL = process.env.MCP_BRIDGE_URL || 'http://mcp-bridge:3000';
 const API_KEY = process.env.POLYLLAMA_API_KEY;
 
-// PolyLlama tool definitions - these are the capabilities we expose via MCP
-const POLYLLAMA_TOOLS = [
-  {
-    name: 'polyllama_list_models',
-    description: 'List all available models across PolyLlama instances',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        show_details: {
-          type: 'boolean',
-          description: 'Include detailed model information',
-          default: false
-        }
+// Cache for MCP tools fetched from the bridge
+let cachedTools = [];
+let lastToolsFetch = 0;
+const TOOLS_CACHE_DURATION = 60000; // 1 minute cache
+
+// Fetch available tools from the MCP bridge
+async function fetchMCPTools() {
+  try {
+    const now = Date.now();
+    if (cachedTools.length > 0 && (now - lastToolsFetch) < TOOLS_CACHE_DURATION) {
+      return cachedTools;
+    }
+
+    console.log('Fetching tools from MCP bridge...');
+    const response = await fetch(`${MCP_BRIDGE_URL}/tools`);
+    
+    if (!response.ok) {
+      throw new Error(`MCP Bridge returned ${response.status}: ${response.statusText}`);
+    }
+
+    const data = await response.json();
+    const tools = data.tools || [];
+    
+    console.log(`Fetched ${tools.length} tools from MCP bridge`);
+    
+    // Convert MCP bridge tool format to MCP protocol format
+    cachedTools = tools.map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema || {
+        type: 'object',
+        properties: {},
+        additionalProperties: true
       }
-    }
-  },
-  {
-    name: 'polyllama_load_model',
-    description: 'Load a model on the optimal PolyLlama instance',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        name: {
-          type: 'string',
-          description: 'Name of the model to load'
-        },
-        force_instance: {
-          type: 'string',
-          description: 'Optional: Force loading on specific instance (polyllama1, polyllama2, etc.)'
-        }
-      },
-      required: ['name']
-    }
-  },
-  {
-    name: 'polyllama_get_status',
-    description: 'Get PolyLlama system status and health information',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        include_metrics: {
-          type: 'boolean',
-          description: 'Include GPU and performance metrics',
-          default: false
-        }
-      }
-    }
-  },
-  {
-    name: 'polyllama_get_running_models',
-    description: 'Get currently running models across all instances',
-    inputSchema: {
-      type: 'object',
-      properties: {}
-    }
-  },
-  {
-    name: 'polyllama_route_request',
-    description: 'Execute a direct Ollama API request with PolyLlama routing',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        method: {
-          type: 'string',
-          enum: ['GET', 'POST', 'DELETE'],
-          description: 'HTTP method'
-        },
-        endpoint: {
-          type: 'string',
-          description: 'Ollama API endpoint (e.g., /api/generate, /api/chat)'
-        },
-        payload: {
-          type: 'object',
-          description: 'Request payload for POST requests'
-        }
-      },
-      required: ['method', 'endpoint']
-    }
-  },
-  {
-    name: 'polyllama_get_model_mappings',
-    description: 'Get current model-to-instance mappings and routing information',
-    inputSchema: {
-      type: 'object',
-      properties: {}
-    }
+    }));
+    
+    lastToolsFetch = now;
+    return cachedTools;
+    
+  } catch (error) {
+    console.error('Failed to fetch tools from MCP bridge:', error);
+    // Return empty array if bridge is unavailable
+    return [];
   }
-];
+}
 
 // Utility function to make requests to PolyLlama with proper authentication
 async function makePolyllamaRequest(endpoint, options = {}) {
@@ -139,111 +97,64 @@ async function makePolyllamaRequest(endpoint, options = {}) {
   }
 }
 
-// Tool execution implementations
-const toolExecutors = {
-  async polyllama_list_models(args) {
-    const showDetails = args.show_details || false;
-    const endpoint = showDetails ? '/api/tags?details=true' : '/api/tags';
-    const result = await makePolyllamaRequest(endpoint);
+// Execute a tool via the MCP bridge
+async function executeToolViaBridge(toolName, args) {
+  try {
+    console.log(`Executing tool ${toolName} via MCP bridge`);
     
-    return {
-      type: 'text',
-      text: `Available models in PolyLlama:\n\n${JSON.stringify(result, null, 2)}`
-    };
-  },
-
-  async polyllama_load_model(args) {
-    const { name, force_instance } = args;
-    
-    // Use PolyLlama's model loading endpoint
-    const payload = {
-      name,
-      stream: false,
-      ...(force_instance && { instance: force_instance })
-    };
-
-    const result = await makePolyllamaRequest('/api/pull', {
+    const response = await fetch(`${MCP_BRIDGE_URL}/execute`, {
       method: 'POST',
-      body: JSON.stringify(payload)
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        toolName,
+        arguments: args
+      })
     });
 
-    return {
-      type: 'text',
-      text: `Model loading initiated: ${name}\n\nResponse: ${JSON.stringify(result, null, 2)}`
-    };
-  },
-
-  async polyllama_get_status(args) {
-    const includeMetrics = args.include_metrics || false;
-    
-    // Get basic system status
-    let statusInfo = {};
-    
-    try {
-      // Get instance status
-      const instanceStatus = await makePolyllamaRequest('/api/polyllama/instance-status');
-      statusInfo.instances = instanceStatus;
-
-      // Get model mappings
-      const modelMappings = await makePolyllamaRequest('/api/polyllama/model-mappings');
-      statusInfo.modelMappings = modelMappings;
-
-      if (includeMetrics) {
-        try {
-          const metrics = await makePolyllamaRequest('/api/polyllama/gpu-metrics');
-          statusInfo.metrics = metrics;
-        } catch (error) {
-          statusInfo.metricsError = `Failed to get metrics: ${error.message}`;
-        }
-      }
-
-    } catch (error) {
-      statusInfo.error = `Failed to get status: ${error.message}`;
+    if (!response.ok) {
+      throw new Error(`MCP Bridge returned ${response.status}: ${response.statusText}`);
     }
 
-    return {
-      type: 'text',
-      text: `PolyLlama System Status:\n\n${JSON.stringify(statusInfo, null, 2)}`
-    };
-  },
-
-  async polyllama_get_running_models(args) {
-    const result = await makePolyllamaRequest('/api/polyllama/running-models');
+    const result = await response.json();
     
-    return {
-      type: 'text',
-      text: `Currently running models:\n\n${JSON.stringify(result, null, 2)}`
-    };
-  },
-
-  async polyllama_route_request(args) {
-    const { method, endpoint, payload } = args;
-    
-    const options = {
-      method: method.toUpperCase()
-    };
-
-    if (payload && (method.toLowerCase() === 'post' || method.toLowerCase() === 'put')) {
-      options.body = JSON.stringify(payload);
+    if (!result.success) {
+      throw new Error(result.error || 'Tool execution failed');
     }
 
-    const result = await makePolyllamaRequest(endpoint, options);
+    // Format the result for MCP protocol
+    // The MCP bridge returns results in different formats, normalize them
+    const content = result.result;
     
-    return {
-      type: 'text',
-      text: `${method} ${endpoint} response:\n\n${JSON.stringify(result, null, 2)}`
-    };
-  },
-
-  async polyllama_get_model_mappings(args) {
-    const result = await makePolyllamaRequest('/api/polyllama/model-mappings');
+    if (Array.isArray(content)) {
+      // If it's already an array of content items
+      return content;
+    } else if (typeof content === 'string') {
+      // If it's a plain string
+      return [{
+        type: 'text',
+        text: content
+      }];
+    } else if (content && typeof content === 'object') {
+      // If it's an object, stringify it
+      return [{
+        type: 'text', 
+        text: JSON.stringify(content, null, 2)
+      }];
+    } else {
+      // Fallback
+      return [{
+        type: 'text',
+        text: String(content || 'No result')
+      }];
+    }
     
-    return {
-      type: 'text',
-      text: `Current model-to-instance mappings:\n\n${JSON.stringify(result, null, 2)}`
-    };
+  } catch (error) {
+    console.error(`Failed to execute tool ${toolName}:`, error);
+    throw new Error(`Tool execution failed: ${error.message}`);
   }
-};
+}
 
 // Create MCP server instance - will be created per connection to avoid state issues
 function createMCPServer() {
@@ -261,23 +172,19 @@ function createMCPServer() {
 
   // Register tool handlers
   mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
+    const tools = await fetchMCPTools();
     return {
-      tools: POLYLLAMA_TOOLS
+      tools: tools
     };
   });
 
   mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
     
-    const executor = toolExecutors[name];
-    if (!executor) {
-      throw new Error(`Unknown tool: ${name}`);
-    }
-
     try {
-      const result = await executor(args || {});
+      const content = await executeToolViaBridge(name, args || {});
       return {
-        content: [result]
+        content: content
       };
     } catch (error) {
       throw new Error(`Tool execution failed: ${error.message}`);
@@ -300,78 +207,171 @@ app.get('/health', (req, res) => {
 });
 
 // MCP server info endpoint
-app.get('/info', (req, res) => {
-  res.json({
-    name: 'PolyLlama MCP Server',
-    version: '1.0.0',
-    description: 'MCP Server that exposes PolyLlama orchestration capabilities as tools',
-    tools: POLYLLAMA_TOOLS.map(tool => ({
-      name: tool.name,
-      description: tool.description
-    })),
-    endpoints: {
-      sse: '/sse',
-      health: '/health',
-      info: '/info'
-    },
-    polyllamaBaseUrl: OLLAMA_BASE_URL,
-    authenticationRequired: !!API_KEY
-  });
+app.get('/info', async (req, res) => {
+  try {
+    const tools = await fetchMCPTools();
+    
+    res.json({
+      name: 'PolyLlama MCP Server',
+      version: '1.0.0',
+      description: 'MCP Server that exposes all PolyLlama MCP tools for external consumption',
+      tools: tools.map(tool => ({
+        name: tool.name,
+        description: tool.description
+      })),
+      endpoints: {
+        sse: '/sse',
+        health: '/health',
+        info: '/info'
+      },
+      mcpBridgeUrl: MCP_BRIDGE_URL,
+      authenticationRequired: !!API_KEY,
+      toolCount: tools.length
+    });
+  } catch (error) {
+    console.error('Error getting tools for info endpoint:', error);
+    res.status(500).json({
+      error: 'Failed to get tool information',
+      message: error.message
+    });
+  }
 });
 
-// Main SSE endpoint for MCP protocol
-app.get('/sse', async (req, res) => {
-  console.log('New MCP client connection via SSE');
+// For MCP over HTTP (POST requests)
+app.post('/sse', express.json(), async (req, res) => {
+  console.log('MCP POST message:', req.body);
   
   try {
-    // Create a new MCP server instance for this connection
+    // Create MCP server for handling this request
     const mcpServer = createMCPServer();
     
-    // Create SSE transport - let it handle all header setup
-    const transport = new SSEServerTransport('/sse', res);
+    // Handle MCP JSON-RPC request directly
+    const { method, params, id } = req.body;
     
-    // Handle client disconnect before connecting
-    req.on('close', () => {
-      console.log('MCP client disconnected');
-      if (transport.close) {
-        transport.close();
-      }
-    });
-
-    req.on('error', (error) => {
-      console.error('SSE request error:', error);
-      if (transport.close) {
-        transport.close();
-      }
-    });
-    
-    // Connect server to transport
-    await mcpServer.connect(transport);
-    console.log('MCP server connected to SSE transport successfully');
-
-  } catch (error) {
-    console.error('Failed to initialize MCP connection:', error);
-    
-    // Only try to send error if we haven't started SSE yet
-    if (!res.headersSent) {
-      res.status(500).json({
-        error: 'Failed to initialize MCP connection',
-        message: error.message,
-        stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
-      });
-    } else {
-      // If SSE has started, write an error event
+    if (method === 'initialize') {
+      const response = {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          protocolVersion: '2025-06-18',
+          capabilities: {
+            tools: {}
+          },
+          serverInfo: {
+            name: 'polyllama-mcp-server',
+            version: '1.0.0'
+          }
+        }
+      };
+      res.json(response);
+    } else if (method === 'tools/list') {
+      const tools = await fetchMCPTools();
+      const response = {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          tools: tools
+        }
+      };
+      res.json(response);
+    } else if (method === 'tools/call') {
+      const { name, arguments: args } = params;
+      
       try {
-        res.write(`data: ${JSON.stringify({
-          error: 'MCP connection failed',
-          message: error.message
-        })}\n\n`);
-        res.end();
-      } catch (writeError) {
-        console.error('Failed to write error to SSE stream:', writeError);
+        const content = await executeToolViaBridge(name, args || {});
+        const response = {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            content: content
+          }
+        };
+        res.json(response);
+      } catch (error) {
+        const errorResponse = {
+          jsonrpc: '2.0',
+          id,
+          error: {
+            code: -32603,
+            message: error.message
+          }
+        };
+        res.json(errorResponse);
+      }
+    } else {
+      const errorResponse = {
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32601,
+          message: `Method not found: ${method}`
+        }
+      };
+      res.json(errorResponse);
+    }
+  } catch (error) {
+    console.error('Error handling MCP POST:', error);
+    const errorResponse = {
+      jsonrpc: '2.0',
+      id: req.body.id || null,
+      error: {
+        code: -32603,
+        message: error.message
+      }
+    };
+    res.status(500).json(errorResponse);
+  }
+});
+
+// For MCP over SSE (GET requests)
+app.get('/sse', async (req, res) => {
+  console.log('MCP SSE connection established');
+  
+  // Set SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*'
+  });
+  
+  // Send server info
+  const serverInfo = {
+    jsonrpc: '2.0',
+    method: 'notifications/initialized',
+    params: {
+      protocolVersion: '2025-06-18',
+      capabilities: {
+        tools: {}
+      },
+      serverInfo: {
+        name: 'polyllama-mcp-server',
+        version: '1.0.0'
       }
     }
-  }
+  };
+  
+  res.write(`data: ${JSON.stringify(serverInfo)}\n\n`);
+  
+  // Keep connection alive
+  const heartbeat = setInterval(() => {
+    res.write(`data: ${JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'notifications/ping',
+      params: { timestamp: Date.now() }
+    })}\n\n`);
+  }, 30000);
+  
+  // Handle client disconnect
+  req.on('close', () => {
+    console.log('SSE client disconnected');
+    clearInterval(heartbeat);
+  });
+  
+  req.on('error', (error) => {
+    console.error('SSE error:', error);
+    clearInterval(heartbeat);
+  });
 });
 
 // Start server
@@ -383,12 +383,22 @@ app.listen(PORT, () => {
   console.log(`🎯 Target PolyLlama: ${OLLAMA_BASE_URL}`);
   console.log(`🔐 API Key protection: ${API_KEY ? 'Enabled' : 'Disabled'}`);
   
-  console.log('\n🛠️  Available Tools:');
-  POLYLLAMA_TOOLS.forEach(tool => {
-    console.log(`   • ${tool.name}: ${tool.description}`);
+  // Fetch and display available tools
+  fetchMCPTools().then(tools => {
+    console.log('\n🛠️  Available Tools:');
+    if (tools.length > 0) {
+      tools.forEach(tool => {
+        console.log(`   • ${tool.name}: ${tool.description}`);
+      });
+    } else {
+      console.log('   No tools available (MCP Bridge may be starting up)');
+    }
+    console.log('\n✨ PolyLlama MCP Server ready for connections!');
+  }).catch(error => {
+    console.log('\n🛠️  Available Tools: Error fetching tools from MCP Bridge');
+    console.log(`   Error: ${error.message}`);
+    console.log('\n✨ PolyLlama MCP Server ready for connections!');
   });
-  
-  console.log('\n✨ PolyLlama MCP Server ready for connections!');
 });
 
 // Graceful shutdown

@@ -101,31 +101,57 @@ Add this configuration to your Claude Desktop MCP settings (`~/Library/Applicati
   "mcpServers": {
     "polyllama": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sse"],
-      "env": {
-        "SSE_URL": "http://localhost:3001/sse"
-      }
+      "args": ["-y", "mcp-remote", "http://localhost:11434/sse"]
     }
   }
 }
 ```
 
-### Available PolyLlama Tools
+**If API Key is Required**: When `POLYLLAMA_API_KEY` is set, add authentication:
 
-When connected as an MCP server, PolyLlama exposes these tools:
+```json
+{
+  "mcpServers": {
+    "polyllama": {
+      "command": "npx",
+      "args": [
+        "-y", 
+        "mcp-remote", 
+        "http://localhost:11434/sse",
+        "--header", "api-key=your_api_key_here"
+      ]
+    }
+  }
+}
+```
 
-- `polyllama_list_models` - List all available models across instances
-- `polyllama_load_model` - Load a model on the optimal instance
-- `polyllama_get_status` - Get system status and health information
-- `polyllama_get_running_models` - Get currently running models
-- `polyllama_route_request` - Execute direct Ollama API requests
-- `polyllama_get_model_mappings` - Get model-to-instance mappings
+### Available Tools via PolyLlama MCP Server
+
+When connected as an MCP server, PolyLlama exposes **all configured MCP tools** from your `mcp-config.json`. This includes:
+
+**Filesystem Tools** (if configured):
+- `filesystem__read_file` - Read file contents
+- `filesystem__write_file` - Write files
+- `filesystem__list_directory` - List directory contents
+
+**GitHub Tools** (if configured):
+- `github__search_repositories` - Search repositories
+- `github__get_file` - Get file contents from repos
+- `github__create_issue` - Create issues
+
+**Database Tools** (if configured):
+- `postgres__query` - Execute PostgreSQL queries
+- `sqlite__execute` - Execute SQLite commands
+
+**And any other tools** you've configured in your MCP setup. The exact list depends on your `mcp-config.json` configuration.
 
 ### MCP Server Endpoints
 
-- **SSE Endpoint**: `http://localhost:3001/sse` - Main MCP protocol endpoint
-- **Info Endpoint**: `http://localhost:3001/info` - Server capabilities
-- **Health Endpoint**: `http://localhost:3001/health` - Health check
+- **SSE Endpoint**: `http://localhost:11434/sse` - Main MCP protocol endpoint (protected)
+- **Info Endpoint**: `http://localhost:11434/mcp-server/info` - Server capabilities (protected)
+- **Health Endpoint**: `http://localhost:11434/mcp-server/health` - Health check (protected)
+
+**Authentication**: All endpoints require the same API key as other PolyLlama APIs when `POLYLLAMA_API_KEY` is configured.
 
 ### Example Usage in Claude Desktop
 
@@ -151,7 +177,9 @@ I'll load codellama:7b on the optimal instance for you...
 3. **Missing dependencies**: Run `pnpm install` to ensure MCP SDK is installed
 
 ### MCP Server (PolyLlama as Server)
-1. **Connection issues**: Verify MCP server is running and accessible at `http://localhost:3001`
-2. **SSE endpoint not working**: Check `http://localhost:3001/health`
+1. **Connection issues**: Verify PolyLlama is running and accessible at `http://localhost:11434`
+2. **SSE endpoint not working**: Check `http://localhost:11434/mcp-server/health` (with API key if required)
 3. **Tool execution fails**: Review logs with `docker logs mcp-server`
 4. **Authentication issues**: Ensure API key is correctly configured if using `POLYLLAMA_API_KEY`
+   - Test with: `curl -H "api-key: your_key" http://localhost:11434/sse`
+   - Verify the key matches your `.env` file setting

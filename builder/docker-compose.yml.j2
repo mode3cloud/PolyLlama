@@ -83,8 +83,10 @@ services:
     environment:
       - MCP_SERVER_PORT=3001
       - OLLAMA_BASE_URL=http://router:11434
+      - MCP_BRIDGE_URL=http://mcp-bridge:3000
     depends_on:
       - router
+      - mcp-bridge
 
   redis:
     image: redis:7-alpine

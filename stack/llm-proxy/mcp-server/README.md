@@ -4,20 +4,24 @@ This service exposes PolyLlama's orchestration capabilities as an MCP (Model Con
 
 ## Overview
 
-The PolyLlama MCP Server allows external applications like Claude Desktop, IDEs, and other MCP-compatible tools to discover and use PolyLlama's native capabilities as tools. This includes model management, instance routing, system status, and GPU metrics.
+The PolyLlama MCP Server allows external applications like Claude Desktop, IDEs, and other MCP-compatible tools to discover and use **all MCP tools that PolyLlama has access to**. This aggregates tools from all configured MCP servers in PolyLlama's `mcp-config.json` and exposes them through a single MCP endpoint.
 
 ## Available Tools
 
-The server exposes the following PolyLlama tools via MCP:
+The server dynamically exposes **all MCP tools** configured in PolyLlama's setup, which may include:
 
-| Tool Name | Description |
-|-----------|-------------|
-| `polyllama_list_models` | List all available models across PolyLlama instances |
-| `polyllama_load_model` | Load a model on the optimal PolyLlama instance |
-| `polyllama_get_status` | Get PolyLlama system status and health information |
-| `polyllama_get_running_models` | Get currently running models across all instances |
-| `polyllama_route_request` | Execute a direct Ollama API request with PolyLlama routing |
-| `polyllama_get_model_mappings` | Get current model-to-instance mappings and routing information |
+**Common Tool Categories:**
+- **Filesystem Tools**: `filesystem__read_file`, `filesystem__write_file`, `filesystem__list_directory`
+- **GitHub Tools**: `github__search_repositories`, `github__get_file`, `github__create_issue`
+- **Database Tools**: `postgres__query`, `sqlite__execute`
+- **Web Tools**: `playwright__navigate`, `puppeteer__screenshot`
+
+**Actual Available Tools**: The exact tools depend on your `mcp-config.json` configuration. Use the `/info` endpoint to see the current list of available tools.
+
+**Tool Discovery**: 
+```bash
+curl http://localhost:11434/mcp-server/info
+```
 
 ## Usage
 
@@ -30,10 +34,41 @@ Add this configuration to your Claude Desktop MCP settings:
   "mcpServers": {
     "polyllama": {
       "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-sse"],
-      "env": {
-        "SSE_URL": "http://localhost:3001/sse"
-      }
+      "args": ["-y", "mcp-remote", "sse://localhost:11434/sse"]
+    }
+  }
+}
+```
+
+**With API Key Authentication**:
+```json
+{
+  "mcpServers": {
+    "polyllama": {
+      "command": "npx",
+      "args": [
+        "-y", 
+        "mcp-remote", 
+        "sse://localhost:11434/sse",
+        "--header", "api-key=your_api_key_here"
+      ]
+    }
+  }
+}
+```
+
+**Alternative with x-api-key header**:
+```json
+{
+  "mcpServers": {
+    "polyllama": {
+      "command": "npx", 
+      "args": [
+        "-y",
+        "mcp-remote",
+        "sse://localhost:11434/sse",
+        "--header", "x-api-key=your_api_key_here"
+      ]
     }
   }
 }
@@ -42,16 +77,25 @@ Add this configuration to your Claude Desktop MCP settings:
 ### Connecting from Other MCP Clients
 
 Use the SSE transport to connect to:
-- **Endpoint**: `http://localhost:3001/sse`
+- **Endpoint**: `http://localhost:11434/sse`
 - **Protocol**: MCP over Server-Sent Events (SSE)
 - **Authentication**: API key required if `POLYLLAMA_API_KEY` is set
 
+**Authentication Methods**:
+- **Header**: `api-key: your_api_key`
+- **Header**: `x-api-key: your_api_key` 
+- **Header**: `Authorization: Bearer your_api_key`
+
 ### Direct HTTP Endpoints
 
-The server also provides REST endpoints for inspection:
+The server also provides REST endpoints for inspection (also protected with API key):
 
-- `GET http://localhost:3001/info` - Server information and available tools
-- `GET http://localhost:3001/health` - Health check endpoint
+- `GET http://localhost:11434/mcp-server/info` - Server information and available tools
+- `GET http://localhost:11434/mcp-server/health` - Health check endpoint
+
+**Direct Access** (bypasses authentication, for internal use):
+- `GET http://localhost:3001/info` - Direct server info
+- `GET http://localhost:3001/health` - Direct health check
 
 ## Configuration
 
@@ -70,61 +114,40 @@ The MCP server is configured through environment variables:
 Once connected, you can use PolyLlama tools in your conversations:
 
 ```
-User: Can you list all available models in my PolyLlama setup?
+User: Can you search for Python repositories on GitHub?
 
-Claude: I'll check what models are available in your PolyLlama instance.
+Claude: I'll search for Python repositories using the GitHub tool.
 
-[Tool: polyllama_list_models]
-Available models in PolyLlama:
-{
-  "models": [
-    {"name": "llama3.2:3b", "size": 2.0, "modified_at": "2024-01-15T10:30:00Z"},
-    {"name": "codellama:7b", "size": 3.8, "modified_at": "2024-01-14T15:22:00Z"}
-  ]
-}
+[Tool: github__search_repositories]
+{"query": "language:python", "sort": "stars"}
 
-You have 2 models available: llama3.2:3b (2.0GB) and codellama:7b (3.8GB).
+Found several popular Python repositories:
+- tensorflow/tensorflow - Machine learning framework
+- django/django - Web framework
+- requests/requests - HTTP library
+...
 ```
 
 ```
-User: Load the codellama model for me
+User: Read the contents of my README file
 
-Claude: I'll load the codellama:7b model on the optimal PolyLlama instance.
+Claude: I'll read your README file using the filesystem tool.
 
-[Tool: polyllama_load_model]
-{"name": "codellama:7b"}
+[Tool: filesystem__read_file]
+{"path": "/path/to/README.md"}
 
-Model loading initiated: codellama:7b
-The model is now being loaded on the best available instance.
+# My Project
+This is a sample README file...
 ```
 
-### Checking System Status
+### Tool Categories Example
 
-```
-User: What's the current status of my PolyLlama system?
-
-Claude: Let me check the current status of your PolyLlama system.
-
-[Tool: polyllama_get_status]
-{"include_metrics": true}
-
-PolyLlama System Status:
-{
-  "instances": {
-    "polyllama1": {"status": "online", "gpu": "RTX 4090"},
-    "polyllama2": {"status": "online", "gpu": "RTX 4090"}
-  },
-  "modelMappings": {
-    "llama3.2:3b": "polyllama1",
-    "codellama:7b": "polyllama2"
-  },
-  "metrics": {
-    "gpu_usage": [45, 67],
-    "memory_usage": [8.2, 12.1]
-  }
-}
-
-Your PolyLlama system is healthy with 2 online instances, each with RTX 4090 GPUs.
+Depending on your MCP configuration, you might see tools like:
+- **filesystem__read_file**: Read file contents
+- **github__search_repositories**: Search GitHub repositories  
+- **postgres__query**: Execute database queries
+- **playwright__navigate**: Navigate web pages
+- **puppeteer__screenshot**: Take webpage screenshots
 ```
 
 ## Development
@@ -181,9 +204,9 @@ The MCP server acts as a bridge, exposing PolyLlama's capabilities through the s
 
 ### Connection Issues
 
-1. Verify MCP server is running: `curl http://localhost:3001/health`
+1. Verify MCP server is running: `curl http://localhost:3001/health` (direct) or `curl -H "api-key: your_key" http://localhost:11434/mcp-server/health` (protected)
 2. Check MCP server logs: `docker logs mcp-server`
-3. Test SSE endpoint: `curl -H "Accept: text/event-stream" http://localhost:3001/sse`
+3. Test SSE endpoint: `curl -H "Accept: text/event-stream" -H "api-key: your_key" http://localhost:11434/sse`
 
 ### Authentication Issues
 
@@ -202,4 +225,4 @@ The MCP server acts as a bridge, exposing PolyLlama's capabilities through the s
 For issues specific to the MCP server implementation, check:
 - Container logs: `docker logs mcp-server`
 - PolyLlama router status: `http://localhost:11434/api/polyllama/instance-status`
-- MCP server health: `http://localhost:3001/health`
+- MCP server health: `http://localhost:11434/mcp-server/health` (with API key) or `http://localhost:3001/health` (direct)

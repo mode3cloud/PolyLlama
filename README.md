@@ -120,6 +120,32 @@ graph TB
     style Router fill:#fff3e0
 ```
 
+## 🏛️ Service Architecture
+
+PolyLlama consists of multiple interconnected services that work together to provide a complete AI orchestration platform.
+
+### Service Responsibilities
+
+| Service | Port | Purpose | Key Features |
+|---------|------|---------|-------------|
+| **Nginx Router** | 11434 | Entry point and load balancer | Lua-based routing, API authentication, request proxying |
+| **Inference Backend** | Internal | Dynamic Ollama instances | GPU grouping, model routing, automatic scaling |
+| **LLM Proxy** | 11435 | Multi-provider LLM gateway | OpenAI/Anthropic/Ollama support, request translation |
+| **Agent Controller** | 11436 | Multi-agent orchestration | Tool execution, session management, workflow coordination |
+| **MCP Bridge** | 3000 | External MCP tool integration | Tool aggregation, protocol translation, server management |
+| **MCP Server** | 3001 | PolyLlama tool exposition | SSE endpoint, external consumption, tool sharing |
+| **Kokoro TTS** | 8880 | Text-to-speech service | GPU-accelerated speech synthesis |
+| **Redis** | 6379 | Caching and session storage | Agent state, tool results, session persistence |
+
+### Data Flow Patterns
+
+1. **Web UI Requests**: Browser → Router → Next.js App (embedded in router)
+2. **API Requests**: Client → Router → Inference Backend (with Lua routing)  
+3. **LLM Proxy**: Router → LLM Proxy → Inference Backend (for multi-provider support)
+4. **Agent Workflows**: Agent Controller → LLM Proxy → Tools → Results
+5. **MCP External**: MCP Client → Router → MCP Server → MCP Bridge → Tools
+6. **Tool Execution**: Any service → MCP Bridge → External MCP servers
+
 ---
 
 ## 🚀 Quick Start

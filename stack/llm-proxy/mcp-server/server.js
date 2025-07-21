@@ -237,58 +237,115 @@ app.get('/info', async (req, res) => {
   }
 });
 
-// For MCP over HTTP (POST requests)
+// Store active connections for the SSE transport
+const activeConnections = new Map();
+
+// MCP over SSE - GET endpoint for establishing SSE connection
+app.get('/sse', (req, res) => {
+  console.log('SSE connection established');
+  
+  // Set SSE headers
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, api-key, x-api-key'
+  });
+
+  // Generate connection ID
+  const connectionId = Date.now().toString();
+  
+  // Create MCP server for this connection
+  const mcpServer = createMCPServer();
+  
+  // Store connection state
+  activeConnections.set(connectionId, {
+    response: res,
+    server: mcpServer,
+    connectionId
+  });
+  
+  // Send connection established event
+  res.write(`data: ${JSON.stringify({
+    jsonrpc: '2.0',
+    method: 'notifications/initialized',
+    params: {
+      protocolVersion: '2025-06-18',
+      capabilities: { tools: {} },
+      serverInfo: {
+        name: 'polyllama-mcp-server',
+        version: '1.0.0'
+      },
+      connectionId
+    }
+  })}\n\n`);
+
+  // Keep connection alive
+  const heartbeat = setInterval(() => {
+    if (res.writableEnded) {
+      clearInterval(heartbeat);
+      return;
+    }
+    res.write(`data: ${JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'notifications/ping',
+      params: { timestamp: Date.now() }
+    })}\n\n`);
+  }, 30000);
+
+  // Handle client disconnect
+  req.on('close', () => {
+    console.log('SSE client disconnected');
+    clearInterval(heartbeat);
+    activeConnections.delete(connectionId);
+  });
+
+  req.on('error', (error) => {
+    console.error('SSE error:', error);
+    clearInterval(heartbeat);
+    activeConnections.delete(connectionId);
+  });
+});
+
+// MCP over SSE - POST endpoint for receiving JSON-RPC messages
 app.post('/sse', express.json(), async (req, res) => {
-  console.log('MCP POST message:', req.body);
+  console.log('MCP POST request:', req.body);
   
   try {
-    // Create MCP server for handling this request
-    const mcpServer = createMCPServer();
-    
-    // Handle MCP JSON-RPC request directly
-    const { method, params, id } = req.body;
-    
+    const { method, params, id, jsonrpc } = req.body;
+    let response;
+
     if (method === 'initialize') {
-      const response = {
+      response = {
         jsonrpc: '2.0',
         id,
         result: {
           protocolVersion: '2025-06-18',
-          capabilities: {
-            tools: {}
-          },
+          capabilities: { tools: {} },
           serverInfo: {
             name: 'polyllama-mcp-server',
             version: '1.0.0'
           }
         }
       };
-      res.json(response);
     } else if (method === 'tools/list') {
       const tools = await fetchMCPTools();
-      const response = {
+      response = {
         jsonrpc: '2.0',
         id,
-        result: {
-          tools: tools
-        }
+        result: { tools }
       };
-      res.json(response);
     } else if (method === 'tools/call') {
-      const { name, arguments: args } = params;
-      
       try {
-        const content = await executeToolViaBridge(name, args || {});
-        const response = {
+        const content = await executeToolViaBridge(params.name, params.arguments || {});
+        response = {
           jsonrpc: '2.0',
           id,
-          result: {
-            content: content
-          }
+          result: { content }
         };
-        res.json(response);
       } catch (error) {
-        const errorResponse = {
+        response = {
           jsonrpc: '2.0',
           id,
           error: {
@@ -296,10 +353,9 @@ app.post('/sse', express.json(), async (req, res) => {
             message: error.message
           }
         };
-        res.json(errorResponse);
       }
     } else {
-      const errorResponse = {
+      response = {
         jsonrpc: '2.0',
         id,
         error: {
@@ -307,71 +363,23 @@ app.post('/sse', express.json(), async (req, res) => {
           message: `Method not found: ${method}`
         }
       };
-      res.json(errorResponse);
     }
+
+    // Send response back via the appropriate SSE connection if available
+    // For now, we'll send the response directly via HTTP
+    res.json(response);
+    
   } catch (error) {
     console.error('Error handling MCP POST:', error);
-    const errorResponse = {
+    res.status(500).json({
       jsonrpc: '2.0',
       id: req.body.id || null,
       error: {
         code: -32603,
         message: error.message
       }
-    };
-    res.status(500).json(errorResponse);
+    });
   }
-});
-
-// For MCP over SSE (GET requests)
-app.get('/sse', async (req, res) => {
-  console.log('MCP SSE connection established');
-  
-  // Set SSE headers
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*'
-  });
-  
-  // Send server info
-  const serverInfo = {
-    jsonrpc: '2.0',
-    method: 'notifications/initialized',
-    params: {
-      protocolVersion: '2025-06-18',
-      capabilities: {
-        tools: {}
-      },
-      serverInfo: {
-        name: 'polyllama-mcp-server',
-        version: '1.0.0'
-      }
-    }
-  };
-  
-  res.write(`data: ${JSON.stringify(serverInfo)}\n\n`);
-  
-  // Keep connection alive
-  const heartbeat = setInterval(() => {
-    res.write(`data: ${JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'notifications/ping',
-      params: { timestamp: Date.now() }
-    })}\n\n`);
-  }, 30000);
-  
-  // Handle client disconnect
-  req.on('close', () => {
-    console.log('SSE client disconnected');
-    clearInterval(heartbeat);
-  });
-  
-  req.on('error', (error) => {
-    console.error('SSE error:', error);
-    clearInterval(heartbeat);
-  });
 });
 
 // Start server

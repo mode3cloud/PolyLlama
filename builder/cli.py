@@ -476,6 +476,91 @@ class PolyLlamaCLI:
 
         return 0
 
+    def rebuild(self, service_name: str):
+        """Rebuild and restart a specific service"""
+        print(f"🔄 Rebuilding service: {service_name}")
+        print("")
+        
+        if not self.check_docker():
+            return 1
+        
+        # Generate fresh docker-compose.yml
+        print("📋 Regenerating docker-compose configuration...")
+        config = self.detect_and_generate()
+        
+        if not self.compose_file.exists():
+            print("❌ Generated docker-compose.yml not found")
+            return 1
+            
+        print(f"✅ Generated: {self.compose_file}")
+        print("")
+        
+        # Get list of services from the compose file to validate
+        print("🔍 Validating service name...")
+        try:
+            result = subprocess.run(
+                ["docker-compose", "-f", str(self.compose_file), "config", "--services"],
+                capture_output=True,
+                text=True,
+                check=True
+            )
+            available_services = result.stdout.strip().split('\n')
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Failed to read services from compose file: {e}")
+            return 1
+        
+        if service_name not in available_services:
+            print(f"❌ Service '{service_name}' not found in configuration")
+            print("📋 Available services:")
+            for service in available_services:
+                print(f"  - {service}")
+            return 1
+            
+        print(f"✅ Service '{service_name}' validated")
+        print("")
+        
+        # Stop the specific service
+        print(f"🛑 Stopping {service_name}...")
+        try:
+            subprocess.run(
+                ["docker-compose", "-f", str(self.compose_file), "stop", service_name],
+                check=True
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️  Warning: Failed to stop {service_name}: {e}")
+        
+        # Remove the container to ensure clean rebuild
+        print(f"🗑️  Removing {service_name} container...")
+        try:
+            subprocess.run(
+                ["docker-compose", "-f", str(self.compose_file), "rm", "-f", service_name],
+                check=True
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"⚠️  Warning: Failed to remove {service_name} container: {e}")
+            
+        # Build and start the service
+        print(f"🔨 Building and starting {service_name}...")
+        try:
+            subprocess.run(
+                ["docker-compose", "-f", str(self.compose_file), "up", "-d", "--build", service_name],
+                check=True
+            )
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Failed to rebuild {service_name}: {e}")
+            return 1
+        
+        print("")
+        print(f"✅ Service {service_name} rebuilt and started successfully!")
+        
+        # Show status of the rebuilt service
+        print(f"📊 Status of {service_name}:")
+        subprocess.run(
+            ["docker-compose", "-f", str(self.compose_file), "ps", service_name]
+        )
+        
+        return 0
+
 
 def main():
     """Main entry point for the CLI"""
@@ -489,11 +574,12 @@ Hardware Detection:
   - 0 GPUs            → CPU-only configuration
 
 Examples:
-  polyllama              # Auto-detect and launch
-  polyllama --detect     # Show what would be detected
-  polyllama --debug      # Launch with debug output on console
-  polyllama --build      # Launch and force rebuild images
-  polyllama --stop       # Stop all services
+  polyllama                        # Auto-detect and launch
+  polyllama --detect               # Show what would be detected
+  polyllama --debug                # Launch with debug output on console
+  polyllama --build                # Launch and force rebuild images
+  polyllama --stop                 # Stop all services
+  polyllama --rebuild mcp-server   # Rebuild and restart specific service
 """,
     )
 
@@ -526,6 +612,12 @@ Examples:
         action="store_true",
         help="Development mode - bind mount app source for hot reloading",
     )
+    parser.add_argument(
+        "--rebuild",
+        type=str,
+        metavar="SERVICE",
+        help="Rebuild and restart a single service (e.g., mcp-server, llm-proxy)",
+    )
 
     args = parser.parse_args()
 
@@ -540,6 +632,8 @@ Examples:
         return cli.status()
     elif args.detect:
         return cli.detect()
+    elif args.rebuild:
+        return cli.rebuild(args.rebuild)
     else:
         # Default action is to launch
         return cli.launch(debug=args.debug, build=args.build, dev_mode=args.dev)

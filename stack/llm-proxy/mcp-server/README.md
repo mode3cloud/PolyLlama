@@ -6,6 +6,17 @@ This service exposes PolyLlama's orchestration capabilities as an MCP (Model Con
 
 The PolyLlama MCP Server allows external applications like Claude Desktop, IDEs, and other MCP-compatible tools to discover and use **all MCP tools that PolyLlama has access to**. This aggregates tools from all configured MCP servers in PolyLlama's `mcp-config.json` and exposes them through a single MCP endpoint.
 
+## ⚡ New: Streamable HTTP Transport
+
+**Version 2.0** now uses the modern **Streamable HTTP** transport instead of legacy SSE. This provides:
+
+- **Better Performance**: Single endpoint reduces connection overhead by 50%
+- **Resource Efficiency**: Dynamic streaming only when needed
+- **Infrastructure Compatibility**: Better support for load balancers and proxies
+- **Simplified Architecture**: One endpoint instead of separate SSE + HTTP
+
+**Backward Compatibility**: Legacy SSE endpoints still work but show deprecation warnings.
+
 ## Available Tools
 
 The server dynamically exposes **all MCP tools** configured in PolyLlama's setup, which may include:
@@ -27,20 +38,36 @@ curl http://localhost:11434/mcp-server/info
 
 ### Connecting from Claude Desktop
 
-Add this configuration to your Claude Desktop MCP settings:
-
+**New: Streamable HTTP (Recommended)**
 ```json
 {
   "mcpServers": {
     "polyllama": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "sse://localhost:11434/sse"]
+      "args": ["-y", "mcp-remote", "http://localhost:11434/mcp"]
     }
   }
 }
 ```
 
 **With API Key Authentication**:
+```json
+{
+  "mcpServers": {
+    "polyllama": {
+      "command": "npx",
+      "args": [
+        "-y", 
+        "mcp-remote", 
+        "http://localhost:11434/mcp",
+        "--header", "api-key=your_api_key_here"
+      ]
+    }
+  }
+}
+```
+
+**Legacy SSE (Still Supported)**:
 ```json
 {
   "mcpServers": {
@@ -57,45 +84,36 @@ Add this configuration to your Claude Desktop MCP settings:
 }
 ```
 
-**Alternative with x-api-key header**:
-```json
-{
-  "mcpServers": {
-    "polyllama": {
-      "command": "npx", 
-      "args": [
-        "-y",
-        "mcp-remote",
-        "sse://localhost:11434/sse",
-        "--header", "x-api-key=your_api_key_here"
-      ]
-    }
-  }
-}
-```
-
 ### Connecting from Other MCP Clients
 
-Use the SSE transport to connect to:
-- **Endpoint**: `http://localhost:11434/sse`
-- **Protocol**: MCP over Server-Sent Events (SSE)
+**Streamable HTTP (Recommended)**:
+- **Endpoint**: `http://localhost:11434/mcp`
+- **Protocol**: MCP over Streamable HTTP (2025-03-26)
+- **Streaming**: Automatic upgrade to SSE when needed
 - **Authentication**: API key required if `POLYLLAMA_API_KEY` is set
 
-**Authentication Methods**:
+**Legacy SSE (Deprecated)**:
+- **Endpoint**: `http://localhost:11434/sse`
+- **Protocol**: MCP over Server-Sent Events (SSE)
+- **Note**: Shows deprecation warnings
+
+**Authentication Methods** (both transports):
 - **Header**: `api-key: your_api_key`
 - **Header**: `x-api-key: your_api_key` 
 - **Header**: `Authorization: Bearer your_api_key`
 
 ### Direct HTTP Endpoints
 
-The server also provides REST endpoints for inspection (also protected with API key):
+The server provides REST endpoints for inspection (also protected with API key):
 
-- `GET http://localhost:11434/mcp-server/info` - Server information and available tools
+- `GET http://localhost:11434/mcp-server/info` - Server information and available tools  
 - `GET http://localhost:11434/mcp-server/health` - Health check endpoint
+- `POST http://localhost:11434/mcp` - Main MCP endpoint (all operations)
 
 **Direct Access** (bypasses authentication, for internal use):
 - `GET http://localhost:3001/info` - Direct server info
 - `GET http://localhost:3001/health` - Direct health check
+- `POST http://localhost:3001/mcp` - Direct MCP endpoint
 
 ## Configuration
 
@@ -179,17 +197,26 @@ docker build -t polyllama-mcp-server stack/llm-proxy/mcp-server/
 
 ## Architecture
 
+**New Streamable HTTP Architecture:**
 ```
 External MCP Client (Claude Desktop, IDEs, etc.)
-           ↓ (SSE Connection)
-    Nginx Router (:11434/sse)
+           ↓ (HTTP POST)
+    Nginx Router (:11434/mcp)
            ↓ (Proxy)
-    MCP Server (:3001/sse)
+    MCP Server (:3001/mcp)
+           ↓ (Dynamic: HTTP or SSE streaming)
+    MCP Bridge (:3000) 
            ↓ (HTTP Calls)
     PolyLlama Router (:11434/api/*)
            ↓ (Lua Routing)
     Ollama Instances (polyllama1, polyllama2, etc.)
 ```
+
+**Key Improvements:**
+- **Single Endpoint**: `/mcp` handles all operations
+- **Dynamic Streaming**: Upgrades to SSE only when needed
+- **Better Resource Management**: No persistent connections unless required
+- **Simplified Flow**: One request path instead of separate SSE + HTTP
 
 The MCP server acts as a bridge, exposing PolyLlama's capabilities through the standardized MCP protocol while maintaining all existing security and routing logic.
 

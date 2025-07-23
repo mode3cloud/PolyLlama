@@ -110,7 +110,7 @@ export default function PolyLlamaInstance({
           <div className="text-sm text-gray-600 mb-3 font-medium">GPU Devices</div>
           <div className="space-y-2">
             {gpuDevices.map((device) => {
-              const deviceMetrics = gpuMetrics?.find(m => m.index === device.index)
+              const deviceMetrics = Array.isArray(gpuMetrics) ? gpuMetrics.find(m => m.index === device.index) : undefined
               return (
                 <GPUDevice
                   key={device.index}

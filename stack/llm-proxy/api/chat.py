@@ -18,10 +18,138 @@ from pydantic import BaseModel
 # Get audio settings from request or config
 from config import LLMProxyConfig
 import litellm
+import datetime
+import pytz
 
 logger = logging.getLogger(__name__)
 
 chat_router = APIRouter()
+
+
+class ChatMessage(BaseModel):
+    """Chat message model."""
+
+    role: str
+    content: str
+    attachments: Optional[List[str]] = None  # Base64 encoded images or file paths
+
+
+class ChatCompletionRequest(BaseModel):
+    """Request model for chat completions."""
+
+    messages: List[ChatMessage]
+    model: Optional[str] = None
+    session_id: Optional[str] = None
+    stream: bool = True
+    temperature: float = 0.7
+    max_tokens: int = 8192
+    system_prompt: Optional[str] = None
+
+    # Tool selection options
+    tool_selection: Optional[Dict[str, Dict[str, bool]]] = (
+        None  # Server -> Tool -> enabled
+    )
+
+    # Audio-specific options
+    voice: Optional[str] = None
+    speech_speed: Optional[float] = None
+    speech_lang: Optional[str] = None
+
+
+# Shared constants
+def get_default_system_prompt() -> str:
+    # Set your location and timezone
+    location = "Katy, TX"
+    timezone = "America/Chicago"
+    now = datetime.datetime.now(pytz.timezone(timezone))
+    date_str = now.strftime("%Y-%m-%d")
+    time_str = now.strftime("%H:%M:%S")
+
+    return (
+        f"You are a helpful AI assistant.\n"
+        f"Current date: {date_str}\n"
+        f"Current time: {time_str}\n"
+        f"Location: {location}\n"
+    )
+
+
+async def _check_vision_support(model_name: str, llm_service) -> bool:
+    """Check if the given model supports vision capabilities."""
+    supports_vision = False
+
+    # For Ollama models, use our capability check
+    if model_name.startswith("ollama/"):
+        supports_vision = await llm_service.check_ollama_vision_support(model_name)
+    else:
+        try:
+            supports_vision = litellm.supports_vision(model_name)  # type: ignore
+        except:
+            # Fallback for models not in litellm's database
+            # Check common vision model patterns
+            vision_patterns = [
+                "vision",
+                "gpt-4o",
+                "gpt-4v",
+                "claude-3",
+                "gemini-pro-vision",
+                "llava",
+                "bakllava",
+            ]
+            model_lower = model_name.lower()
+            supports_vision = any(pattern in model_lower for pattern in vision_patterns)
+
+    return supports_vision
+
+
+def _convert_messages_to_dict(
+    messages: List[ChatMessage], supports_vision: bool
+) -> List[Dict[str, Any]]:
+    """Convert pydantic ChatMessage objects to dict format with vision support."""
+    converted_messages = []
+
+    for msg in messages:
+        if (
+            msg.role == "user"
+            and msg.attachments
+            and len(msg.attachments) > 0
+            and supports_vision
+        ):
+            # For vision models, format content as array
+            content = []
+            if msg.content:
+                content.append({"type": "text", "text": msg.content})
+
+            for attachment in msg.attachments:
+                content.append({"type": "image_url", "image_url": {"url": attachment}})
+
+            message_dict = {"role": msg.role, "content": content}
+            converted_messages.append(message_dict)
+        else:
+            # Standard message format
+            message_dict = {"role": msg.role, "content": msg.content}
+            converted_messages.append(message_dict)
+
+            # For non-vision models with attachments, add a note about the image
+            if (
+                msg.role == "user"
+                and msg.attachments
+                and len(msg.attachments) > 0
+                and not supports_vision
+            ):
+                # Add a text description that an image was attached
+                image_count = len(msg.attachments)
+                image_note = f"\n\n[Note: {image_count} image{'s' if image_count > 1 else ''} attached but this model doesn't support vision]"
+                message_dict["content"] += image_note
+
+    return converted_messages
+
+
+def _setup_model(request: ChatCompletionRequest, llm_service):
+    """Set up the model from request or use default."""
+    if request.model:
+        llm_service.set_model(request.model)
+    else:
+        logger.warning("No model specified in request, using default model")
 
 
 def process_base64_attachments(attachments: List[str]) -> List[str]:
@@ -93,61 +221,41 @@ async def test_chat(req: Request):
         }
 
 
-class ChatMessage(BaseModel):
-    """Chat message model."""
-
-    role: str
-    content: str
-    attachments: Optional[List[str]] = None  # Base64 encoded images or file paths
-
-
-class ChatCompletionRequest(BaseModel):
-    """Request model for chat completions."""
-
-    messages: List[ChatMessage]
-    model: Optional[str] = None
-    session_id: Optional[str] = None
-    stream: bool = True
-    temperature: float = 0.7
-    max_tokens: int = 8192
-    system_prompt: Optional[str] = None
-
-    # Tool selection options
-    tool_selection: Optional[Dict[str, Dict[str, bool]]] = None  # Server -> Tool -> enabled
-
-    # Audio-specific options
-    voice: Optional[str] = None
-    speech_speed: Optional[float] = None
-    speech_lang: Optional[str] = None
-
-
 def _convert_to_openai_format(chunk: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Convert llm-proxy internal format to OpenAI streaming format."""
     if chunk.get("type") == "content":
         return {
-            "choices": [{
-                "delta": {"content": chunk.get("content", "")},
-                "finish_reason": None,
-                "index": 0
-            }]
+            "choices": [
+                {
+                    "delta": {"content": chunk.get("content", "")},
+                    "finish_reason": None,
+                    "index": 0,
+                }
+            ]
         }
     elif chunk.get("type") == "tool_call":
         tool_call = chunk.get("tool_call", {})
         return {
-            "choices": [{
-                "delta": {
-                    "tool_calls": [{
-                        "id": tool_call.get("id"),
-                        "type": "function",
-                        "function": {
-                            "name": tool_call.get("name"),
-                            "arguments": json.dumps(tool_call.get("arguments", {}))
-                        }
-                    }]
-                },
-                "finish_reason": None,
-                "index": 0
-            }]
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": tool_call.get("id"),
+                                "type": "function",
+                                "function": {
+                                    "name": tool_call.get("name"),
+                                    "arguments": json.dumps(
+                                        tool_call.get("arguments", {})
+                                    ),
+                                },
+                            }
+                        ]
+                    },
+                    "finish_reason": None,
+                    "index": 0,
+                }
+            ]
         }
     elif chunk.get("type") == "tool_call_streaming":
         # Convert streaming tool call to OpenAI format
@@ -155,21 +263,25 @@ def _convert_to_openai_format(chunk: Dict[str, Any]) -> Optional[Dict[str, Any]]
         if tool_call.get("status") == "started":
             # Send initial tool call with empty arguments
             return {
-                "choices": [{
-                    "delta": {
-                        "tool_calls": [{
-                            "index": 0,
-                            "id": tool_call.get("id"),
-                            "type": "function",
-                            "function": {
-                                "name": tool_call.get("name"),
-                                "arguments": ""
-                            }
-                        }]
-                    },
-                    "finish_reason": None,
-                    "index": 0
-                }]
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": tool_call.get("id"),
+                                    "type": "function",
+                                    "function": {
+                                        "name": tool_call.get("name"),
+                                        "arguments": "",
+                                    },
+                                }
+                            ]
+                        },
+                        "finish_reason": None,
+                        "index": 0,
+                    }
+                ]
             }
         # Skip other streaming statuses for now
         return None
@@ -179,21 +291,17 @@ def _convert_to_openai_format(chunk: Dict[str, Any]) -> Optional[Dict[str, Any]]
         name = chunk.get("name", "unknown")
         # Format tool result as a content message showing the tool execution
         return {
-            "choices": [{
-                "delta": {"content": f"\n[Tool: {name}]\n{result}\n"},
-                "finish_reason": None,
-                "index": 0
-            }]
+            "choices": [
+                {
+                    "delta": {"content": f"\n[Tool: {name}]\n{result}\n"},
+                    "finish_reason": None,
+                    "index": 0,
+                }
+            ]
         }
     elif chunk.get("type") == "complete":
         # Send final content with finish reason
-        return {
-            "choices": [{
-                "delta": {},
-                "finish_reason": "stop",
-                "index": 0
-            }]
-        }
+        return {"choices": [{"delta": {}, "finish_reason": "stop", "index": 0}]}
     # Skip other types like "connected", "tool_error", "done"
     return None
 
@@ -208,10 +316,7 @@ async def chat_completion(request: ChatCompletionRequest, req: Request):
         mcp_manager = req.app.state.mcp_manager
 
         # Set model if provided
-        if request.model:
-            llm_service.set_model(request.model)
-        else:
-            logger.warning("No model specified in request, using default model")
+        _setup_model(request, llm_service)
 
         logger.info(
             f"Processing chat completion request with model: {llm_service.model}"
@@ -220,70 +325,23 @@ async def chat_completion(request: ChatCompletionRequest, req: Request):
 
         # Check if model supports vision
         model_name = request.model or llm_service.model
-        supports_vision = False
-        
-        # For Ollama models, use our capability check
-        if model_name.startswith("ollama/"):
-            supports_vision = await llm_service.check_ollama_vision_support(model_name)
-        else:
-            try:
-                supports_vision = litellm.supports_vision(model_name)  # type: ignore
-            except:
-                # Fallback for models not in litellm's database
-                # Check common vision model patterns
-                vision_patterns = [
-                    "vision",
-                    "gpt-4o",
-                    "gpt-4v",
-                    "claude-3",
-                    "gemini-pro-vision",
-                    "llava",
-                    "bakllava",
-                ]
-                model_lower = model_name.lower()
-                supports_vision = any(pattern in model_lower for pattern in vision_patterns)
+        supports_vision = await _check_vision_support(model_name, llm_service)
 
         logger.info(f"Model {model_name} supports vision: {supports_vision}")
-        
+
         # Debug: Log raw request messages
-        logger.info(f"Raw request messages: {[{'role': msg.role, 'content': msg.content, 'attachments': msg.attachments} for msg in request.messages]}")
+        logger.info(
+            f"Raw request messages: {[{'role': msg.role, 'content': msg.content, 'attachments': msg.attachments} for msg in request.messages]}"
+        )
 
         # Convert pydantic messages to dict format
-        messages = []
+        messages = _convert_messages_to_dict(request.messages, supports_vision)
 
-        for msg in request.messages:
-            if msg.role == "user" and msg.attachments and len(msg.attachments) > 0 and supports_vision:
-                # For vision models, format content as array
-                content = []
-                if msg.content:
-                    content.append({"type": "text", "text": msg.content})
-
-                for attachment in msg.attachments:
-                    content.append(
-                        {"type": "image_url", "image_url": {"url": attachment}}
-                    )
-
-                message_dict = {"role": msg.role, "content": content}
-                messages.append(message_dict)
-            else:
-                # Standard message format
-                message_dict = {"role": msg.role, "content": msg.content}
-                messages.append(message_dict)
-
-                # For non-vision models with attachments, add a note about the image
-                if msg.role == "user" and msg.attachments and len(msg.attachments) > 0 and not supports_vision:
-                    # Add a text description that an image was attached
-                    image_count = len(msg.attachments)
-                    image_note = f"\n\n[Note: {image_count} image{'s' if image_count > 1 else ''} attached but this model doesn't support vision]"
-                    message_dict["content"] += image_note
-
-        # We don't process attachments anymore since document processing isn't implemented
-        
         # Debug: Log converted messages
         logger.info(f"Converted messages being sent to LLM: {messages}")
 
         # Prepare system prompt
-        system_prompt = request.system_prompt or "You are a helpful AI assistant."
+        system_prompt = request.system_prompt or get_default_system_prompt()
 
         # Return streaming response
         return StreamingResponse(
@@ -358,20 +416,22 @@ async def _stream_chat_completion(
         logger.info(f"Streamed {chunk_count} chunks")
 
         # Signal completion in OpenAI format
-        yield 'data: [DONE]\n\n'
+        yield "data: [DONE]\n\n"
 
     except Exception as e:
         logger.error(f"Error in streaming chat completion: {e}", exc_info=True)
         # For errors, we'll send an error in the content
         error_chunk = {
-            "choices": [{
-                "delta": {"content": f"Error: {str(e)}"},
-                "finish_reason": None,
-                "index": 0
-            }]
+            "choices": [
+                {
+                    "delta": {"content": f"Error: {str(e)}"},
+                    "finish_reason": None,
+                    "index": 0,
+                }
+            ]
         }
         yield f"data: {json.dumps(error_chunk)}\n\n"
-        yield 'data: [DONE]\n\n'
+        yield "data: [DONE]\n\n"
 
 
 @chat_router.post("/completions_audio")
@@ -387,64 +447,21 @@ async def chat_completion_audio(request: ChatCompletionRequest, req: Request):
         audio_service = req.app.state.audio_service
 
         # Set model if provided
-        if request.model:
-            llm_service.set_model(request.model)
-        else:
-            logger.warning("No model specified in request, using default model")
+        _setup_model(request, llm_service)
 
         logger.info(
             f"Processing audio chat completion request with model: {llm_service.model}"
         )
 
-        # Check if model supports vision (same logic as regular completions)
+        # Check if model supports vision
         model_name = request.model or llm_service.model
-        supports_vision = False
-        
-        # For Ollama models, use our capability check
-        if model_name.startswith("ollama/"):
-            supports_vision = await llm_service.check_ollama_vision_support(model_name)
-        else:
-            try:
-                supports_vision = litellm.supports_vision(model_name)  # type: ignore
-            except:
-                vision_patterns = [
-                    "vision",
-                    "gpt-4o",
-                    "gpt-4v",
-                    "claude-3",
-                    "gemini-pro-vision",
-                    "llava",
-                    "bakllava",
-                ]
-                model_lower = model_name.lower()
-                supports_vision = any(pattern in model_lower for pattern in vision_patterns)
+        supports_vision = await _check_vision_support(model_name, llm_service)
 
-        # Convert pydantic messages to dict format (same as regular completions)
-        messages = []
-        for msg in request.messages:
-            if msg.role == "user" and msg.attachments and len(msg.attachments) > 0 and supports_vision:
-                content = []
-                if msg.content:
-                    content.append({"type": "text", "text": msg.content})
-
-                for attachment in msg.attachments:
-                    content.append(
-                        {"type": "image_url", "image_url": {"url": attachment}}
-                    )
-
-                message_dict = {"role": msg.role, "content": content}
-                messages.append(message_dict)
-            else:
-                message_dict = {"role": msg.role, "content": msg.content}
-                messages.append(message_dict)
-
-                if msg.role == "user" and msg.attachments and len(msg.attachments) > 0 and not supports_vision:
-                    image_count = len(msg.attachments)
-                    image_note = f"\n\n[Note: {image_count} image{'s' if image_count > 1 else ''} attached but this model doesn't support vision]"
-                    message_dict["content"] += image_note
+        # Convert pydantic messages to dict format
+        messages = _convert_messages_to_dict(request.messages, supports_vision)
 
         # Prepare system prompt
-        system_prompt = request.system_prompt or "You are a helpful AI assistant."
+        system_prompt = request.system_prompt or get_default_system_prompt()
 
         voice = request.voice or LLMProxyConfig.AUDIO_DEFAULT_VOICE
         speed = request.speech_speed or LLMProxyConfig.AUDIO_DEFAULT_SPEED
@@ -540,11 +557,13 @@ async def _stream_chat_completion_with_audio(
                 logger.error(f"Error in text collection: {e}")
                 # Send error in OpenAI format
                 error_chunk = {
-                    "choices": [{
-                        "delta": {"content": f"Error: {str(e)}"},
-                        "finish_reason": None,
-                        "index": 0
-                    }]
+                    "choices": [
+                        {
+                            "delta": {"content": f"Error: {str(e)}"},
+                            "finish_reason": None,
+                            "index": 0,
+                        }
+                    ]
                 }
                 await audio_queue.put(("error", error_chunk))
             finally:
@@ -576,18 +595,20 @@ async def _stream_chat_completion_with_audio(
 
                     # Create audio event in OpenAI format with audio extension
                     audio_chunk = {
-                        "choices": [{
-                            "delta": {
-                                "audio": {
-                                    "audio": audio_base64,
-                                    "sample_rate": sample_rate,
-                                    "text": text_chunk,
-                                    "format": "wav"
-                                }
-                            },
-                            "finish_reason": None,
-                            "index": 0
-                        }]
+                        "choices": [
+                            {
+                                "delta": {
+                                    "audio": {
+                                        "audio": audio_base64,
+                                        "sample_rate": sample_rate,
+                                        "text": text_chunk,
+                                        "format": "wav",
+                                    }
+                                },
+                                "finish_reason": None,
+                                "index": 0,
+                            }
+                        ]
                     }
 
                     await audio_queue.put(("audio", audio_chunk))
@@ -621,17 +642,19 @@ async def _stream_chat_completion_with_audio(
         await audio_task
 
         # Signal completion in OpenAI format
-        yield 'data: [DONE]\n\n'
+        yield "data: [DONE]\n\n"
 
     except Exception as e:
         logger.error(f"Error in streaming audio chat completion: {e}", exc_info=True)
         # Send error in OpenAI format
         error_chunk = {
-            "choices": [{
-                "delta": {"content": f"Error: {str(e)}"},
-                "finish_reason": None,
-                "index": 0
-            }]
+            "choices": [
+                {
+                    "delta": {"content": f"Error: {str(e)}"},
+                    "finish_reason": None,
+                    "index": 0,
+                }
+            ]
         }
         yield f"data: {json.dumps(error_chunk)}\n\n"
-        yield 'data: [DONE]\n\n'
+        yield "data: [DONE]\n\n"

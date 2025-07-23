@@ -5,6 +5,7 @@ import { ChatMessage, ChatModel, ChatImage } from '../types'
 import { fetchWithAuth } from '../lib/fetchWithAuth'
 import { streamChat, streamChatWithAudio, syncSessionMessages, exportChatToMarkdown } from '../lib/chatUtils'
 import { useAudioPlayer } from '../hooks/useAudioPlayer'
+import { debugLog } from '../lib/debugConfig'
 import SessionSidebar from './SessionSidebar'
 import ChatHeader from './ChatHeader'
 import ChatInput from './ChatInput'
@@ -392,11 +393,9 @@ export default function ChatInterface() {
   const createStreamHandlers = useCallback(() => ({
     onChunk: (content: string) => {
       const timestamp = Date.now();
-      console.log(`[onChunk ${timestamp}] Called with: "${content}"`);
+      debugLog(`[onChunk ${timestamp}] Called with: "${content}"`);
       
       setMessages(prev => {
-        console.log(`[onChunk ${timestamp}] State update - current messages count: ${prev.length}`);
-        
         // Check if we need a new assistant message after tool results
         const lastMessage = prev[prev.length - 1];
         const needNewMessage = !lastMessage || 
@@ -410,7 +409,7 @@ export default function ChatInterface() {
           lastMessageIndexRef.current = messageIndex;
           streamingContentRef.current[messageIndex] = content;
           
-          console.log(`[onChunk ${timestamp}] NEW MESSAGE: content="${content}"`);
+          debugLog(`[onChunk ${timestamp}] NEW MESSAGE: content="${content}"`);
           
           const newAssistantMessage: ChatMessage = {
             role: 'assistant',
@@ -424,7 +423,7 @@ export default function ChatInterface() {
           const lastIdx = prev.length - 1;
           const currentContent = updatedMessages[lastIdx].content;
           
-          console.log(`[onChunk ${timestamp}] UPDATE: currentContent="${currentContent}", adding="${content}"`);
+          debugLog(`[onChunk ${timestamp}] UPDATE: currentContent="${currentContent}", adding="${content}"`);
           
           // Simply append to the existing content
           updatedMessages[lastIdx] = {
@@ -432,7 +431,7 @@ export default function ChatInterface() {
             content: currentContent + content
           };
           
-          console.log(`[onChunk ${timestamp}] RESULT: "${updatedMessages[lastIdx].content}"`);
+          debugLog(`[onChunk ${timestamp}] RESULT: "${updatedMessages[lastIdx].content}"`);
           return updatedMessages;
         }
       });

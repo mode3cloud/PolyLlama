@@ -1,5 +1,6 @@
 import { ChatMessage, StreamChunk } from '../types'
 import { fetchWithAuth } from './fetchWithAuth'
+import { debugLog } from './debugConfig'
 
 const API_BASE_URL = '/ui/api/chat'
 
@@ -61,7 +62,7 @@ export async function streamChat({
   }
   
   activeStreams.set(sessionId, streamId);
-  console.log('[streamChat] Starting stream:', streamId);
+  debugLog('[streamChat] Starting stream:', streamId);
   
   // Handle abort signal
   if (signal?.aborted) {
@@ -73,7 +74,7 @@ export async function streamChat({
     const currentStreamId = activeStreams.get(sessionId);
     if (currentStreamId === streamId) {
       activeStreams.delete(sessionId);
-      console.log('[streamChat] Cleaned up stream:', streamId);
+      debugLog('[streamChat] Cleaned up stream:', streamId);
     }
   };
   

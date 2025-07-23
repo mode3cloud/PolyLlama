@@ -76,6 +76,9 @@ class ComposeGenerator:
         if not gpu_groups:
             # CPU-only configuration - create at least one CPU instance
             cpu_instance_count = max(1, cpu_instance_count)
+        elif mixed_mode and gpu_groups and cpu_instance_count == 0:
+            # Mixed mode - ensure at least one CPU instance when GPUs are available
+            cpu_instance_count = 1
 
         # Create GPU instances first
         for i, group in enumerate(gpu_groups):
@@ -95,11 +98,8 @@ class ComposeGenerator:
             )
             instance_number += 1
 
-        # Add CPU instances if requested or in mixed mode
-        if cpu_instance_count > 0 or (mixed_mode and gpu_groups):
-            # In mixed mode with GPUs, ensure at least 1 CPU instance
-            if mixed_mode and gpu_groups and cpu_instance_count == 0:
-                cpu_instance_count = 1
+        # Add CPU instances only if explicitly requested
+        if cpu_instance_count > 0:
 
             for i in range(cpu_instance_count):
                 instances.append(

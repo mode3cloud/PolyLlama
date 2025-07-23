@@ -1,14 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import { readFile } from 'fs/promises';
-import { dirname, join } from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+import { v4 as uuidv4 } from 'uuid';
 
 const app = express();
 app.use(cors());
@@ -19,6 +11,10 @@ const PORT = process.env.MCP_SERVER_PORT || 3001;
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://polyllama:11434';
 const MCP_BRIDGE_URL = process.env.MCP_BRIDGE_URL || 'http://mcp-bridge:3000';
 const API_KEY = process.env.POLYLLAMA_API_KEY;
+
+// Store active SSE connections and pending messages
+const activeConnections = new Map();
+const pendingMessages = new Map();
 
 // Cache for MCP tools fetched from the bridge
 let cachedTools = [];
@@ -36,7 +32,6 @@ async function fetchMCPTools() {
 
     console.log(`Fetching tools from MCP bridge at ${MCP_BRIDGE_URL}/tools`);
     
-    // Add timeout to prevent hanging
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
@@ -59,16 +54,8 @@ async function fetchMCPTools() {
       
       console.log(`Successfully fetched ${tools.length} tools from MCP bridge`);
       
-      // Convert MCP bridge tool format to MCP protocol format
-      cachedTools = tools.map(tool => ({
-        name: tool.name,
-        description: tool.description || 'No description available',
-        inputSchema: tool.inputSchema || {
-          type: 'object',
-          properties: {},
-          additionalProperties: true
-        }
-      }));
+      // Pass through tools directly from MCP bridge (preserve complete schemas)
+      cachedTools = tools;
       
       lastToolsFetch = now;
       return cachedTools;
@@ -83,48 +70,11 @@ async function fetchMCPTools() {
     
   } catch (error) {
     console.error('Failed to fetch tools from MCP bridge:', error);
-    console.error('Error details:', {
-      message: error.message,
-      stack: error.stack,
-      mcpBridgeUrl: MCP_BRIDGE_URL
-    });
-    // Return cached tools if available, otherwise empty array
     if (cachedTools.length > 0) {
       console.log(`Returning ${cachedTools.length} cached tools due to fetch error`);
       return cachedTools;
     }
     return [];
-  }
-}
-
-// Utility function to make requests to PolyLlama with proper authentication
-async function makePolyllamaRequest(endpoint, options = {}) {
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(API_KEY && { 'api-key': API_KEY }),
-    ...options.headers
-  };
-
-  const url = `${OLLAMA_BASE_URL}${endpoint}`;
-  
-  try {
-    const response = await fetch(url, {
-      ...options,
-      headers
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-    }
-
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('application/json')) {
-      return await response.json();
-    } else {
-      return await response.text();
-    }
-  } catch (error) {
-    throw new Error(`Failed to connect to PolyLlama: ${error.message}`);
   }
 }
 
@@ -147,9 +97,8 @@ async function executeToolViaBridge(toolName, args) {
   try {
     console.log(`Executing tool ${toolName} via MCP bridge with args:`, safeStringify(args));
     
-    // Add timeout to prevent hanging
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout for tool execution
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
     
     try {
       const response = await fetch(`${MCP_BRIDGE_URL}/execute`, {
@@ -182,22 +131,18 @@ async function executeToolViaBridge(toolName, args) {
       }
 
       // Format the result for MCP protocol
-      // The MCP bridge returns results in different formats, normalize them
       const content = result.result;
       
       if (Array.isArray(content)) {
-        // If it's already an array of content items
         console.log(`Tool ${toolName} returning array content with ${content.length} items`);
         return content;
       } else if (typeof content === 'string') {
-        // If it's a plain string
         console.log(`Tool ${toolName} returning string content (${content.length} chars)`);
         return [{
           type: 'text',
           text: content
         }];
       } else if (content && typeof content === 'object') {
-        // If it's an object, stringify it safely
         const stringified = safeStringify(content);
         console.log(`Tool ${toolName} returning object content (${stringified.length} chars)`);
         return [{
@@ -205,7 +150,6 @@ async function executeToolViaBridge(toolName, args) {
           text: stringified
         }];
       } else {
-        // Fallback
         console.log(`Tool ${toolName} returning fallback content`);
         return [{
           type: 'text',
@@ -223,65 +167,13 @@ async function executeToolViaBridge(toolName, args) {
     
   } catch (error) {
     console.error(`Failed to execute tool ${toolName}:`, error);
-    console.error('Tool execution error details:', {
-      toolName,
-      args,
-      message: error.message,
-      stack: error.stack,
-      mcpBridgeUrl: MCP_BRIDGE_URL
-    });
     throw new Error(`Tool execution failed: ${error.message}`);
   }
 }
 
-// Create MCP server instance - will be created per connection to avoid state issues
-function createMCPServer() {
-  const mcpServer = new Server(
-    {
-      name: 'polyllama-mcp-server',
-      version: '1.0.0'
-    },
-    {
-      capabilities: {
-        tools: {}
-      }
-    }
-  );
-
-  // Register tool handlers
-  mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
-    const tools = await fetchMCPTools();
-    return {
-      tools: tools
-    };
-  });
-
-  mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
-    
-    try {
-      const content = await executeToolViaBridge(name, args || {});
-      return {
-        content: content
-      };
-    } catch (error) {
-      throw new Error(`Tool execution failed: ${error.message}`);
-    }
-  });
-
-  return mcpServer;
-}
-
-// Express routes
-
-// Health check endpoint
+// Health check
 app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'polyllama-mcp-server',
-    version: '1.0.0',
-    timestamp: new Date().toISOString()
-  });
+  res.json({ status: 'ok', service: 'polyllama-mcp-server-async' });
 });
 
 // MCP server info endpoint
@@ -296,9 +188,10 @@ app.get('/info', async (req, res) => {
     console.log(`Info endpoint: fetched ${tools.length} tools in ${fetchTime}ms`);
     
     const response = {
-      name: 'PolyLlama MCP Server',
+      name: 'PolyLlama MCP Server (Async)',
       version: '1.0.0',
-      description: 'MCP Server that exposes all PolyLlama MCP tools for external consumption',
+      description: 'Async MCP Server that exposes all PolyLlama MCP tools for external consumption',
+      protocol: 'asynchronous-sse',
       tools: tools.map(tool => ({
         name: tool.name,
         description: tool.description
@@ -309,7 +202,7 @@ app.get('/info', async (req, res) => {
         info: '/info'
       },
       mcpBridgeUrl: MCP_BRIDGE_URL,
-      authenticationRequired: !!API_KEY,
+      authenticationRequired: false, // Auth handled by nginx
       toolCount: tools.length,
       performance: {
         toolFetchTime: `${fetchTime}ms`
@@ -323,33 +216,16 @@ app.get('/info', async (req, res) => {
     console.error('Error getting tools for info endpoint:', error);
     const errorResponse = {
       error: 'Failed to get tool information',
-      message: error.message,
-      stack: error.stack
+      message: error.message
     };
     res.status(500).json(errorResponse);
   }
 });
 
-// Store active connections for the SSE transport
-const activeConnections = new Map();
-
-// Handle the different client types (n8n vs Claude Desktop/mcp-remote)
-function detectClientType(userAgent, headers) {
-  if (userAgent && userAgent.includes('node')) {
-    return 'n8n';
-  } else if (headers['user-agent'] && headers['user-agent'].includes('mcp-remote')) {
-    return 'mcp-remote';
-  } else {
-    return 'unknown';
-  }
-}
-
-// MCP over SSE - GET endpoint for establishing SSE connection
+// SSE endpoint - establishes connection and provides session_id
 app.get('/sse', async (req, res) => {
   const userAgent = req.headers['user-agent'] || 'unknown';
-  const clientType = detectClientType(userAgent, req.headers);
-  
-  console.log(`SSE connection established from: ${userAgent} (detected: ${clientType})`);
+  console.log(`SSE connection from: ${userAgent}`);
   
   // Set SSE headers
   res.writeHead(200, {
@@ -360,254 +236,161 @@ app.get('/sse', async (req, res) => {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, api-key, x-api-key'
   });
 
-  // Generate connection ID
-  const connectionId = Date.now().toString();
+  // Generate session ID
+  const sessionId = uuidv4().replace(/-/g, '');
   
-  // Create MCP server for this connection
-  const mcpServer = createMCPServer();
-  
-  // Store connection state
-  activeConnections.set(connectionId, {
+  // Store connection
+  activeConnections.set(sessionId, {
     response: res,
-    server: mcpServer,
-    connectionId,
-    clientType
+    sessionId,
+    userAgent
   });
-  
-  if (clientType === 'n8n') {
-    console.log('SSE: Configuring for n8n client');
-    
-    // For n8n, send a complete MCP server info in a format it expects
-    res.write(`data: ${safeStringify({
-      jsonrpc: '2.0',
-      method: 'notifications/initialized',
-      params: {
-        protocolVersion: '2025-06-18',
-        capabilities: { 
-          tools: {},
-          resources: { subscribe: false, listChanged: false },
-          prompts: { listChanged: false }
-        },
-        serverInfo: {
-          name: 'polyllama-mcp-server',
-          version: '1.0.0'
-        }
-      }
-    }, 0)}\n\n`);
 
-    // Send tools immediately in MCP JSON-RPC format
-    try {
-      console.log('SSE: Fetching and sending tools for n8n');
-      const tools = await fetchMCPTools();
-      console.log(`SSE: Sending ${tools.length} tools to n8n`);
-      
-      res.write(`data: ${safeStringify({
-        jsonrpc: '2.0',
-        method: 'notifications/tools/list_changed',
-        params: { tools }
-      }, 0)}\n\n`);
-      
-    } catch (error) {
-      console.error('SSE: Error fetching tools for n8n:', error);
-      res.write(`data: ${safeStringify({
-        jsonrpc: '2.0',
-        method: 'notifications/error',
-        params: { error: error.message }
-      }, 0)}\n\n`);
-    }
-    
-  } else {
-    console.log('SSE: Configuring for standard MCP client');
-    
-    // For other clients (like mcp-remote), use event-based format
-    res.write('event: server-ready\n');
-    res.write(`data: ${safeStringify({
-      name: 'polyllama-mcp-server',
-      version: '1.0.0',
-      protocolVersion: '2025-06-18',
-      capabilities: { tools: {} }
-    }, 0)}\n\n`);
+  // Send endpoint event with session_id (like working server)
+  const endpointUrl = `/messages/?session_id=${sessionId}`;
+  res.write(`event: endpoint\n`);
+  res.write(`data: ${endpointUrl}\n\n`);
+  console.log(`SSE: Sent endpoint event: ${endpointUrl}`);
 
-    // Send tools list
-    try {
-      const tools = await fetchMCPTools();
-      res.write('event: tools\n');
-      res.write(`data: ${safeStringify({ tools }, 0)}\n\n`);
-    } catch (error) {
-      res.write('event: error\n');
-      res.write(`data: ${safeStringify({ error: error.message }, 0)}\n\n`);
-    }
-  }
-
-  // Keep connection alive
-  const heartbeat = setInterval(() => {
-    if (res.writableEnded) {
-      clearInterval(heartbeat);
-      return;
-    }
-    
-    if (clientType === 'n8n') {
-      res.write(`data: ${safeStringify({
-        jsonrpc: '2.0',
-        method: 'notifications/ping',
-        params: { timestamp: Date.now() }
-      }, 0)}\n\n`);
-    } else {
-      res.write('event: ping\n');
-      res.write(`data: ${Date.now()}\n\n`);
-    }
-  }, 30000);
-
-  // Handle client disconnect
+  // Handle disconnect
   req.on('close', () => {
-    console.log(`SSE client disconnected (${clientType})`);
-    clearInterval(heartbeat);
-    activeConnections.delete(connectionId);
+    console.log(`SSE client disconnected (session: ${sessionId})`);
+    activeConnections.delete(sessionId);
+    pendingMessages.delete(sessionId);
   });
 
   req.on('error', (error) => {
-    console.error(`SSE error (${clientType}):`, error);
-    clearInterval(heartbeat);
-    activeConnections.delete(connectionId);
+    console.error(`SSE error (session: ${sessionId}):`, error);
+    activeConnections.delete(sessionId);
+    pendingMessages.delete(sessionId);
   });
-  
-  console.log(`SSE connection fully initialized for ${clientType}`);
+
+  console.log(`SSE connection established (session: ${sessionId})`);
 });
 
-// MCP over SSE - POST endpoint for receiving JSON-RPC messages
-app.post('/sse', express.json(), async (req, res) => {
-  const startTime = Date.now();
-  console.log(`MCP POST request received: ${req.body?.method || 'unknown'} (id: ${req.body?.id})`);
-  console.log('Full POST body:', safeStringify(req.body));
+// Messages endpoint - handles JSON-RPC requests asynchronously
+app.post('/messages/', express.json(), async (req, res) => {
+  const sessionId = req.query.session_id;
   
-  try {
-    const { method, params, id, jsonrpc } = req.body;
-    let response;
+  if (!sessionId) {
+    return res.status(400).send('session_id is required');
+  }
 
-    if (method === 'initialize') {
-      console.log('Processing initialize request');
-      response = {
-        jsonrpc: '2.0',
-        id,
-        result: {
-          protocolVersion: '2025-06-18',
-          capabilities: { tools: {} },
-          serverInfo: {
-            name: 'polyllama-mcp-server',
-            version: '1.0.0'
+  const connection = activeConnections.get(sessionId);
+  if (!connection) {
+    return res.status(404).send('Session not found');
+  }
+
+  console.log(`JSON-RPC request for session ${sessionId}:`, req.body);
+  
+  // Immediately return "Accepted" (like working server)
+  res.send('Accepted');
+  
+  // Process request asynchronously and send response via SSE
+  setTimeout(async () => {
+    try {
+      const { method, params, id, jsonrpc } = req.body;
+      let response;
+
+      if (method === 'initialize') {
+        // Use the same protocol version that the client requested
+        const clientProtocolVersion = params?.protocolVersion || '2025-06-18';
+        response = {
+          jsonrpc: '2.0',
+          id,
+          result: {
+            protocolVersion: clientProtocolVersion,
+            capabilities: { tools: {} },
+            serverInfo: {
+              name: 'polyllama-async-mcp-server',
+              version: '1.0.0'
+            }
           }
-        }
-      };
-    } else if (method === 'tools/list') {
-      console.log('Processing tools/list request');
-      const toolsFetchStart = Date.now();
-      const tools = await fetchMCPTools();
-      const toolsFetchTime = Date.now() - toolsFetchStart;
-      console.log(`tools/list: fetched ${tools.length} tools in ${toolsFetchTime}ms`);
-      
-      response = {
-        jsonrpc: '2.0',
-        id,
-        result: { tools }
-      };
-    } else if (method === 'tools/call') {
-      console.log(`Processing tools/call request for tool: ${params?.name}`);
-      const toolExecStart = Date.now();
-      
-      try {
-        const content = await executeToolViaBridge(params.name, params.arguments || {});
-        const toolExecTime = Date.now() - toolExecStart;
-        console.log(`tools/call: executed ${params.name} in ${toolExecTime}ms`);
-        
-        response = {
-          jsonrpc: '2.0',
-          id,
-          result: { content }
         };
-      } catch (error) {
-        const toolExecTime = Date.now() - toolExecStart;
-        console.error(`tools/call: failed ${params.name} after ${toolExecTime}ms:`, error.message);
-        
+      } else if (method === 'tools/list') {
+        const tools = await fetchMCPTools();
         response = {
           jsonrpc: '2.0',
           id,
+          result: { tools }
+        };
+      } else if (method === 'resources/list') {
+        response = {
+          jsonrpc: '2.0',
+          id,
+          result: { resources: [] }
+        };
+      } else if (method === 'prompts/list') {
+        response = {
+          jsonrpc: '2.0',
+          id,
+          result: { prompts: [] }
+        };
+      } else if (method === 'tools/call') {
+        const { name, arguments: args } = params;
+        try {
+          const content = await executeToolViaBridge(name, args || {});
+          response = {
+            jsonrpc: '2.0',
+            id,
+            result: { content }
+          };
+        } catch (error) {
+          response = {
+            jsonrpc: '2.0',
+            id,
+            error: {
+              code: -32603,
+              message: error.message
+            }
+          };
+        }
+      } else {
+        response = {
+          jsonrpc: '2.0',
+          id,
+          error: {
+            code: -32601,
+            message: `Method not found: ${method}`
+          }
+        };
+      }
+
+      // Send response via SSE
+      if (connection.response && !connection.response.destroyed) {
+        const responseData = JSON.stringify(response);
+        connection.response.write(`data: ${responseData}\n\n`);
+        console.log(`Sent JSON-RPC response via SSE for ${method} (session: ${sessionId})`);
+      }
+      
+    } catch (error) {
+      console.error(`Error processing request for session ${sessionId}:`, error);
+      
+      if (connection.response && !connection.response.destroyed) {
+        const errorResponse = {
+          jsonrpc: '2.0',
+          id: req.body?.id || null,
           error: {
             code: -32603,
             message: error.message
           }
         };
+        connection.response.write(`data: ${JSON.stringify(errorResponse)}\n\n`);
       }
-    } else if (method === 'notifications/initialized') {
-      console.log('Processing notifications/initialized (acknowledging client initialization)');
-      // This is a notification, no response needed but return success
-      response = {
-        jsonrpc: '2.0',
-        id,
-        result: {}
-      };
-    } else if (method === 'resources/list') {
-      console.log('Processing resources/list request');
-      // We don't have resources, return empty list
-      response = {
-        jsonrpc: '2.0',
-        id,
-        result: { resources: [] }
-      };
-    } else if (method === 'prompts/list') {
-      console.log('Processing prompts/list request');
-      // We don't have prompts, return empty list
-      response = {
-        jsonrpc: '2.0',
-        id,
-        result: { prompts: [] }
-      };
-    } else {
-      console.log(`Unknown method requested: ${method}`);
-      response = {
-        jsonrpc: '2.0',
-        id,
-        error: {
-          code: -32601,
-          message: `Method not found: ${method}`
-        }
-      };
     }
-
-    // Send response back via HTTP
-    const totalTime = Date.now() - startTime;
-    console.log(`MCP POST response sent for ${method} (id: ${id}) in ${totalTime}ms`);
-    res.json(response);
-    
-  } catch (error) {
-    const totalTime = Date.now() - startTime;
-    console.error(`Error handling MCP POST after ${totalTime}ms:`, error);
-    console.error('POST error details:', {
-      message: error.message,
-      stack: error.stack,
-      body: req.body
-    });
-    
-    const errorResponse = {
-      jsonrpc: '2.0',
-      id: req.body?.id || null,
-      error: {
-        code: -32603,
-        message: error.message
-      }
-    };
-    
-    res.status(500).json(errorResponse);
-  }
+  }, 100); // Small delay to simulate async processing
 });
 
 // Start server
-app.listen(PORT, () => {
-  console.log(`🚀 PolyLlama MCP Server running on port ${PORT}`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 PolyLlama MCP Server (Async) running on port ${PORT}`);
   console.log(`📡 SSE endpoint: http://localhost:${PORT}/sse`);
+  console.log(`📤 Messages endpoint: http://localhost:${PORT}/messages/`);
   console.log(`🔍 Health check: http://localhost:${PORT}/health`);
   console.log(`ℹ️  Server info: http://localhost:${PORT}/info`);
   console.log(`🎯 Target PolyLlama: ${OLLAMA_BASE_URL}`);
-  console.log(`🔐 API Key protection: ${API_KEY ? 'Enabled' : 'Disabled'}`);
+  console.log(`🔐 API Key protection: Handled by nginx router`);
+  console.log(`🌉 MCP Bridge: ${MCP_BRIDGE_URL}`);
   
   // Fetch and display available tools
   fetchMCPTools().then(tools => {
@@ -619,21 +402,10 @@ app.listen(PORT, () => {
     } else {
       console.log('   No tools available (MCP Bridge may be starting up)');
     }
-    console.log('\n✨ PolyLlama MCP Server ready for connections!');
+    console.log('\n✨ PolyLlama Async MCP Server ready for connections!');
   }).catch(error => {
     console.log('\n🛠️  Available Tools: Error fetching tools from MCP Bridge');
     console.log(`   Error: ${error.message}`);
-    console.log('\n✨ PolyLlama MCP Server ready for connections!');
+    console.log('\n✨ PolyLlama Async MCP Server ready for connections!');
   });
-});
-
-// Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('SIGTERM received, shutting down gracefully');
-  process.exit(0);
-});
-
-process.on('SIGINT', () => {
-  console.log('SIGINT received, shutting down gracefully');
-  process.exit(0);
 });

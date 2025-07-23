@@ -27,10 +27,10 @@ async function fetchMCPTools() {
     }
 
     console.log(`Fetching tools from MCP bridge at ${MCP_BRIDGE_URL}/tools`);
-    
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
+
     try {
       const response = await fetch(`${MCP_BRIDGE_URL}/tools`, {
         signal: controller.signal,
@@ -38,24 +38,24 @@ async function fetchMCPTools() {
           'Content-Type': 'application/json'
         }
       });
-      
+
       clearTimeout(timeoutId);
-      
+
       if (!response.ok) {
         throw new Error(`MCP Bridge returned ${response.status}: ${response.statusText}`);
       }
 
       const data = await response.json();
       const tools = data.tools || [];
-      
+
       console.log(`Successfully fetched ${tools.length} tools from MCP bridge`);
-      
+
       // Pass through tools directly from MCP bridge (preserve complete schemas)
       cachedTools = tools;
-      
+
       lastToolsFetch = now;
       return cachedTools;
-      
+
     } catch (fetchError) {
       clearTimeout(timeoutId);
       if (fetchError.name === 'AbortError') {
@@ -63,7 +63,7 @@ async function fetchMCPTools() {
       }
       throw fetchError;
     }
-    
+
   } catch (error) {
     console.error('Failed to fetch tools from MCP bridge:', error);
     if (cachedTools.length > 0) {
@@ -92,10 +92,10 @@ function safeStringify(obj, indent = 2) {
 async function executeToolViaBridge(toolName, args) {
   try {
     console.log(`Executing tool ${toolName} via MCP bridge with args:`, safeStringify(args));
-    
+
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-    
+
     try {
       const response = await fetch(`${MCP_BRIDGE_URL}/execute`, {
         method: 'POST',
@@ -121,14 +121,14 @@ async function executeToolViaBridge(toolName, args) {
 
       const result = await response.json();
       console.log(`Tool ${toolName} execution result:`, safeStringify(result));
-      
+
       if (!result.success) {
         throw new Error(result.error || 'Tool execution failed');
       }
 
       // Format the result for MCP protocol
       const content = result.result;
-      
+
       if (Array.isArray(content)) {
         console.log(`Tool ${toolName} returning array content with ${content.length} items`);
         return content;
@@ -142,7 +142,7 @@ async function executeToolViaBridge(toolName, args) {
         const stringified = safeStringify(content);
         console.log(`Tool ${toolName} returning object content (${stringified.length} chars)`);
         return [{
-          type: 'text', 
+          type: 'text',
           text: stringified
         }];
       } else {
@@ -152,7 +152,7 @@ async function executeToolViaBridge(toolName, args) {
           text: String(content || 'No result')
         }];
       }
-      
+
     } catch (fetchError) {
       clearTimeout(timeoutId);
       if (fetchError.name === 'AbortError') {
@@ -160,7 +160,7 @@ async function executeToolViaBridge(toolName, args) {
       }
       throw fetchError;
     }
-    
+
   } catch (error) {
     console.error(`Failed to execute tool ${toolName}:`, error);
     throw new Error(`Tool execution failed: ${error.message}`);
@@ -181,14 +181,14 @@ app.get('/health', (req, res) => {
 // MCP server info endpoint
 app.get('/info', async (req, res) => {
   console.log('Info endpoint requested');
-  
+
   try {
     const startTime = Date.now();
     const tools = await fetchMCPTools();
     const fetchTime = Date.now() - startTime;
-    
+
     console.log(`Info endpoint: fetched ${tools.length} tools in ${fetchTime}ms`);
-    
+
     const response = {
       name: 'PolyLlama MCP Server (Streamable HTTP)',
       version: '1.0.0',
@@ -216,10 +216,10 @@ app.get('/info', async (req, res) => {
         toolFetchTime: `${fetchTime}ms`
       }
     };
-    
+
     res.json(response);
     console.log('Info endpoint: response sent successfully');
-    
+
   } catch (error) {
     console.error('Error getting tools for info endpoint:', error);
     const errorResponse = {
@@ -234,24 +234,24 @@ app.get('/info', async (req, res) => {
 app.post('/mcp', express.json(), async (req, res) => {
   const userAgent = req.headers['user-agent'] || 'unknown';
   const requestId = uuidv4().replace(/-/g, '').substring(0, 8);
-  
+
   console.log(`[${requestId}] MCP request from: ${userAgent}`);
   console.log(`[${requestId}] Request body:`, safeStringify(req.body));
-  
+
   try {
     const { method, params, id, jsonrpc } = req.body;
-    
+
     // Determine if we should stream the response
     const shouldStream = supportsStreaming(req) && (
-      method === 'tools/call' || 
+      method === 'tools/call' ||
       method === 'initialize' ||
       (params && params.stream === true)
     );
-    
+
     console.log(`[${requestId}] Method: ${method}, Streaming: ${shouldStream}`);
-    
+
     let response;
-    
+
     if (method === 'initialize') {
       // Use the same protocol version that the client requested
       const clientProtocolVersion = params?.protocolVersion || '2025-03-26';
@@ -260,7 +260,7 @@ app.post('/mcp', express.json(), async (req, res) => {
         id,
         result: {
           protocolVersion: clientProtocolVersion,
-          capabilities: { 
+          capabilities: {
             tools: {},
             streaming: {
               supported: true,
@@ -294,11 +294,11 @@ app.post('/mcp', express.json(), async (req, res) => {
       };
     } else if (method === 'tools/call') {
       const { name, arguments: args } = params;
-      
+
       if (shouldStream) {
         // Upgrade to SSE streaming for tool execution
         console.log(`[${requestId}] Upgrading to SSE streaming for tool: ${name}`);
-        
+
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
           'Cache-Control': 'no-cache',
@@ -306,7 +306,7 @@ app.post('/mcp', express.json(), async (req, res) => {
           'Access-Control-Allow-Origin': '*',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization, api-key, x-api-key'
         });
-        
+
         try {
           // Send start event
           const startEvent = {
@@ -319,21 +319,21 @@ app.post('/mcp', express.json(), async (req, res) => {
             }
           };
           res.write(`data: ${JSON.stringify(startEvent)}\n\n`);
-          
+
           // Execute tool
           const content = await executeToolViaBridge(name, args || {});
-          
+
           // Send progress/result events
           const resultEvent = {
             jsonrpc: '2.0',
             id,
-            result: { 
+            result: {
               type: 'result',
-              content 
+              content
             }
           };
           res.write(`data: ${JSON.stringify(resultEvent)}\n\n`);
-          
+
           // Send completion event
           const completeEvent = {
             jsonrpc: '2.0',
@@ -344,11 +344,11 @@ app.post('/mcp', express.json(), async (req, res) => {
             }
           };
           res.write(`data: ${JSON.stringify(completeEvent)}\n\n`);
-          
+
           console.log(`[${requestId}] Streaming tool execution completed for: ${name}`);
           res.end();
           return;
-          
+
         } catch (error) {
           // Send error event
           const errorEvent = {
@@ -398,10 +398,10 @@ app.post('/mcp', express.json(), async (req, res) => {
     // Send standard HTTP response
     console.log(`[${requestId}] Sending HTTP response for method: ${method}`);
     res.json(response);
-    
+
   } catch (error) {
     console.error(`[${requestId}] Error processing MCP request:`, error);
-    
+
     const errorResponse = {
       jsonrpc: '2.0',
       id: req.body?.id || null,
@@ -410,7 +410,7 @@ app.post('/mcp', express.json(), async (req, res) => {
         message: error.message
       }
     };
-    
+
     res.status(500).json(errorResponse);
   }
 });
@@ -418,10 +418,10 @@ app.post('/mcp', express.json(), async (req, res) => {
 // Legacy SSE endpoint for backward compatibility
 app.get('/sse', async (req, res) => {
   console.log('⚠️  Legacy SSE endpoint accessed - consider upgrading to streamable HTTP /mcp endpoint');
-  
+
   const userAgent = req.headers['user-agent'] || 'unknown';
   console.log(`SSE connection from: ${userAgent}`);
-  
+
   // Set SSE headers
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -433,16 +433,16 @@ app.get('/sse', async (req, res) => {
 
   // Generate session ID
   const sessionId = uuidv4().replace(/-/g, '');
-  
+
   // Send deprecation notice
   res.write(`event: deprecation\n`);
   res.write(`data: {"message": "SSE transport is deprecated. Please upgrade to streamable HTTP at /mcp endpoint.", "sessionId": "${sessionId}"}\n\n`);
-  
+
   // Send endpoint event for backward compatibility
   const endpointUrl = `/messages/?session_id=${sessionId}`;
   res.write(`event: endpoint\n`);
   res.write(`data: ${endpointUrl}\n\n`);
-  
+
   console.log(`Legacy SSE: Sent endpoint event: ${endpointUrl}`);
 
   // Handle disconnect
@@ -458,15 +458,15 @@ app.get('/sse', async (req, res) => {
 // Legacy messages endpoint for backward compatibility
 app.post('/messages/', express.json(), async (req, res) => {
   console.log('⚠️  Legacy messages endpoint accessed - consider upgrading to streamable HTTP /mcp endpoint');
-  
+
   const sessionId = req.query.session_id;
-  
+
   if (!sessionId) {
     return res.status(400).send('session_id is required');
   }
 
   console.log(`Legacy JSON-RPC request for session ${sessionId}:`, req.body);
-  
+
   // Redirect to main MCP endpoint
   res.status(302).json({
     message: 'This endpoint is deprecated. Please use POST /mcp for all MCP requests.',
@@ -486,13 +486,13 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🔐 API Key protection: Handled by nginx router`);
   console.log(`🌉 MCP Bridge: ${MCP_BRIDGE_URL}`);
   console.log(`📊 Protocol: Streamable HTTP (2025-03-26)`);
-  
+
   // Fetch and display available tools
   fetchMCPTools().then(tools => {
     console.log('\n🛠️  Available Tools:');
     if (tools.length > 0) {
       tools.forEach(tool => {
-        console.log(`   • ${tool.name}: ${tool.description}`);
+        console.log(` ⛏️ ${tool.name}`);
       });
     } else {
       console.log('   No tools available (MCP Bridge may be starting up)');

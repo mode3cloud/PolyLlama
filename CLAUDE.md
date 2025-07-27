@@ -806,6 +806,60 @@ The frontend (`chatUtils.ts`) parses OpenAI format and:
 - Structured logging with correlation IDs
 - Real-time dashboards for agent performance
 
+## MCP Server Implementation - Critical Notes
+
+### Streamable HTTP Proxy Compatibility
+
+**CRITICAL: Single-Event SSE Format for MCP Client Compatibility**
+
+The MCP server proxy (`stack/llm-proxy/mcp-server/server_streamable_http.js`) implements a **single-event SSE streaming format** that is essential for compatibility with MCP inspection tools like `mcpinspection v0.16.1`.
+
+**Key Implementation Details:**
+```javascript
+// CORRECT: Single event after tool completion
+// Execute tool first, then send only final result
+const content = await executeTool(name, args || {});
+const finalEvent = {
+  jsonrpc: '2.0',
+  id,
+  result: { content }
+};
+res.write(`data: ${JSON.stringify(finalEvent)}\n\n`);
+res.end();
+```
+
+**DO NOT use multi-event streaming:**
+```javascript
+// INCORRECT: Multi-event format causes mcpinspection to hang
+res.write(`data: ${JSON.stringify(startEvent)}\n\n`);  // Start event
+// ... tool execution ...
+res.write(`data: ${JSON.stringify(resultEvent)}\n\n`); // Result event  
+res.write(`data: ${JSON.stringify(completeEvent)}\n\n`); // Complete event
+```
+
+**Why This Matters:**
+- MCP inspection tools expect a single, final response after tool completion
+- Multi-event streams cause clients to hang after receiving the first event
+- The single-event format ensures proper tool execution waiting and result delivery
+- This pattern is required for `mcpinspection`, MCP IDEs, and other MCP-compliant clients
+
+**Testing Commands:**
+```bash
+# Test with curl (should work with both formats)
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d '{"jsonrpc": "2.0", "id": "test", "method": "tools/call", "params": {"name": "github__search_users", "arguments": {"q": "username"}}}' \
+  -N
+
+# Test with mcpinspection (requires single-event format)
+# Should receive complete tool results, not hang after first event
+```
+
+**Related Files:**
+- `stack/llm-proxy/mcp-server/server_streamable_http.js` - Main implementation
+- `mcp-config.json` - Upstream MCP server configuration
+
 ## Do NOT
 
 - Modify existing Nginx configurations
@@ -813,3 +867,4 @@ The frontend (`chatUtils.ts`) parses OpenAI format and:
 - Allow client-side tool execution
 - Bypass API-KEY authentication
 - Create agent-specific Ollama instances
+- **Use multi-event SSE streaming in MCP server proxy** - breaks MCP client compatibility

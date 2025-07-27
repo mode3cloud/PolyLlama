@@ -2,13 +2,11 @@
   "name": "polyllama-mcp-server",
   "version": "1.0.0",
   "description": "MCP Server implementation that exposes PolyLlama capabilities as MCP tools",
-  "main": "server.js",
+  "main": "server_streamable_http.js",
   "type": "module",
   "scripts": {
     "start": "node server_streamable_http.js",
-    "start:legacy": "node server.js",
     "dev": "node --watch server_streamable_http.js",
-    "dev:legacy": "node --watch server.js",
     "test": "node ../../test_streamable_http.js"
   },
   "dependencies": {
@@ -16,9 +14,6 @@
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "uuid": "^11.1.0"
-  },
-  "devDependencies": {
-    "node-fetch": "^3.3.2"
   },
   "keywords": [
     "mcp",

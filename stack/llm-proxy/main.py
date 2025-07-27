@@ -22,7 +22,7 @@ from api.models import models_router
 from api.mcp import mcp_router
 from services.multi_llm_service import MultiLLMService
 from services.message_manager import MessageManager
-from services.mcp_bridge_manager import MCPBridgeManager
+from services.mcp_manager import MCPManager
 from services.audio_service_api import AudioServiceAPI
 from config import LLMProxyConfig
 
@@ -53,7 +53,7 @@ app.add_middleware(
 # Global service instances
 llm_service: MultiLLMService
 message_manager: MessageManager
-mcp_manager: MCPBridgeManager
+mcp_manager: MCPManager
 audio_service: AudioServiceAPI
 
 
@@ -68,7 +68,7 @@ async def startup_event():
     message_manager = MessageManager(redis_url=LLMProxyConfig.REDIS_URL)
     llm_service = MultiLLMService()  # No Neo4j for now
     llm_service.message_manager = message_manager  # Set message manager directly
-    mcp_manager = MCPBridgeManager()
+    mcp_manager = MCPManager()
 
     # Initialize audio service
     audio_service = AudioServiceAPI(

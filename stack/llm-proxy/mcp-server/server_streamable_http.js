@@ -1,6 +1,15 @@
 import express from 'express';
 import cors from 'cors';
+import { spawn } from 'child_process';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { readFile } from 'fs/promises';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { v4 as uuidv4 } from 'uuid';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const app = express();
 app.use(cors());
@@ -9,15 +18,284 @@ app.use(express.json());
 // Configuration
 const PORT = process.env.MCP_SERVER_PORT || 3001;
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://polyllama:11434';
-const MCP_BRIDGE_URL = process.env.MCP_BRIDGE_URL || 'http://mcp-bridge:3000';
 const API_KEY = process.env.POLYLLAMA_API_KEY;
+
+// Store active MCP connections
+const mcpConnections = new Map();
+
+// Store initialization state and tool counts per server
+const serverState = new Map();
 
 // Cache for MCP tools fetched from the bridge
 let cachedTools = [];
 let lastToolsFetch = 0;
 const TOOLS_CACHE_DURATION = 60000; // 1 minute cache
 
-// Fetch available tools from the MCP bridge
+// Configuration constants
+const INIT_RETRY_DELAY = 2000; // 2 seconds
+const INIT_MAX_RETRIES = 3;
+const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
+
+// Beautiful console formatter for initialization results
+function displayInitializationResults(results) {
+  console.log('\n' + '═'.repeat(60));
+  console.log('🚀 MCP SERVERS INITIALIZATION RESULTS');
+  console.log('═'.repeat(60) + '\n');
+  
+  const servers = Object.entries(results);
+  const totalServers = servers.length;
+  const successfulServers = servers.filter(([_, success]) => success).length;
+  const failedServers = totalServers - successfulServers;
+  
+  // Create a formatted table
+  console.log('┌─────────────────────────┬──────────┬────────────────────┐');
+  console.log('│ Server Name             │ Status   │ Tools              │');
+  console.log('├─────────────────────────┼──────────┼────────────────────┤');
+  
+  for (const [name, success] of servers) {
+    const state = serverState.get(name);
+    const toolCount = state?.toolCount || 0;
+    const statusEmoji = success ? '✅' : '❌';
+    const statusText = success ? 'Online' : 'Failed';
+    const toolsText = success ? `${toolCount} tools` : state?.lastError || 'Error';
+    
+    // Pad strings for alignment
+    const paddedName = name.padEnd(23);
+    const paddedStatus = `${statusEmoji} ${statusText}`.padEnd(8);
+    const paddedTools = toolsText.padEnd(18);
+    
+    console.log(`│ ${paddedName} │ ${paddedStatus} │ ${paddedTools} │`);
+  }
+  
+  console.log('└─────────────────────────┴──────────┴────────────────────┘');
+  
+  // Summary statistics
+  console.log('\n📊 SUMMARY:');
+  console.log('─'.repeat(40));
+  console.log(`  Total Servers:      ${totalServers}`);
+  console.log(`  ✅ Successful:      ${successfulServers}`);
+  console.log(`  ❌ Failed:          ${failedServers}`);
+  console.log(`  Success Rate:       ${((successfulServers/totalServers) * 100).toFixed(1)}%`);
+  
+  // Show failed server details if any
+  if (failedServers > 0) {
+    console.log('\n⚠️  FAILED SERVERS:');
+    console.log('─'.repeat(40));
+    for (const [name, success] of servers) {
+      if (!success) {
+        const state = serverState.get(name);
+        console.log(`  • ${name}: ${state?.lastError || 'Unknown error'}`);
+      }
+    }
+  }
+  
+  // Show successful servers with tool details
+  if (successfulServers > 0) {
+    console.log('\n✨ READY SERVERS:');
+    console.log('─'.repeat(40));
+    for (const [name, success] of servers) {
+      if (success) {
+        const state = serverState.get(name);
+        const toolCount = state?.toolCount || 0;
+        const emoji = getServerEmoji(name);
+        console.log(`  ${emoji} ${name}: ${toolCount} tool${toolCount !== 1 ? 's' : ''} available`);
+      }
+    }
+  }
+  
+  console.log('\n' + '═'.repeat(60) + '\n');
+}
+
+// Get emoji for server based on name
+function getServerEmoji(serverName) {
+  const emojiMap = {
+    'github': '🐙',
+    'gitlab': '🦊',
+    'docker': '🐳',
+    'kubernetes': '☸️',
+    'aws': '☁️',
+    'azure': '☁️',
+    'google': '🔍',
+    'database': '🗄️',
+    'api': '🔌',
+    'web': '🌐',
+    'file': '📁',
+    'system': '⚙️',
+    'default': '🔧'
+  };
+  
+  const lowerName = serverName.toLowerCase();
+  for (const [key, emoji] of Object.entries(emojiMap)) {
+    if (lowerName.includes(key)) {
+      return emoji;
+    }
+  }
+  return emojiMap.default;
+}
+
+// Load MCP configuration
+async function loadConfig() {
+  try {
+    const configPath = process.env.MCP_CONFIG_PATH || join(__dirname, 'mcp-config.json');
+    const configData = await readFile(configPath, 'utf-8');
+    return JSON.parse(configData);
+  } catch (error) {
+    console.error('Failed to load MCP config:', error);
+    return { mcpServers: {} };
+  }
+}
+
+// Initialize MCP server connection with retries
+async function initializeMcpServer(name, config, retryCount = 0) {
+  console.log(`Initializing MCP server: ${name} (attempt ${retryCount + 1})`);
+  console.log(`Server config:`, JSON.stringify(config, null, 2));
+  
+  try {
+    // Create transport with proper process management
+    const transport = new StdioClientTransport({
+      command: config.command,
+      args: config.args,
+      env: { ...process.env, ...config.env }
+    });
+
+    // Add error handling for transport
+    transport.onError = (error) => {
+      console.error(`Transport error for ${name}:`, error);
+      // Mark server as disconnected but don't crash main process
+      serverState.set(name, {
+        connected: false,
+        toolCount: 0,
+        lastError: error.message,
+        initTime: Date.now()
+      });
+    };
+
+    transport.onClose = () => {
+      console.log(`Transport closed for ${name}`);
+      // Mark server as disconnected
+      serverState.set(name, {
+        connected: false,
+        toolCount: 0,
+        lastError: 'Transport closed',
+        initTime: Date.now()
+      });
+    };
+
+    // Create client
+    const client = new Client({
+      name: `mcp-server-${name}`,
+      version: '1.0.0'
+    }, {
+      capabilities: {}
+    });
+
+    // Connect client to transport
+    await client.connect(transport);
+
+    // Fetch initial tools to verify connection
+    const tools = await client.listTools();
+    const toolCount = tools.tools?.length || 0;
+
+    // Store connection
+    mcpConnections.set(name, {
+      client,
+      transport,
+      config,
+      lastHealthCheck: Date.now()
+    });
+
+    // Store server state
+    serverState.set(name, {
+      connected: true,
+      toolCount,
+      lastError: null,
+      initTime: Date.now()
+    });
+
+    console.log(`Successfully connected to MCP server: ${name} with ${toolCount} tools`);
+    return true;
+  } catch (error) {
+    console.error(`Failed to initialize MCP server ${name}:`, error);
+    
+    // Store failed state
+    serverState.set(name, {
+      connected: false,
+      toolCount: 0,
+      lastError: error.message,
+      initTime: Date.now()
+    });
+
+    // Retry logic
+    if (retryCount < INIT_MAX_RETRIES) {
+      console.log(`Retrying ${name} in ${INIT_RETRY_DELAY}ms...`);
+      await new Promise(resolve => setTimeout(resolve, INIT_RETRY_DELAY));
+      return await initializeMcpServer(name, config, retryCount + 1);
+    }
+
+    return false;
+  }
+}
+
+// Initialize all MCP servers
+async function initializeAllServers() {
+  const config = await loadConfig();
+  const results = {};
+
+  // Initialize servers in parallel with staggered start
+  const initPromises = Object.entries(config.mcpServers).map(async ([name, serverConfig], index) => {
+    // Stagger initialization to avoid overwhelming the system
+    await new Promise(resolve => setTimeout(resolve, index * 500));
+    results[name] = await initializeMcpServer(name, serverConfig);
+  });
+
+  await Promise.all(initPromises);
+  return results;
+}
+
+// Health check for a single server
+async function checkServerHealth(name) {
+  const connection = mcpConnections.get(name);
+  const state = serverState.get(name) || { connected: false, toolCount: 0 };
+
+  if (!connection) {
+    serverState.set(name, { ...state, connected: false, lastError: 'No connection' });
+    return false;
+  }
+
+  try {
+    // Try to list tools as a health check
+    const tools = await connection.client.listTools();
+    const toolCount = tools.tools?.length || 0;
+    
+    serverState.set(name, {
+      connected: true,
+      toolCount,
+      lastError: null,
+      lastHealthCheck: Date.now()
+    });
+    
+    connection.lastHealthCheck = Date.now();
+    return true;
+  } catch (error) {
+    console.error(`Health check failed for ${name}:`, error.message);
+    serverState.set(name, {
+      ...state,
+      connected: false,
+      lastError: error.message,
+      lastHealthCheck: Date.now()
+    });
+    return false;
+  }
+}
+
+// Periodic health check for all servers
+async function runHealthChecks() {
+  for (const [name] of mcpConnections) {
+    await checkServerHealth(name);
+  }
+}
+
+// Fetch available tools from all managed MCP servers
 async function fetchMCPTools() {
   try {
     const now = Date.now();
@@ -26,46 +304,60 @@ async function fetchMCPTools() {
       return cachedTools;
     }
 
-    console.log(`Fetching tools from MCP bridge at ${MCP_BRIDGE_URL}/tools`);
+    console.log(`Fetching tools from all managed MCP servers`);
+    const allTools = [];
+    const errors = {};
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    for (const [serverName, connection] of mcpConnections.entries()) {
+      const state = serverState.get(serverName);
+      
+      // Skip if server is known to be disconnected
+      if (state && !state.connected) {
+        errors[serverName] = state.lastError || 'Server disconnected';
+        continue;
+      }
 
-    try {
-      const response = await fetch(`${MCP_BRIDGE_URL}/tools`, {
-        signal: controller.signal,
-        headers: {
-          'Content-Type': 'application/json'
+      try {
+        const tools = await connection.client.listTools();
+        const toolCount = tools.tools?.length || 0;
+        
+        // Update tool count in server state
+        if (state) {
+          state.toolCount = toolCount;
         }
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        throw new Error(`MCP Bridge returned ${response.status}: ${response.statusText}`);
+        
+        // Add server name to each tool and prefix tool name
+        for (const tool of tools.tools || []) {
+          // Replace hyphens in server name with underscores for OpenAI compatibility
+          const safeServerName = serverName.replace(/-/g, '_');
+          allTools.push({
+            ...tool,
+            name: `${safeServerName}__${tool.name}`,
+            originalName: tool.name,
+            server: serverName
+          });
+        }
+      } catch (error) {
+        console.error(`Failed to list tools from ${serverName}:`, error);
+        errors[serverName] = error.message;
+        
+        // Update server state to reflect error
+        serverState.set(serverName, {
+          ...state,
+          connected: false,
+          lastError: error.message,
+          toolCount: 0
+        });
       }
-
-      const data = await response.json();
-      const tools = data.tools || [];
-
-      console.log(`Successfully fetched ${tools.length} tools from MCP bridge`);
-
-      // Pass through tools directly from MCP bridge (preserve complete schemas)
-      cachedTools = tools;
-
-      lastToolsFetch = now;
-      return cachedTools;
-
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      if (fetchError.name === 'AbortError') {
-        throw new Error('Request to MCP bridge timed out after 10 seconds');
-      }
-      throw fetchError;
     }
 
+    cachedTools = allTools;
+    lastToolsFetch = now;
+    console.log(`Successfully fetched ${allTools.length} tools from managed servers`);
+    return allTools;
+
   } catch (error) {
-    console.error('Failed to fetch tools from MCP bridge:', error);
+    console.error('Failed to fetch tools from managed MCP servers:', error);
     if (cachedTools.length > 0) {
       console.log(`Returning ${cachedTools.length} cached tools due to fetch error`);
       return cachedTools;
@@ -88,77 +380,85 @@ function safeStringify(obj, indent = 2) {
   }, indent);
 }
 
-// Execute a tool via the MCP bridge
-async function executeToolViaBridge(toolName, args) {
+// Execute a tool on the appropriate managed MCP server
+async function executeTool(toolName, args) {
   try {
-    console.log(`Executing tool ${toolName} via MCP bridge with args:`, safeStringify(args));
+    console.log(`Executing tool ${toolName} with args:`, safeStringify(args));
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-    try {
-      const response = await fetch(`${MCP_BRIDGE_URL}/execute`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          toolName,
-          arguments: args
-        }),
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      console.log(`Tool ${toolName} execution response status: ${response.status}`);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Tool ${toolName} execution failed with status ${response.status}:`, errorText);
-        throw new Error(`MCP Bridge returned ${response.status}: ${response.statusText} - ${errorText}`);
+    // Handle prefixed tool names (server__toolName)
+    let actualToolName = toolName;
+    let targetServer = null;
+    
+    if (toolName.includes('__')) {
+      const [prefix, ...nameParts] = toolName.split('__');
+      // Try to find the actual server name (with hyphens) from the safe name (with underscores)
+      let foundServer = false;
+      for (const [serverName] of mcpConnections.entries()) {
+        if (serverName.replace(/-/g, '_') === prefix) {
+          targetServer = serverName;
+          foundServer = true;
+          break;
+        }
       }
-
-      const result = await response.json();
-      console.log(`Tool ${toolName} execution result:`, safeStringify(result));
-
-      if (!result.success) {
-        throw new Error(result.error || 'Tool execution failed');
+      // If not found by underscore conversion, try the prefix as-is
+      if (!foundServer && mcpConnections.has(prefix)) {
+        targetServer = prefix;
       }
+      actualToolName = nameParts.join('__'); // Handle tool names that might contain __
+    }
+    
+    console.log(`Resolved - actualToolName: ${actualToolName}, targetServer: ${targetServer}`);
+    console.log(`Available connections:`, Array.from(mcpConnections.keys()));
 
-      // Format the result for MCP protocol
-      const content = result.result;
+    if (!targetServer || !mcpConnections.has(targetServer)) {
+      console.error(`Server not found for tool: ${toolName}. Target server: ${targetServer}`);
+      throw new Error(`Invalid or missing server for tool: ${toolName}`);
+    }
 
-      if (Array.isArray(content)) {
-        console.log(`Tool ${toolName} returning array content with ${content.length} items`);
-        return content;
-      } else if (typeof content === 'string') {
-        console.log(`Tool ${toolName} returning string content (${content.length} chars)`);
-        return [{
-          type: 'text',
-          text: content
-        }];
-      } else if (content && typeof content === 'object') {
-        const stringified = safeStringify(content);
-        console.log(`Tool ${toolName} returning object content (${stringified.length} chars)`);
-        return [{
-          type: 'text',
-          text: stringified
-        }];
-      } else {
-        console.log(`Tool ${toolName} returning fallback content`);
-        return [{
-          type: 'text',
-          text: String(content || 'No result')
-        }];
-      }
+    const connection = mcpConnections.get(targetServer);
 
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      if (fetchError.name === 'AbortError') {
-        throw new Error(`Tool ${toolName} execution timed out after 30 seconds`);
-      }
-      throw fetchError;
+    // Add timeout wrapper for tool execution
+    const TOOL_TIMEOUT = 30000; // 30 seconds
+    const toolPromise = connection.client.callTool({
+      name: actualToolName,
+      arguments: args
+    });
+    
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT/1000} seconds`));
+      }, TOOL_TIMEOUT);
+    });
+    
+    console.log(`[${toolName}] Waiting for tool completion...`);
+    const result = await Promise.race([toolPromise, timeoutPromise]);
+    console.log(`[${toolName}] Tool call returned:`, safeStringify(result));
+
+    // Format the result for MCP protocol
+    const content = result.content;
+
+    if (Array.isArray(content)) {
+      console.log(`Tool ${toolName} returning array content with ${content.length} items`);
+      return content;
+    } else if (typeof content === 'string') {
+      console.log(`Tool ${toolName} returning string content (${content.length} chars)`);
+      return [{
+        type: 'text',
+        text: content
+      }];
+    } else if (content && typeof content === 'object') {
+      const stringified = safeStringify(content);
+      console.log(`Tool ${toolName} returning object content (${stringified.length} chars)`);
+      return [{
+        type: 'text',
+        text: stringified
+      }];
+    } else {
+      console.log(`Tool ${toolName} returning fallback content`);
+      return [{
+        type: 'text',
+        text: String(content || 'No result')
+      }];
     }
 
   } catch (error) {
@@ -204,7 +504,6 @@ app.get('/info', async (req, res) => {
         health: '/health',
         info: '/info'
       },
-      mcpBridgeUrl: MCP_BRIDGE_URL,
       authenticationRequired: false, // Auth handled by nginx
       toolCount: tools.length,
       features: {
@@ -298,6 +597,18 @@ app.post('/mcp', express.json(), async (req, res) => {
       if (shouldStream) {
         // Upgrade to SSE streaming for tool execution
         console.log(`[${requestId}] Upgrading to SSE streaming for tool: ${name}`);
+        
+        // Track this operation
+        incrementActiveOperations();
+
+        // Monitor connection events
+        req.on('close', () => {
+          console.log(`[${requestId}] Client disconnected`);
+        });
+
+        req.on('error', (err) => {
+          console.log(`[${requestId}] Client connection error:`, err.message);
+        });
 
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
@@ -308,48 +619,34 @@ app.post('/mcp', express.json(), async (req, res) => {
         });
 
         try {
-          // Send start event
-          const startEvent = {
+          // Execute tool first
+          console.log(`[${requestId}] Starting tool execution: ${name}`);
+          const content = await executeTool(name, args || {});
+          console.log(`[${requestId}] Tool execution completed: ${name}`);
+
+          // Send only the final result as standard MCP response
+          const finalEvent = {
             jsonrpc: '2.0',
             id,
             result: {
-              type: 'start',
-              tool: name,
-              message: `Starting execution of tool: ${name}`
-            }
-          };
-          res.write(`data: ${JSON.stringify(startEvent)}\n\n`);
-
-          // Execute tool
-          const content = await executeToolViaBridge(name, args || {});
-
-          // Send progress/result events
-          const resultEvent = {
-            jsonrpc: '2.0',
-            id,
-            result: {
-              type: 'result',
               content
             }
           };
-          res.write(`data: ${JSON.stringify(resultEvent)}\n\n`);
-
-          // Send completion event
-          const completeEvent = {
-            jsonrpc: '2.0',
-            id,
-            result: {
-              type: 'complete',
-              message: `Tool ${name} execution completed successfully`
-            }
-          };
-          res.write(`data: ${JSON.stringify(completeEvent)}\n\n`);
+          console.log(`[${requestId}] Sending final result for: ${name}`);
+          console.log(`[${requestId}] Result content length: ${JSON.stringify(content).length} chars`);
+          res.write(`data: ${JSON.stringify(finalEvent)}\n\n`);
+          console.log(`[${requestId}] Final event written, connection alive: ${!res.destroyed}`);
 
           console.log(`[${requestId}] Streaming tool execution completed for: ${name}`);
           res.end();
+          
+          // Operation completed successfully
+          decrementActiveOperations();
           return;
 
         } catch (error) {
+          console.error(`[${requestId}] Tool execution error for ${name}:`, error);
+          
           // Send error event
           const errorEvent = {
             jsonrpc: '2.0',
@@ -362,12 +659,15 @@ app.post('/mcp', express.json(), async (req, res) => {
           };
           res.write(`data: ${JSON.stringify(errorEvent)}\n\n`);
           res.end();
+          
+          // Operation completed with error
+          decrementActiveOperations();
           return;
         }
       } else {
         // Standard HTTP response for tool execution
         try {
-          const content = await executeToolViaBridge(name, args || {});
+          const content = await executeTool(name, args || {});
           response = {
             jsonrpc: '2.0',
             id,
@@ -476,7 +776,9 @@ app.post('/messages/', express.json(), async (req, res) => {
 });
 
 // Start server
-app.listen(PORT, '0.0.0.0', () => {
+let healthCheckInterval;
+
+app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 PolyLlama MCP Server (Streamable HTTP) running on port ${PORT}`);
   console.log(`📡 Main MCP endpoint: http://localhost:${PORT}/mcp`);
   console.log(`🔍 Health check: http://localhost:${PORT}/health`);
@@ -484,8 +786,25 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📜 Legacy SSE endpoint: http://localhost:${PORT}/sse (deprecated)`);
   console.log(`🎯 Target PolyLlama: ${OLLAMA_BASE_URL}`);
   console.log(`🔐 API Key protection: Handled by nginx router`);
-  console.log(`🌉 MCP Bridge: ${MCP_BRIDGE_URL}`);
   console.log(`📊 Protocol: Streamable HTTP (2025-03-26)`);
+
+  // Initialize MCP servers on startup
+  const results = await initializeAllServers();
+  displayInitializationResults(results);
+  
+  // Start periodic health checks
+  healthCheckInterval = setInterval(() => {
+    runHealthChecks().catch(error => {
+      console.error('Error during health checks:', error);
+    });
+  }, HEALTH_CHECK_INTERVAL);
+  
+  // Run initial health check after 5 seconds
+  setTimeout(() => {
+    runHealthChecks().catch(error => {
+      console.error('Error during initial health check:', error);
+    });
+  }, 5000);
 
   // Fetch and display available tools
   fetchMCPTools().then(tools => {
@@ -508,4 +827,71 @@ app.listen(PORT, '0.0.0.0', () => {
     console.log(`   Error: ${error.message}`);
     console.log('\n✨ PolyLlama Streamable HTTP MCP Server ready for connections!');
   });
+});
+
+// Graceful shutdown with active operation tracking
+let activeOperations = 0;
+let shutdownRequested = false;
+
+function incrementActiveOperations() {
+  activeOperations++;
+  console.log(`Active operations: ${activeOperations}`);
+}
+
+function decrementActiveOperations() {
+  activeOperations--;
+  console.log(`Active operations: ${activeOperations}`);
+  
+  // If shutdown was requested and no active operations, proceed with shutdown
+  if (shutdownRequested && activeOperations === 0) {
+    console.log('All operations completed, proceeding with shutdown');
+    performShutdown();
+  }
+}
+
+function performShutdown() {
+  console.log('Performing shutdown...');
+  
+  // Clear health check interval
+  if (healthCheckInterval) {
+    clearInterval(healthCheckInterval);
+  }
+  
+  for (const [name, connection] of mcpConnections.entries()) {
+    try {
+      connection.client.close();
+      if (connection.process) {
+        connection.process.kill();
+      }
+    } catch (error) {
+      console.error(`Error closing connection ${name}:`, error);
+    }
+  }
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received');
+  
+  if (activeOperations > 0) {
+    console.log(`Waiting for ${activeOperations} active operations to complete before shutdown...`);
+    shutdownRequested = true;
+    
+    // Force shutdown after 30 seconds
+    setTimeout(() => {
+      console.log('Force shutdown after timeout');
+      performShutdown();
+    }, 30000);
+  } else {
+    console.log('No active operations, shutting down immediately');
+    performShutdown();
+  }
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down gracefully');
+  shutdownRequested = true;
+  if (activeOperations === 0) {
+    performShutdown();
+  }
 });

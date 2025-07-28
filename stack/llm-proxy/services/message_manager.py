@@ -6,12 +6,25 @@ Handles chat session persistence and message storage.
 
 import json
 import logging
+import hashlib
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 import redis.asyncio as redis
 from redis.exceptions import RedisError
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_valid_tool_call_id(tool_id: str) -> str:
+    """Ensure tool call ID is within OpenAI's 40-character limit."""
+    if len(tool_id) <= 40:
+        return tool_id
+    
+    # Hash the ID to create a consistent, shorter version
+    # Use first 8 chars + SHA256 hash truncated to 32 chars
+    hash_obj = hashlib.sha256(tool_id.encode('utf-8'))
+    hash_hex = hash_obj.hexdigest()[:32]  # Take first 32 chars of hash
+    return f"{tool_id[:8]}{hash_hex}"[:40]  # Ensure total is exactly 40 chars
 
 
 class MessageManager:
@@ -53,6 +66,31 @@ class MessageManager:
                 # Ensure metadata field exists for backward compatibility
                 if "metadata" not in session:
                     session["metadata"] = {}
+                # Validate and fix any tool_call_ids that are too long (backward compatibility)
+                messages_updated = False
+                for message in session.get("messages", []):
+                    # Fix tool_call_id in tool messages
+                    if message.get("role") == "tool" and "tool_call_id" in message:
+                        original_id = message["tool_call_id"]
+                        validated_id = _ensure_valid_tool_call_id(original_id)
+                        if original_id != validated_id:
+                            message["tool_call_id"] = validated_id
+                            messages_updated = True
+                            logger.info(f"Fixed tool_call_id in tool message: {original_id} -> {validated_id}")
+                    
+                    # Fix tool_call_id in assistant messages with tool_calls
+                    if message.get("role") == "assistant" and "tool_calls" in message:
+                        for tool_call in message["tool_calls"]:
+                            if "id" in tool_call:
+                                original_id = tool_call["id"]
+                                validated_id = _ensure_valid_tool_call_id(original_id)
+                                if original_id != validated_id:
+                                    tool_call["id"] = validated_id
+                                    messages_updated = True
+                                    logger.info(f"Fixed tool_call_id in assistant message: {original_id} -> {validated_id}")
+                # If we fixed any IDs, save the session back to Redis
+                if messages_updated:
+                    await self._save_session(session_id, session)
                 return session
             else:
                 # Create new session
@@ -138,17 +176,32 @@ class MessageManager:
             "timestamp": datetime.now().isoformat(),
         }
         if tool_calls:
-            message["tool_calls"] = tool_calls
+            # Validate tool_call_ids in tool_calls
+            validated_tool_calls = []
+            for tool_call in tool_calls:
+                validated_tool_call = tool_call.copy()
+                if "id" in validated_tool_call:
+                    validated_tool_call["id"] = _ensure_valid_tool_call_id(validated_tool_call["id"])
+                validated_tool_calls.append(validated_tool_call)
+            message["tool_calls"] = validated_tool_calls
         session["messages"].append(message)
         await self._save_session(session_id, session)
     
     async def add_assistant_message_with_tool_calls(self, session_id: str, tool_calls: List[Dict[str, Any]]) -> None:
         """Add an assistant message with tool_calls to the session."""
         session = await self.get_session_messages(session_id)
+        # Validate tool_call_ids in tool_calls
+        validated_tool_calls = []
+        for tool_call in tool_calls:
+            validated_tool_call = tool_call.copy()
+            if "id" in validated_tool_call:
+                validated_tool_call["id"] = _ensure_valid_tool_call_id(validated_tool_call["id"])
+            validated_tool_calls.append(validated_tool_call)
+        
         message = {
             "role": "assistant",
             "content": "",  # Tool call messages typically have empty content
-            "tool_calls": tool_calls,
+            "tool_calls": validated_tool_calls,
             "timestamp": datetime.now().isoformat(),
         }
         session["messages"].append(message)
@@ -159,11 +212,13 @@ class MessageManager:
     ) -> None:
         """Add a tool result message to the session."""
         session = await self.get_session_messages(session_id)
+        # Ensure tool_call_id is within OpenAI's 40-character limit
+        validated_tool_call_id = _ensure_valid_tool_call_id(tool_call_id)
         message = {
             "role": "tool",
             "content": content,
             "tool_name": tool_name,
-            "tool_call_id": tool_call_id,
+            "tool_call_id": validated_tool_call_id,
             "timestamp": datetime.now().isoformat(),
         }
         session["messages"].append(message)

@@ -11,6 +11,7 @@ import logging
 import inspect
 import re
 import time
+import hashlib
 from functools import wraps
 from typing import (
     Any,
@@ -81,6 +82,18 @@ def _looks_like_tool_call_json(text: str) -> bool:
         return False
 
 
+def _ensure_valid_tool_call_id(tool_id: str) -> str:
+    """Ensure tool call ID is within OpenAI's 40-character limit."""
+    if len(tool_id) <= 40:
+        return tool_id
+    
+    # Hash the ID to create a consistent, shorter version
+    # Use first 8 chars + SHA256 hash truncated to 32 chars
+    hash_obj = hashlib.sha256(tool_id.encode('utf-8'))
+    hash_hex = hash_obj.hexdigest()[:32]  # Take first 32 chars of hash
+    return f"{tool_id[:8]}{hash_hex}"[:40]  # Ensure total is exactly 40 chars
+
+
 def _convert_tool_call_json(text: str) -> str:
     """Convert custom tool-call JSON or GPT-4o action/arguments to OpenAI format."""
     try:
@@ -99,7 +112,7 @@ def _convert_tool_call_json(text: str) -> str:
             return json.dumps(
                 [
                     {
-                        "id": "synthetic",
+                        "id": _ensure_valid_tool_call_id("synthetic"),
                         "type": "function",
                         "function": {
                             "name": obj["action"],
@@ -598,6 +611,8 @@ class MultiLLMService:
                             logger.debug("Received tool_calls in chunk: %s", tool_calls)
                             for tc in tool_calls:
                                 tc_id = getattr(tc, "id", None)
+                                if tc_id:
+                                    tc_id = _ensure_valid_tool_call_id(tc_id)
                                 tc_name = (
                                     getattr(tc.function, "name", None)
                                     if hasattr(tc, "function")
@@ -1416,7 +1431,7 @@ class MultiLLMService:
                                         content = None
                                         tool_calls = [
                                             {
-                                                "id": "fallback",
+                                                "id": _ensure_valid_tool_call_id("fallback"),
                                                 "function": {
                                                     "name": "unknown",
                                                     "arguments": "{}",
@@ -1445,6 +1460,7 @@ class MultiLLMService:
                                     content = ""
                                     tool_calls = [
                                         {
+                                            "id": _ensure_valid_tool_call_id("fallback"),
                                             "function": {
                                                 "name": "unknown",
                                                 "arguments": "{}",

@@ -860,6 +860,21 @@ curl -X POST http://localhost:3001/mcp \
 - `stack/llm-proxy/mcp-server/server_streamable_http.js` - Main implementation
 - `mcp-config.json` - Upstream MCP server configuration
 
+## MCP Configuration Management
+
+**CRITICAL: Do NOT modify mcp-config.json unless explicitly requested**
+
+The `mcp-config.json` file contains user-specific MCP server configurations including:
+- Personal AI servers (e.g., personal-ai connecting to localhost:8084/sse)
+- API keys and authentication tokens
+- Custom server endpoints and configurations
+
+**Guidelines:**
+- Never remove or modify existing server configurations during debugging
+- If troubleshooting requires temporary changes, restore the original configuration immediately
+- User configurations should be preserved across all development sessions
+- Always check with the user before making any changes to this file
+
 ## Do NOT
 
 - Modify existing Nginx configurations
@@ -868,3 +883,4 @@ curl -X POST http://localhost:3001/mcp \
 - Bypass API-KEY authentication
 - Create agent-specific Ollama instances
 - **Use multi-event SSE streaming in MCP server proxy** - breaks MCP client compatibility
+- **Modify mcp-config.json without explicit user permission** - contains personal configurations

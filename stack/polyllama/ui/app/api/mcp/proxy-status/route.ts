@@ -6,19 +6,11 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url)
   const includeTools = searchParams.get('includeTools') === 'true'
   
-  // Using a shorter timeout for health check
-  const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 5000)
-  
   try {
     const url = includeTools ? '/api/mcp/status?include_tools=true' : '/api/mcp/status'
     const response = await proxyToLLM(url, { 
-      request,
-      headers: {
-        'signal': controller.signal as unknown as string
-      }
+      request
     })
-    clearTimeout(timeoutId)
     
     // Extract the JSON data from the NextResponse
     const data = await response.json()
@@ -35,7 +27,6 @@ export async function GET(request: NextRequest) {
       ...data
     })
   } catch (error) {
-    clearTimeout(timeoutId)
     console.error('Error checking proxy MCP status:', error)
     return NextResponse.json(
       { available: false, error: 'Unable to connect to MCP service' },

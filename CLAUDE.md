@@ -2,6 +2,15 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+
+**IMPORTANT**: The official 2025-06-18 MCP scehma is provided in mcp-server/official-mcp-transport-specification-2025-06-18.json If there are any backwards compatibility issues with MCP clients we consume, or servers that consume us, we can reference https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2025-03-26/schema.json to understand the issues.
+
+## Primary Agent Approach
+
+You are the lead architect for PolyLlama, a dynamic multi-instance Ollama orchestration system.
+You have deep understanding of the entire system architecture including hardware detection, routing, and single-agent tool integration.
+Refer to this CLAUDE.md for system guidelines and architectural principles.
+
 ## Architecture Overview
 
 PolyLlama is a dynamic multi-instance Ollama orchestration system that automatically detects hardware and generates optimal deployments. The core architecture consists of:
@@ -279,9 +288,9 @@ Implementation details:
 - Track progress frequently as tasks are completed and new ones arise
 - Use the todo list to organize complex tasks and ensure nothing is forgotten
 
-### Multi-Agent Implementation Status
+### Single-Agent Implementation Status
 
-**Overall Progress: Phase 2 Complete (Phase 1: ✅ | Phase 2: ✅ | Phase 3: 🔄 | Phase 4: 🔄)**
+**Overall Progress: Phase 2 Complete (Phase 1: ✅ | Phase 2: ✅)**
 
 **Recent Completions:**
 - ✅ **Tool Integration Framework**: Complete tool system with 12+ modules
@@ -289,11 +298,10 @@ Implementation details:
 - ✅ **Monitoring**: Comprehensive metrics and performance tracking  
 - ✅ **Developer Experience**: Auto-documentation, testing, streaming support
 
-**Current Priorities for Phase 3:**
-1. Multi-agent orchestration patterns
-2. Agent communication protocols  
-3. Workflow management system
-4. Next.js API route integration (pending from Phase 1)
+**Current Priorities:**
+1. Next.js API route integration (pending from Phase 1)
+2. Full session persistence improvements
+3. Advanced prompt engineering and context management
 
 **Ready for Production:**
 - Tool execution and discovery
@@ -302,11 +310,11 @@ Implementation details:
 - Streaming tool support
 - MCP protocol integration
 
-# PolyLlama Multi-Agent Implementation Plan
+# PolyLlama Single-Agent Implementation Plan
 
 ## Overview
 
-This document provides a comprehensive implementation plan for adding multi-agent capabilities to PolyLlama while preserving the existing multi-instance Ollama architecture, security patterns, and routing logic.
+This document provides a comprehensive implementation plan for the single-agent architecture in PolyLlama while preserving the existing multi-instance Ollama architecture, security patterns, and routing logic.
 
 ## Architecture Overview
 
@@ -315,7 +323,7 @@ This document provides a comprehensive implementation plan for adding multi-agen
 - **No Disruption**: Maintain existing Nginx/Lua routing logic unchanged
 - **Server-Side Only**: All agent/tool operations must be server-side (no browser-based tool calls)
 - **Security First**: Preserve API-KEY and JWT/OAuth patterns on all endpoints
-- **Incremental**: Build single-agent flows before multi-agent orchestration
+- **Focused**: Build robust single-agent flows with comprehensive tool support
 - **Streaming First**: Support progressive feedback at every layer
 
 ### High-Level Architecture
@@ -349,21 +357,15 @@ This document provides a comprehensive implementation plan for adding multi-agen
 +-----------------------------[ Agent Controller Service (Python) ]---------------------+
 |   Port: 11436 (internal only)                                                       |
 |   - Session memory (per user/conversation)                                          |
-|   - Implements Aggregator Agent with planning capabilities                          |
+|   - Implements single agent with planning capabilities                              |
 |   - Streaming support: yields partial LLM or agent output back to API               |
 |   - Orchestrates workflow:                                                          |
 |        a) Plan/Reason (CoT, ReACT, etc)                                            |
-|        b) Decide which sub-agent/tool to call                                      |
+|        b) Decide which tool to call                                                 |
 |        c) Invoke LLM via LLM Proxy (litellm)                                       |
-|        d) Invoke MCP sub-agents as needed                                          |
-|        e) Combine/generate results                                                 |
-+------------------------+---------------+---------------+-----------------------------+
-                         |               |               |
-          [Sub-Agent: Search]   [Sub-Agent: Local Data]   [Sub-Agent: Cloud/API]
-           - Calls MCP search      - Calls DB/file/API       - Calls cloud API, etc.
-           - Returns results       - Returns results         - Returns results
-                         |               |               |
-                         +-------+-------+-------+-------+
+|        d) Execute tools as needed                                                   |
+|        e) Generate results                                                          |
++--------------------------------------------------------------------------------------+
                                        |
                                        | 3. Calls LLM Proxy
                                        v
@@ -498,72 +500,6 @@ Standardized tool interface for all integrations:
 - `GET /tools/stats` - Usage statistics
 
 **No Pending Items in Phase 2** - All planned functionality delivered.
-
-### 🔄 Phase 3: Multi-Agent Orchestration (NEXT)
-
-**Status: PLANNED** - Ready to begin implementation.
-
-**Objectives:**
-- Enable multiple specialized agents working together
-- Implement agent coordination patterns
-- Build workflow management system
-- Create agent communication protocols
-
-**Planned Components:**
-
-1. **Specialist Agent Types**
-   - **ManagerAgent**: Orchestrates and delegates to specialist agents
-   - **ResearchAgent**: Specialized in information gathering and analysis
-   - **DataAgent**: Focused on data processing and analytics
-   - **WorkflowAgent**: Handles complex multi-step processes
-
-2. **Orchestration Patterns**
-   - **Manager Pattern**: Top-level agent delegates to specialists
-   - **Pipeline Pattern**: Sequential agent processing with handoffs
-   - **Consensus Pattern**: Multiple agents collaborate and vote on outputs
-   - **Parallel Pattern**: Concurrent agent execution with result aggregation
-
-3. **Agent Communication**
-   - Inter-agent message passing
-   - Shared context and memory
-   - Result aggregation and synthesis
-   - Conflict resolution mechanisms
-
-**Prerequisites (Ready from Phase 2):**
-- ✅ Tool registry and execution framework
-- ✅ Authentication and authorization system
-- ✅ Metrics and monitoring infrastructure
-- ✅ Streaming support for real-time updates
-
-### 🔄 Phase 4: Guardrails & Safety (PLANNED)
-
-**Status: PLANNED** - Advanced safety and validation systems.
-
-**Objectives:**
-- Implement comprehensive input/output validation
-- Add content filtering and PII protection
-- Create audit trails for compliance
-- Build safety guardrails for autonomous operation
-
-**Planned Components:**
-
-1. **Input Validation & Safety**
-   - Content filtering for harmful inputs
-   - PII detection and masking
-   - Input sanitization and normalization
-   - Rate limiting and abuse prevention
-
-2. **Output Validation**
-   - Content safety checks before delivery
-   - Business rule validation
-   - Sensitive information detection
-   - Quality assurance gates
-
-3. **Audit & Compliance**
-   - Complete action logging
-   - Compliance reporting
-   - Data retention policies
-   - Privacy protection measures
 
 ## Current File Structure
 

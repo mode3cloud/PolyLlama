@@ -35,6 +35,9 @@ const TOOLS_CACHE_DURATION = 60000; // 1 minute cache
 const INIT_RETRY_DELAY = 2000; // 2 seconds
 const INIT_MAX_RETRIES = 3;
 const HEALTH_CHECK_INTERVAL = 30000; // 30 seconds
+const RECONNECT_BASE_DELAY = 5000; // 5 seconds base delay for reconnection
+const RECONNECT_MAX_DELAY = 300000; // 5 minutes max delay
+const RECONNECT_MAX_ATTEMPTS = 10; // Maximum reconnection attempts before giving up
 
 // Beautiful console formatter for initialization results
 function displayInitializationResults(results) {
@@ -48,9 +51,9 @@ function displayInitializationResults(results) {
   const failedServers = totalServers - successfulServers;
   
   // Create a formatted table
-  console.log('┌─────────────────────────┬──────────┬────────────────────┐');
-  console.log('│ Server Name             │ Status   │ Tools              │');
-  console.log('├─────────────────────────┼──────────┼────────────────────┤');
+  console.log('┌─────────────────────────┬──────────┬────────────────────┬─────────────────────┐');
+  console.log('│ Server Name             │ Status   │ Tools              │ Reconnect Attempts  │');
+  console.log('├─────────────────────────┼──────────┼────────────────────┼─────────────────────┤');
   
   for (const [name, success] of servers) {
     const state = serverState.get(name);
@@ -58,16 +61,20 @@ function displayInitializationResults(results) {
     const statusEmoji = success ? '✅' : '❌';
     const statusText = success ? 'Online' : 'Failed';
     const toolsText = success ? `${toolCount} tools` : state?.lastError || 'Error';
+    const reconnectText = state?.reconnectAttempts ? 
+      `${state.reconnectAttempts}/${RECONNECT_MAX_ATTEMPTS}` : 
+      success ? 'N/A' : '0/10';
     
     // Pad strings for alignment
     const paddedName = name.padEnd(23);
     const paddedStatus = `${statusEmoji} ${statusText}`.padEnd(8);
     const paddedTools = toolsText.padEnd(18);
+    const paddedReconnect = reconnectText.padEnd(19);
     
-    console.log(`│ ${paddedName} │ ${paddedStatus} │ ${paddedTools} │`);
+    console.log(`│ ${paddedName} │ ${paddedStatus} │ ${paddedTools} │ ${paddedReconnect} │`);
   }
   
-  console.log('└─────────────────────────┴──────────┴────────────────────┘');
+  console.log('└─────────────────────────┴──────────┴────────────────────┴─────────────────────┘');
   
   // Summary statistics
   console.log('\n📊 SUMMARY:');
@@ -160,25 +167,45 @@ async function initializeMcpServer(name, config, retryCount = 0) {
 
     // Add error handling for transport
     transport.onError = (error) => {
-      console.error(`Transport error for ${name}:`, error);
-      // Mark server as disconnected but don't crash main process
+      console.error(`❌ Transport error for ${name}:`, error);
+      // Mark server as disconnected and remove connection
+      const currentState = serverState.get(name) || {};
       serverState.set(name, {
+        ...currentState,
         connected: false,
         toolCount: 0,
         lastError: error.message,
         initTime: Date.now()
       });
+      mcpConnections.delete(name);
+      
+      // Trigger reconnection attempt after a short delay
+      setTimeout(() => {
+        reconnectMcpServer(name).catch(err => {
+          console.error(`Failed to trigger reconnection for ${name}:`, err);
+        });
+      }, 1000);
     };
 
     transport.onClose = () => {
-      console.log(`Transport closed for ${name}`);
-      // Mark server as disconnected
+      console.log(`🔌 Transport closed for ${name}`);
+      // Mark server as disconnected and remove connection
+      const currentState = serverState.get(name) || {};
       serverState.set(name, {
+        ...currentState,
         connected: false,
         toolCount: 0,
         lastError: 'Transport closed',
         initTime: Date.now()
       });
+      mcpConnections.delete(name);
+      
+      // Trigger reconnection attempt after a short delay
+      setTimeout(() => {
+        reconnectMcpServer(name).catch(err => {
+          console.error(`Failed to trigger reconnection for ${name}:`, err);
+        });
+      }, 1000);
     };
 
     // Create client
@@ -209,7 +236,10 @@ async function initializeMcpServer(name, config, retryCount = 0) {
       connected: true,
       toolCount,
       lastError: null,
-      initTime: Date.now()
+      initTime: Date.now(),
+      reconnectAttempts: 0,
+      lastReconnectAttempt: null,
+      nextReconnectDelay: RECONNECT_BASE_DELAY
     });
 
     console.log(`Successfully connected to MCP server: ${name} with ${toolCount} tools`);
@@ -218,11 +248,15 @@ async function initializeMcpServer(name, config, retryCount = 0) {
     console.error(`Failed to initialize MCP server ${name}:`, error);
     
     // Store failed state
+    const currentState = serverState.get(name) || {};
     serverState.set(name, {
       connected: false,
       toolCount: 0,
       lastError: error.message,
-      initTime: Date.now()
+      initTime: Date.now(),
+      reconnectAttempts: currentState.reconnectAttempts || 0,
+      lastReconnectAttempt: currentState.lastReconnectAttempt || null,
+      nextReconnectDelay: currentState.nextReconnectDelay || RECONNECT_BASE_DELAY
     });
 
     // Retry logic
@@ -252,14 +286,107 @@ async function initializeAllServers() {
   return results;
 }
 
+// Reconnect to a failed MCP server with exponential backoff
+async function reconnectMcpServer(name) {
+  const state = serverState.get(name);
+  if (!state || state.connected) {
+    return true; // Already connected
+  }
+
+  // Check if we should attempt reconnection
+  const now = Date.now();
+  if (state.lastReconnectAttempt && (now - state.lastReconnectAttempt) < state.nextReconnectDelay) {
+    return false; // Too soon to retry
+  }
+
+  if (state.reconnectAttempts >= RECONNECT_MAX_ATTEMPTS) {
+    console.log(`⚠️  Server ${name} has exceeded maximum reconnection attempts (${RECONNECT_MAX_ATTEMPTS}), giving up`);
+    return false; // Exceeded max attempts
+  }
+
+  console.log(`🔄 Attempting to reconnect to MCP server: ${name} (attempt ${state.reconnectAttempts + 1}/${RECONNECT_MAX_ATTEMPTS})`);
+
+  // Clean up existing connection if any
+  const existingConnection = mcpConnections.get(name);
+  if (existingConnection) {
+    try {
+      existingConnection.client.close();
+      if (existingConnection.transport) {
+        existingConnection.transport.close();
+      }
+    } catch (error) {
+      console.log(`Warning: Error cleaning up existing connection for ${name}:`, error.message);
+    }
+    mcpConnections.delete(name);
+  }
+
+  // Update reconnection state
+  const nextDelay = Math.min(
+    state.nextReconnectDelay * 2, // Exponential backoff
+    RECONNECT_MAX_DELAY
+  );
+
+  serverState.set(name, {
+    ...state,
+    reconnectAttempts: state.reconnectAttempts + 1,
+    lastReconnectAttempt: now,
+    nextReconnectDelay: nextDelay
+  });
+
+  // Load config and attempt reconnection
+  try {
+    const config = await loadConfig();
+    const serverConfig = config.mcpServers[name];
+    
+    if (!serverConfig) {
+      console.error(`⚠️  No configuration found for server: ${name}`);
+      return false;
+    }
+
+    // Use the existing initialization function but without internal retries
+    const success = await initializeMcpServer(name, serverConfig, 0);
+    
+    if (success) {
+      console.log(`✅ Successfully reconnected to MCP server: ${name}`);
+      // Reset reconnection state on successful connection
+      const currentState = serverState.get(name);
+      serverState.set(name, {
+        ...currentState,
+        reconnectAttempts: 0,
+        lastReconnectAttempt: null,
+        nextReconnectDelay: RECONNECT_BASE_DELAY
+      });
+      
+      // Invalidate tools cache to refetch from reconnected server
+      cachedTools = [];
+      lastToolsFetch = 0;
+      
+      return true;
+    }
+
+    return false;
+  } catch (error) {
+    console.error(`❌ Failed to reconnect to MCP server ${name}:`, error.message);
+    return false;
+  }
+}
+
 // Health check for a single server
 async function checkServerHealth(name) {
   const connection = mcpConnections.get(name);
-  const state = serverState.get(name) || { connected: false, toolCount: 0 };
+  const state = serverState.get(name) || { 
+    connected: false, 
+    toolCount: 0,
+    reconnectAttempts: 0,
+    lastReconnectAttempt: null,
+    nextReconnectDelay: RECONNECT_BASE_DELAY
+  };
 
   if (!connection) {
     serverState.set(name, { ...state, connected: false, lastError: 'No connection' });
-    return false;
+    // Attempt reconnection for servers without connections
+    await reconnectMcpServer(name);
+    return serverState.get(name)?.connected || false;
   }
 
   try {
@@ -268,29 +395,43 @@ async function checkServerHealth(name) {
     const toolCount = tools.tools?.length || 0;
     
     serverState.set(name, {
+      ...state,
       connected: true,
       toolCount,
       lastError: null,
-      lastHealthCheck: Date.now()
+      lastHealthCheck: Date.now(),
+      reconnectAttempts: 0, // Reset on successful health check
+      lastReconnectAttempt: null,
+      nextReconnectDelay: RECONNECT_BASE_DELAY
     });
     
     connection.lastHealthCheck = Date.now();
     return true;
   } catch (error) {
-    console.error(`Health check failed for ${name}:`, error.message);
+    console.error(`❌ Health check failed for ${name}:`, error.message);
     serverState.set(name, {
       ...state,
       connected: false,
       lastError: error.message,
       lastHealthCheck: Date.now()
     });
-    return false;
+    
+    // Remove failed connection
+    mcpConnections.delete(name);
+    
+    // Attempt reconnection
+    await reconnectMcpServer(name);
+    return serverState.get(name)?.connected || false;
   }
 }
 
 // Periodic health check for all servers
 async function runHealthChecks() {
-  for (const [name] of mcpConnections) {
+  // Check all configured servers, not just connected ones
+  const config = await loadConfig();
+  const configuredServers = Object.keys(config.mcpServers);
+  
+  for (const name of configuredServers) {
     await checkServerHealth(name);
   }
 }
@@ -476,6 +617,50 @@ function supportsStreaming(req) {
 // Health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'polyllama-mcp-server-streamable-http' });
+});
+
+// Server status endpoint with reconnection information
+app.get('/status', async (req, res) => {
+  try {
+    const config = await loadConfig();
+    const configuredServers = Object.keys(config.mcpServers);
+    const status = {};
+    
+    for (const name of configuredServers) {
+      const state = serverState.get(name);
+      const connection = mcpConnections.get(name);
+      
+      status[name] = {
+        connected: state?.connected || false,
+        toolCount: state?.toolCount || 0,
+        lastError: state?.lastError || null,
+        lastHealthCheck: state?.lastHealthCheck || null,
+        reconnectAttempts: state?.reconnectAttempts || 0,
+        maxReconnectAttempts: RECONNECT_MAX_ATTEMPTS,
+        lastReconnectAttempt: state?.lastReconnectAttempt || null,
+        nextReconnectDelay: state?.nextReconnectDelay || RECONNECT_BASE_DELAY,
+        hasConnection: !!connection,
+        initTime: state?.initTime || null
+      };
+    }
+    
+    res.json({
+      service: 'polyllama-mcp-server-streamable-http',
+      timestamp: new Date().toISOString(),
+      servers: status,
+      config: {
+        healthCheckInterval: HEALTH_CHECK_INTERVAL,
+        reconnectBaseDelay: RECONNECT_BASE_DELAY,
+        reconnectMaxDelay: RECONNECT_MAX_DELAY,
+        maxReconnectAttempts: RECONNECT_MAX_ATTEMPTS
+      }
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: 'Failed to get server status',
+      message: error.message
+    });
+  }
 });
 
 // MCP server info endpoint
@@ -715,12 +900,12 @@ app.post('/mcp', express.json(), async (req, res) => {
   }
 });
 
-// Legacy SSE endpoint for backward compatibility
+// SSE endpoint that wraps MCP streamable HTTP functionality
 app.get('/sse', async (req, res) => {
-  console.log('⚠️  Legacy SSE endpoint accessed - consider upgrading to streamable HTTP /mcp endpoint');
-
   const userAgent = req.headers['user-agent'] || 'unknown';
-  console.log(`SSE connection from: ${userAgent}`);
+  const sessionId = uuidv4().replace(/-/g, '').substring(0, 8);
+  
+  console.log(`[${sessionId}] SSE connection from: ${userAgent}`);
 
   // Set SSE headers
   res.writeHead(200, {
@@ -731,48 +916,161 @@ app.get('/sse', async (req, res) => {
     'Access-Control-Allow-Headers': 'Content-Type, Authorization, api-key, x-api-key'
   });
 
-  // Generate session ID
-  const sessionId = uuidv4().replace(/-/g, '');
+  // Send initial connection event
+  res.write(`event: connected\n`);
+  res.write(`data: {"sessionId": "${sessionId}", "message": "SSE connection established"}\n\n`);
 
-  // Send deprecation notice
-  res.write(`event: deprecation\n`);
-  res.write(`data: {"message": "SSE transport is deprecated. Please upgrade to streamable HTTP at /mcp endpoint.", "sessionId": "${sessionId}"}\n\n`);
-
-  // Send endpoint event for backward compatibility
+  // Send endpoint event for clients expecting it
   const endpointUrl = `/messages/?session_id=${sessionId}`;
   res.write(`event: endpoint\n`);
   res.write(`data: ${endpointUrl}\n\n`);
 
-  console.log(`Legacy SSE: Sent endpoint event: ${endpointUrl}`);
+  console.log(`[${sessionId}] SSE connection established, endpoint: ${endpointUrl}`);
 
-  // Handle disconnect
+  // Handle connection events
   req.on('close', () => {
-    console.log(`Legacy SSE client disconnected (session: ${sessionId})`);
+    console.log(`[${sessionId}] SSE client disconnected`);
   });
 
   req.on('error', (error) => {
-    console.error(`Legacy SSE error (session: ${sessionId}):`, error);
+    console.error(`[${sessionId}] SSE connection error:`, error.message);
+  });
+
+  // Keep connection alive with periodic ping
+  const pingInterval = setInterval(() => {
+    if (!res.destroyed) {
+      res.write(`event: ping\n`);
+      res.write(`data: {"timestamp": "${new Date().toISOString()}"}\n\n`);
+    } else {
+      clearInterval(pingInterval);
+    }
+  }, 30000); // Ping every 30 seconds
+
+  // Clean up on disconnect
+  req.on('close', () => {
+    clearInterval(pingInterval);
   });
 });
 
-// Legacy messages endpoint for backward compatibility
+// Messages endpoint that wraps MCP functionality for SSE clients
 app.post('/messages/', express.json(), async (req, res) => {
-  console.log('⚠️  Legacy messages endpoint accessed - consider upgrading to streamable HTTP /mcp endpoint');
-
   const sessionId = req.query.session_id;
+  const requestId = uuidv4().replace(/-/g, '').substring(0, 8);
 
   if (!sessionId) {
-    return res.status(400).send('session_id is required');
+    return res.status(400).json({
+      error: 'session_id is required',
+      code: 400
+    });
   }
 
-  console.log(`Legacy JSON-RPC request for session ${sessionId}:`, req.body);
+  console.log(`[${sessionId}:${requestId}] Messages endpoint request:`, req.body);
 
-  // Redirect to main MCP endpoint
-  res.status(302).json({
-    message: 'This endpoint is deprecated. Please use POST /mcp for all MCP requests.',
-    newEndpoint: '/mcp',
-    migration: 'Remove session_id and send requests directly to /mcp with Accept: text/event-stream for streaming'
-  });
+  try {
+    const { method, params, id, jsonrpc } = req.body;
+
+    // Create a mock request object with SSE accept header
+    const mockReq = {
+      headers: {
+        'accept': 'text/event-stream',
+        'user-agent': req.headers['user-agent'] || 'sse-wrapper'
+      },
+      body: req.body,
+      on: () => {} // Mock event handlers
+    };
+
+    let response;
+
+    if (method === 'initialize') {
+      const clientProtocolVersion = params?.protocolVersion || '2025-03-26';
+      response = {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          protocolVersion: clientProtocolVersion,
+          capabilities: {
+            tools: {},
+            streaming: {
+              supported: true,
+              protocols: ['sse']
+            }
+          },
+          serverInfo: {
+            name: 'polyllama-streamable-http-mcp-server',
+            version: '1.0.0'
+          }
+        }
+      };
+    } else if (method === 'tools/list') {
+      const tools = await fetchMCPTools();
+      response = {
+        jsonrpc: '2.0',
+        id,
+        result: { tools }
+      };
+    } else if (method === 'resources/list') {
+      response = {
+        jsonrpc: '2.0',
+        id,
+        result: { resources: [] }
+      };
+    } else if (method === 'prompts/list') {
+      response = {
+        jsonrpc: '2.0',
+        id,
+        result: { prompts: [] }
+      };
+    } else if (method === 'tools/call') {
+      const { name, arguments: args } = params;
+
+      try {
+        console.log(`[${sessionId}:${requestId}] Executing tool: ${name}`);
+        const content = await executeTool(name, args || {});
+        response = {
+          jsonrpc: '2.0',
+          id,
+          result: { content }
+        };
+        console.log(`[${sessionId}:${requestId}] Tool execution completed: ${name}`);
+      } catch (error) {
+        console.error(`[${sessionId}:${requestId}] Tool execution error:`, error);
+        response = {
+          jsonrpc: '2.0',
+          id,
+          error: {
+            code: -32603,
+            message: error.message
+          }
+        };
+      }
+    } else {
+      response = {
+        jsonrpc: '2.0',
+        id,
+        error: {
+          code: -32601,
+          message: `Method not found: ${method}`
+        }
+      };
+    }
+
+    console.log(`[${sessionId}:${requestId}] Sending response for method: ${method}`);
+    res.json(response);
+
+  } catch (error) {
+    console.error(`[${sessionId}:${requestId}] Error processing messages request:`, error);
+
+    const errorResponse = {
+      jsonrpc: '2.0',
+      id: req.body?.id || null,
+      error: {
+        code: -32603,
+        message: error.message
+      }
+    };
+
+    res.status(500).json(errorResponse);
+  }
 });
 
 // Start server
@@ -782,8 +1080,10 @@ app.listen(PORT, '0.0.0.0', async () => {
   console.log(`🚀 PolyLlama MCP Server (Streamable HTTP) running on port ${PORT}`);
   console.log(`📡 Main MCP endpoint: http://localhost:${PORT}/mcp`);
   console.log(`🔍 Health check: http://localhost:${PORT}/health`);
+  console.log(`📊 Server status: http://localhost:${PORT}/status`);
   console.log(`ℹ️  Server info: http://localhost:${PORT}/info`);
-  console.log(`📜 Legacy SSE endpoint: http://localhost:${PORT}/sse (deprecated)`);
+  console.log(`📡 SSE endpoint: http://localhost:${PORT}/sse`);
+  console.log(`💬 Messages endpoint: http://localhost:${PORT}/messages/`);
   console.log(`🎯 Target PolyLlama: ${OLLAMA_BASE_URL}`);
   console.log(`🔐 API Key protection: Handled by nginx router`);
   console.log(`📊 Protocol: Streamable HTTP (2025-03-26)`);
@@ -820,6 +1120,8 @@ app.listen(PORT, '0.0.0.0', async () => {
     console.log('💡 Key Features:');
     console.log('   • Single endpoint for all MCP operations');
     console.log('   • Dynamic SSE streaming for long-running operations');
+    console.log('   • Automatic reconnection with exponential backoff');
+    console.log('   • Health monitoring and status reporting');
     console.log('   • Backward compatibility with legacy SSE transport');
     console.log('   • Better resource efficiency and connection management');
   }).catch(error => {

@@ -575,21 +575,32 @@ async function executeTool(toolName, args) {
     const result = await Promise.race([toolPromise, timeoutPromise]);
     console.log(`[${toolName}] Tool call returned:`, safeStringify(result));
 
-    // Format the result for MCP protocol
-    const content = result.content;
-
-    if (Array.isArray(content)) {
+    // The MCP SDK callTool response should already be in the correct format
+    // with a 'content' array. We just need to extract and validate it.
+    
+    // If result already has the proper MCP format with content array
+    if (result && Array.isArray(result.content)) {
+      console.log(`Tool ${toolName} returning properly formatted content with ${result.content.length} items`);
+      return result.content;
+    }
+    
+    // Fallback handling for legacy or non-standard responses
+    // This ensures backward compatibility while encouraging proper format
+    const content = result.content || result;
+    
+    if (Array.isArray(content) && content.length > 0 && content[0].type) {
+      // Already in correct format [{type: 'text', text: '...'}]
       console.log(`Tool ${toolName} returning array content with ${content.length} items`);
       return content;
     } else if (typeof content === 'string') {
-      console.log(`Tool ${toolName} returning string content (${content.length} chars)`);
+      console.log(`Tool ${toolName} returning string content (${content.length} chars) - converting to MCP format`);
       return [{
         type: 'text',
         text: content
       }];
     } else if (content && typeof content === 'object') {
       const stringified = safeStringify(content);
-      console.log(`Tool ${toolName} returning object content (${stringified.length} chars)`);
+      console.log(`Tool ${toolName} returning object content (${stringified.length} chars) - converting to MCP format`);
       return [{
         type: 'text',
         text: stringified

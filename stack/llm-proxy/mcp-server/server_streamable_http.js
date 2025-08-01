@@ -29,7 +29,10 @@ const serverState = new Map();
 // Cache for MCP tools fetched from the bridge
 let cachedTools = [];
 let lastToolsFetch = 0;
-const TOOLS_CACHE_DURATION = 60000; // 1 minute cache
+const TOOLS_CACHE_DURATION = 30000; // 1 minute cache
+
+// Store tool output schemas for validation and logging
+const toolOutputSchemas = new Map();
 
 // Configuration constants
 const INIT_RETRY_DELAY = 2000; // 2 seconds
@@ -44,46 +47,46 @@ function displayInitializationResults(results) {
   console.log('\n' + '═'.repeat(60));
   console.log('🚀 MCP SERVERS INITIALIZATION RESULTS');
   console.log('═'.repeat(60) + '\n');
-  
+
   const servers = Object.entries(results);
   const totalServers = servers.length;
   const successfulServers = servers.filter(([_, success]) => success).length;
   const failedServers = totalServers - successfulServers;
-  
+
   // Create a formatted table
   console.log('┌─────────────────────────┬──────────┬────────────────────┬─────────────────────┐');
   console.log('│ Server Name             │ Status   │ Tools              │ Reconnect Attempts  │');
   console.log('├─────────────────────────┼──────────┼────────────────────┼─────────────────────┤');
-  
+
   for (const [name, success] of servers) {
     const state = serverState.get(name);
     const toolCount = state?.toolCount || 0;
     const statusEmoji = success ? '✅' : '❌';
     const statusText = success ? 'Online' : 'Failed';
     const toolsText = success ? `${toolCount} tools` : state?.lastError || 'Error';
-    const reconnectText = state?.reconnectAttempts ? 
-      `${state.reconnectAttempts}/${RECONNECT_MAX_ATTEMPTS}` : 
+    const reconnectText = state?.reconnectAttempts ?
+      `${state.reconnectAttempts}/${RECONNECT_MAX_ATTEMPTS}` :
       success ? 'N/A' : '0/10';
-    
+
     // Pad strings for alignment
     const paddedName = name.padEnd(23);
     const paddedStatus = `${statusEmoji} ${statusText}`.padEnd(8);
     const paddedTools = toolsText.padEnd(18);
     const paddedReconnect = reconnectText.padEnd(19);
-    
+
     console.log(`│ ${paddedName} │ ${paddedStatus} │ ${paddedTools} │ ${paddedReconnect} │`);
   }
-  
+
   console.log('└─────────────────────────┴──────────┴────────────────────┴─────────────────────┘');
-  
+
   // Summary statistics
   console.log('\n📊 SUMMARY:');
   console.log('─'.repeat(40));
   console.log(`  Total Servers:      ${totalServers}`);
   console.log(`  ✅ Successful:      ${successfulServers}`);
   console.log(`  ❌ Failed:          ${failedServers}`);
-  console.log(`  Success Rate:       ${((successfulServers/totalServers) * 100).toFixed(1)}%`);
-  
+  console.log(`  Success Rate:       ${((successfulServers / totalServers) * 100).toFixed(1)}%`);
+
   // Show failed server details if any
   if (failedServers > 0) {
     console.log('\n⚠️  FAILED SERVERS:');
@@ -95,7 +98,7 @@ function displayInitializationResults(results) {
       }
     }
   }
-  
+
   // Show successful servers with tool details
   if (successfulServers > 0) {
     console.log('\n✨ READY SERVERS:');
@@ -109,7 +112,7 @@ function displayInitializationResults(results) {
       }
     }
   }
-  
+
   console.log('\n' + '═'.repeat(60) + '\n');
 }
 
@@ -130,7 +133,7 @@ function getServerEmoji(serverName) {
     'system': '⚙️',
     'default': '🔧'
   };
-  
+
   const lowerName = serverName.toLowerCase();
   for (const [key, emoji] of Object.entries(emojiMap)) {
     if (lowerName.includes(key)) {
@@ -156,7 +159,7 @@ async function loadConfig() {
 async function initializeMcpServer(name, config, retryCount = 0) {
   console.log(`Initializing MCP server: ${name} (attempt ${retryCount + 1})`);
   console.log(`Server config:`, JSON.stringify(config, null, 2));
-  
+
   try {
     // Create transport with proper process management
     const transport = new StdioClientTransport({
@@ -168,6 +171,18 @@ async function initializeMcpServer(name, config, retryCount = 0) {
     // Add error handling for transport
     transport.onError = (error) => {
       console.error(`❌ Transport error for ${name}:`, error);
+
+      // Check if this is a session error
+      const isSessionError = error.message && (
+        error.message.includes('No valid session ID provided') ||
+        error.message.includes('session') ||
+        error.message.includes('Session')
+      );
+
+      if (isSessionError) {
+        console.log(`📌 Session error detected for ${name}, will attempt reconnection`);
+      }
+
       // Mark server as disconnected and remove connection
       const currentState = serverState.get(name) || {};
       serverState.set(name, {
@@ -178,7 +193,7 @@ async function initializeMcpServer(name, config, retryCount = 0) {
         initTime: Date.now()
       });
       mcpConnections.delete(name);
-      
+
       // Trigger reconnection attempt after a short delay
       setTimeout(() => {
         reconnectMcpServer(name).catch(err => {
@@ -199,7 +214,7 @@ async function initializeMcpServer(name, config, retryCount = 0) {
         initTime: Date.now()
       });
       mcpConnections.delete(name);
-      
+
       // Trigger reconnection attempt after a short delay
       setTimeout(() => {
         reconnectMcpServer(name).catch(err => {
@@ -246,7 +261,7 @@ async function initializeMcpServer(name, config, retryCount = 0) {
     return true;
   } catch (error) {
     console.error(`Failed to initialize MCP server ${name}:`, error);
-    
+
     // Store failed state
     const currentState = serverState.get(name) || {};
     serverState.set(name, {
@@ -304,6 +319,17 @@ async function reconnectMcpServer(name) {
     return false; // Exceeded max attempts
   }
 
+  // Check if this is a session-related reconnection
+  const isSessionError = state.lastError && (
+    state.lastError.includes('No valid session ID provided') ||
+    state.lastError.includes('session') ||
+    state.lastError.includes('Session')
+  );
+
+  if (isSessionError) {
+    console.log(`🔑 Reconnecting ${name} due to session error: ${state.lastError}`);
+  }
+
   console.log(`🔄 Attempting to reconnect to MCP server: ${name} (attempt ${state.reconnectAttempts + 1}/${RECONNECT_MAX_ATTEMPTS})`);
 
   // Clean up existing connection if any
@@ -337,7 +363,7 @@ async function reconnectMcpServer(name) {
   try {
     const config = await loadConfig();
     const serverConfig = config.mcpServers[name];
-    
+
     if (!serverConfig) {
       console.error(`⚠️  No configuration found for server: ${name}`);
       return false;
@@ -345,7 +371,7 @@ async function reconnectMcpServer(name) {
 
     // Use the existing initialization function but without internal retries
     const success = await initializeMcpServer(name, serverConfig, 0);
-    
+
     if (success) {
       console.log(`✅ Successfully reconnected to MCP server: ${name}`);
       // Reset reconnection state on successful connection
@@ -356,11 +382,11 @@ async function reconnectMcpServer(name) {
         lastReconnectAttempt: null,
         nextReconnectDelay: RECONNECT_BASE_DELAY
       });
-      
+
       // Invalidate tools cache to refetch from reconnected server
       cachedTools = [];
       lastToolsFetch = 0;
-      
+
       return true;
     }
 
@@ -374,8 +400,8 @@ async function reconnectMcpServer(name) {
 // Health check for a single server
 async function checkServerHealth(name) {
   const connection = mcpConnections.get(name);
-  const state = serverState.get(name) || { 
-    connected: false, 
+  const state = serverState.get(name) || {
+    connected: false,
     toolCount: 0,
     reconnectAttempts: 0,
     lastReconnectAttempt: null,
@@ -393,7 +419,7 @@ async function checkServerHealth(name) {
     // Try to list tools as a health check
     const tools = await connection.client.listTools();
     const toolCount = tools.tools?.length || 0;
-    
+
     serverState.set(name, {
       ...state,
       connected: true,
@@ -404,21 +430,33 @@ async function checkServerHealth(name) {
       lastReconnectAttempt: null,
       nextReconnectDelay: RECONNECT_BASE_DELAY
     });
-    
+
     connection.lastHealthCheck = Date.now();
     return true;
   } catch (error) {
     console.error(`❌ Health check failed for ${name}:`, error.message);
+
+    // Check if this is a session error
+    const isSessionError = error.message && (
+      error.message.includes('No valid session ID provided') ||
+      error.message.includes('session') ||
+      error.message.includes('Session')
+    );
+
+    if (isSessionError) {
+      console.log(`📌 Session error detected during health check for ${name}`);
+    }
+
     serverState.set(name, {
       ...state,
       connected: false,
       lastError: error.message,
       lastHealthCheck: Date.now()
     });
-    
+
     // Remove failed connection
     mcpConnections.delete(name);
-    
+
     // Attempt reconnection
     await reconnectMcpServer(name);
     return serverState.get(name)?.connected || false;
@@ -430,7 +468,7 @@ async function runHealthChecks() {
   // Check all configured servers, not just connected ones
   const config = await loadConfig();
   const configuredServers = Object.keys(config.mcpServers);
-  
+
   for (const name of configuredServers) {
     await checkServerHealth(name);
   }
@@ -451,7 +489,7 @@ async function fetchMCPTools() {
 
     for (const [serverName, connection] of mcpConnections.entries()) {
       const state = serverState.get(serverName);
-      
+
       // Skip if server is known to be disconnected
       if (state && !state.connected) {
         errors[serverName] = state.lastError || 'Server disconnected';
@@ -461,19 +499,26 @@ async function fetchMCPTools() {
       try {
         const tools = await connection.client.listTools();
         const toolCount = tools.tools?.length || 0;
-        
+
         // Update tool count in server state
         if (state) {
           state.toolCount = toolCount;
         }
-        
+
         // Add server name to each tool and prefix tool name
         for (const tool of tools.tools || []) {
           // Replace hyphens in server name with underscores for OpenAI compatibility
           const safeServerName = serverName.replace(/-/g, '_');
+          const prefixedName = `${safeServerName}__${tool.name}`;
+          
+          // Store output schema if present
+          if (tool.outputSchema) {
+            toolOutputSchemas.set(prefixedName, tool.outputSchema);
+          }
+          
           allTools.push({
             ...tool,
-            name: `${safeServerName}__${tool.name}`,
+            name: prefixedName,
             originalName: tool.name,
             server: serverName
           });
@@ -481,7 +526,7 @@ async function fetchMCPTools() {
       } catch (error) {
         console.error(`Failed to list tools from ${serverName}:`, error);
         errors[serverName] = error.message;
-        
+
         // Update server state to reflect error
         serverState.set(serverName, {
           ...state,
@@ -529,7 +574,7 @@ async function executeTool(toolName, args) {
     // Handle prefixed tool names (server__toolName)
     let actualToolName = toolName;
     let targetServer = null;
-    
+
     if (toolName.includes('__')) {
       const [prefix, ...nameParts] = toolName.split('__');
       // Try to find the actual server name (with hyphens) from the safe name (with underscores)
@@ -547,7 +592,7 @@ async function executeTool(toolName, args) {
       }
       actualToolName = nameParts.join('__'); // Handle tool names that might contain __
     }
-    
+
     console.log(`Resolved - actualToolName: ${actualToolName}, targetServer: ${targetServer}`);
     console.log(`Available connections:`, Array.from(mcpConnections.keys()));
 
@@ -564,30 +609,48 @@ async function executeTool(toolName, args) {
       name: actualToolName,
       arguments: args
     });
-    
+
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => {
-        reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT/1000} seconds`));
+        reject(new Error(`Tool execution timed out after ${TOOL_TIMEOUT / 1000} seconds`));
       }, TOOL_TIMEOUT);
     });
-    
+
     console.log(`[${toolName}] Waiting for tool completion...`);
     const result = await Promise.race([toolPromise, timeoutPromise]);
     console.log(`[${toolName}] Tool call returned:`, safeStringify(result));
+    console.log(`[${toolName}] Result type:`, typeof result, 'isArray:', Array.isArray(result), 'has content:', !!result?.content, 'has structuredContent:', !!result?.structuredContent);
+
+    // Check if this tool has an output schema
+    const hasOutputSchema = toolOutputSchemas.has(toolName);
+    console.log(`[${toolName}] Has output schema:`, hasOutputSchema, 'Total schemas stored:', toolOutputSchemas.size);
+    
+    // Log MCP spec violations
+    if (hasOutputSchema) {
+      if (result && result.structuredContent) {
+        console.log(`✅ [${toolName}] Tool with outputSchema correctly returned structuredContent`);
+      } else if (result && Array.isArray(result.content)) {
+        console.warn(`⚠️  MCP SPEC VIOLATION: Tool '${toolName}' has an outputSchema but returned content array instead of structuredContent`);
+        console.warn(`   This violates the MCP specification. Tools with outputSchema should return structuredContent.`);
+        console.warn(`   The tool's outputSchema:`, safeStringify(toolOutputSchemas.get(toolName)));
+      }
+    } else {
+      console.log(`[${toolName}] No output schema defined for this tool`);
+    }
 
     // The MCP SDK callTool response should already be in the correct format
     // with a 'content' array. We just need to extract and validate it.
-    
+
     // If result already has the proper MCP format with content array
     if (result && Array.isArray(result.content)) {
       console.log(`Tool ${toolName} returning properly formatted content with ${result.content.length} items`);
       return result.content;
     }
-    
+
     // Fallback handling for legacy or non-standard responses
     // This ensures backward compatibility while encouraging proper format
     const content = result.content || result;
-    
+
     if (Array.isArray(content) && content.length > 0 && content[0].type) {
       // Already in correct format [{type: 'text', text: '...'}]
       console.log(`Tool ${toolName} returning array content with ${content.length} items`);
@@ -615,6 +678,40 @@ async function executeTool(toolName, args) {
 
   } catch (error) {
     console.error(`Failed to execute tool ${toolName}:`, error);
+
+    // Check for session-related errors and trigger reconnection
+    if (error.message && (
+      error.message.includes('No valid session ID provided') ||
+      error.message.includes('session') ||
+      error.message.includes('Session')
+    )) {
+      console.log(`Session error detected for ${targetServer}, triggering reconnection...`);
+
+      // Mark server as disconnected
+      const state = serverState.get(targetServer);
+      if (state) {
+        serverState.set(targetServer, {
+          ...state,
+          connected: false,
+          lastError: error.message
+        });
+      }
+
+      // Remove the failed connection
+      mcpConnections.delete(targetServer);
+
+      // Trigger reconnection
+      const reconnected = await reconnectMcpServer(targetServer);
+
+      if (reconnected) {
+        console.log(`Reconnection successful for ${targetServer}, retrying tool execution...`);
+        // Retry the tool execution after successful reconnection
+        return executeTool(toolName, args);
+      } else {
+        throw new Error(`Tool execution failed after reconnection attempt: ${error.message}`);
+      }
+    }
+
     throw new Error(`Tool execution failed: ${error.message}`);
   }
 }
@@ -636,11 +733,11 @@ app.get('/status', async (req, res) => {
     const config = await loadConfig();
     const configuredServers = Object.keys(config.mcpServers);
     const status = {};
-    
+
     for (const name of configuredServers) {
       const state = serverState.get(name);
       const connection = mcpConnections.get(name);
-      
+
       status[name] = {
         connected: state?.connected || false,
         toolCount: state?.toolCount || 0,
@@ -654,7 +751,7 @@ app.get('/status', async (req, res) => {
         initTime: state?.initTime || null
       };
     }
-    
+
     res.json({
       service: 'polyllama-mcp-server-streamable-http',
       timestamp: new Date().toISOString(),
@@ -793,7 +890,7 @@ app.post('/mcp', express.json(), async (req, res) => {
       if (shouldStream) {
         // Upgrade to SSE streaming for tool execution
         console.log(`[${requestId}] Upgrading to SSE streaming for tool: ${name}`);
-        
+
         // Track this operation
         incrementActiveOperations();
 
@@ -829,20 +926,20 @@ app.post('/mcp', express.json(), async (req, res) => {
             }
           };
           console.log(`[${requestId}] Sending final result for: ${name}`);
-          console.log(`[${requestId}] Result content length: ${JSON.stringify(content).length} chars`);
+          console.log(`[${requestId}] Result content length: ${JSON.stringify(finalEvent).length} chars`);
           res.write(`data: ${JSON.stringify(finalEvent)}\n\n`);
           console.log(`[${requestId}] Final event written, connection alive: ${!res.destroyed}`);
 
           console.log(`[${requestId}] Streaming tool execution completed for: ${name}`);
           res.end();
-          
+
           // Operation completed successfully
           decrementActiveOperations();
           return;
 
         } catch (error) {
           console.error(`[${requestId}] Tool execution error for ${name}:`, error);
-          
+
           // Send error event
           const errorEvent = {
             jsonrpc: '2.0',
@@ -855,7 +952,7 @@ app.post('/mcp', express.json(), async (req, res) => {
           };
           res.write(`data: ${JSON.stringify(errorEvent)}\n\n`);
           res.end();
-          
+
           // Operation completed with error
           decrementActiveOperations();
           return;
@@ -915,7 +1012,7 @@ app.post('/mcp', express.json(), async (req, res) => {
 app.get('/sse', async (req, res) => {
   const userAgent = req.headers['user-agent'] || 'unknown';
   const sessionId = uuidv4().replace(/-/g, '').substring(0, 8);
-  
+
   console.log(`[${sessionId}] SSE connection from: ${userAgent}`);
 
   // Set SSE headers
@@ -987,7 +1084,7 @@ app.post('/messages/', express.json(), async (req, res) => {
         'user-agent': req.headers['user-agent'] || 'sse-wrapper'
       },
       body: req.body,
-      on: () => {} // Mock event handlers
+      on: () => { } // Mock event handlers
     };
 
     let response;
@@ -1102,14 +1199,14 @@ app.listen(PORT, '0.0.0.0', async () => {
   // Initialize MCP servers on startup
   const results = await initializeAllServers();
   displayInitializationResults(results);
-  
+
   // Start periodic health checks
   healthCheckInterval = setInterval(() => {
     runHealthChecks().catch(error => {
       console.error('Error during health checks:', error);
     });
   }, HEALTH_CHECK_INTERVAL);
-  
+
   // Run initial health check after 5 seconds
   setTimeout(() => {
     runHealthChecks().catch(error => {
@@ -1154,7 +1251,7 @@ function incrementActiveOperations() {
 function decrementActiveOperations() {
   activeOperations--;
   console.log(`Active operations: ${activeOperations}`);
-  
+
   // If shutdown was requested and no active operations, proceed with shutdown
   if (shutdownRequested && activeOperations === 0) {
     console.log('All operations completed, proceeding with shutdown');
@@ -1164,12 +1261,12 @@ function decrementActiveOperations() {
 
 function performShutdown() {
   console.log('Performing shutdown...');
-  
+
   // Clear health check interval
   if (healthCheckInterval) {
     clearInterval(healthCheckInterval);
   }
-  
+
   for (const [name, connection] of mcpConnections.entries()) {
     try {
       connection.client.close();
@@ -1185,11 +1282,11 @@ function performShutdown() {
 
 process.on('SIGTERM', () => {
   console.log('SIGTERM received');
-  
+
   if (activeOperations > 0) {
     console.log(`Waiting for ${activeOperations} active operations to complete before shutdown...`);
     shutdownRequested = true;
-    
+
     // Force shutdown after 30 seconds
     setTimeout(() => {
       console.log('Force shutdown after timeout');

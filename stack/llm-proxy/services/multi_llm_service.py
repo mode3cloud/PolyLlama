@@ -86,10 +86,10 @@ def _ensure_valid_tool_call_id(tool_id: str) -> str:
     """Ensure tool call ID is within OpenAI's 40-character limit."""
     if len(tool_id) <= 40:
         return tool_id
-    
+
     # Hash the ID to create a consistent, shorter version
     # Use first 8 chars + SHA256 hash truncated to 32 chars
-    hash_obj = hashlib.sha256(tool_id.encode('utf-8'))
+    hash_obj = hashlib.sha256(tool_id.encode("utf-8"))
     hash_hex = hash_obj.hexdigest()[:32]  # Take first 32 chars of hash
     return f"{tool_id[:8]}{hash_hex}"[:40]  # Ensure total is exactly 40 chars
 
@@ -157,7 +157,7 @@ class MultiLLMService:
 
         # Cache for Ollama model capabilities
         self._ollama_capabilities_cache: Dict[str, Tuple[bool, bool, float]] = {}
-        self._cache_ttl = 300.0  # 5 minutes
+        self._cache_ttl = 30.0  # 30 seconds
 
         # Configure LiteLLM
         self._prepare_env()
@@ -337,20 +337,24 @@ class MultiLLMService:
                     logger.info(
                         "Loaded %d tools from MCP manager (filtered: %s)",
                         len(tools_spec) if tools_spec else 0,
-                        bool(tool_selection)
+                        bool(tool_selection),
                     )
             except Exception as e:
                 logger.warning("Failed to load tools from MCP manager: %s", e)
-        
+
         # Check for duplicate tool names and remove them
         if tools_spec:
-            tool_names = [tool.get("function", {}).get("name", "") for tool in tools_spec if tool.get("function")]
+            tool_names = [
+                tool.get("function", {}).get("name", "")
+                for tool in tools_spec
+                if tool.get("function")
+            ]
             duplicates = [name for name in tool_names if tool_names.count(name) > 1]
             if duplicates:
                 unique_duplicates = list(set(duplicates))
                 logger.warning("Found duplicate tool names: %s", unique_duplicates)
                 logger.warning("All tool names: %s", tool_names)
-                
+
                 # Remove duplicates - keep only the first occurrence of each tool
                 seen_names = set()
                 unique_tools = []
@@ -359,18 +363,30 @@ class MultiLLMService:
                     if tool_name and tool_name not in seen_names:
                         seen_names.add(tool_name)
                         unique_tools.append(tool)
-                
-                logger.info("Reduced tools from %d to %d after removing duplicates", len(tools_spec), len(unique_tools))
+
+                logger.info(
+                    "Reduced tools from %d to %d after removing duplicates",
+                    len(tools_spec),
+                    len(unique_tools),
+                )
                 tools_spec = unique_tools
-            
+
             # DEFENSIVE: Enforce OpenAI 128 tool limit as final safety net
             if len(tools_spec) > 128:
-                logger.warning("Tool count %d exceeds OpenAI limit of 128. Truncating to first 128 tools.", len(tools_spec))
-                logger.warning("This indicates tool selection filtering may have failed. Tool names: %s", 
-                             [tool.get("function", {}).get("name", "") for tool in tools_spec[:5]] + 
-                             (["..."] if len(tools_spec) > 5 else []))
+                logger.warning(
+                    "Tool count %d exceeds OpenAI limit of 128. Truncating to first 128 tools.",
+                    len(tools_spec),
+                )
+                logger.warning(
+                    "This indicates tool selection filtering may have failed. Tool names: %s",
+                    [
+                        tool.get("function", {}).get("name", "")
+                        for tool in tools_spec[:5]
+                    ]
+                    + (["..."] if len(tools_spec) > 5 else []),
+                )
                 tools_spec = tools_spec[:128]
-            
+
             logger.info("Final tool count being sent to LLM: %d", len(tools_spec))
 
         # Filter supported parameters for this model
@@ -1244,7 +1260,7 @@ class MultiLLMService:
 
             # Always allow these common parameters
             always_allowed = {"api_base", "api_key", "api_version", "extra_headers"}
-            
+
             supported_set = set(supported_params) | always_allowed
 
             filtered = {k: v for k, v in kwargs.items() if k in supported_set}
@@ -1431,7 +1447,9 @@ class MultiLLMService:
                                         content = None
                                         tool_calls = [
                                             {
-                                                "id": _ensure_valid_tool_call_id("fallback"),
+                                                "id": _ensure_valid_tool_call_id(
+                                                    "fallback"
+                                                ),
                                                 "function": {
                                                     "name": "unknown",
                                                     "arguments": "{}",
@@ -1460,11 +1478,13 @@ class MultiLLMService:
                                     content = ""
                                     tool_calls = [
                                         {
-                                            "id": _ensure_valid_tool_call_id("fallback"),
+                                            "id": _ensure_valid_tool_call_id(
+                                                "fallback"
+                                            ),
                                             "function": {
                                                 "name": "unknown",
                                                 "arguments": "{}",
-                                            }
+                                            },
                                         }
                                     ]
 

@@ -101,7 +101,7 @@ Add this configuration to your Claude Desktop MCP settings (`~/Library/Applicati
   "mcpServers": {
     "polyllama": {
       "command": "npx",
-      "args": ["-y", "mcp-remote", "http://localhost:11434/sse"]
+      "args": ["-y", "mcp-remote", "http://localhost:11434/mcp"]
     }
   }
 }
@@ -117,7 +117,7 @@ Add this configuration to your Claude Desktop MCP settings (`~/Library/Applicati
       "args": [
         "-y", 
         "mcp-remote", 
-        "http://localhost:11434/sse",
+        "http://localhost:11434/mcp",
         "--header", "api-key=your_api_key_here"
       ]
     }
@@ -147,7 +147,7 @@ When connected as an MCP server, PolyLlama exposes **all configured MCP tools** 
 
 ### MCP Server Endpoints
 
-- **SSE Endpoint**: `http://localhost:11434/sse` - Main MCP protocol endpoint (protected)
+- **MCP Endpoint**: `http://localhost:11434/mcp` - Main MCP protocol endpoint (supports both SSE and HTTP streamable transport)
 - **Info Endpoint**: `http://localhost:11434/mcp-server/info` - Server capabilities (protected)
 - **Health Endpoint**: `http://localhost:11434/mcp-server/health` - Health check (protected)
 
@@ -178,8 +178,8 @@ I'll load codellama:7b on the optimal instance for you...
 
 ### MCP Server (PolyLlama as Server)
 1. **Connection issues**: Verify PolyLlama is running and accessible at `http://localhost:11434`
-2. **SSE endpoint not working**: Check `http://localhost:11434/mcp-server/health` (with API key if required)
+2. **MCP endpoint not working**: Check `http://localhost:11434/mcp-server/health` (with API key if required)
 3. **Tool execution fails**: Review logs with `docker logs mcp-server`
 4. **Authentication issues**: Ensure API key is correctly configured if using `POLYLLAMA_API_KEY`
-   - Test with: `curl -H "api-key: your_key" http://localhost:11434/sse`
+   - Test with: `curl -H "api-key: your_key" -H "Accept: text/event-stream" http://localhost:11434/mcp`
    - Verify the key matches your `.env` file setting

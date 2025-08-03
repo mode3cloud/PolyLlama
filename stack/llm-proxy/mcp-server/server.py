@@ -17,6 +17,10 @@ from mcp.server.models import InitializationOptions
 from mcp import types
 
 from mcp_bridge import MCPBridge
+from patched_fastmcp import patch_fastmcp_for_dual_transport
+
+# Apply the dual transport patch before creating any FastMCP instances
+patch_fastmcp_for_dual_transport()
 
 # Configure logging
 logging.basicConfig(
@@ -176,105 +180,115 @@ Available capabilities:
     def setup_tools(self):
         """Set up the available tools."""
         
-        @self.mcp.tool()
-        async def list_models() -> str:
-            """List all available models in PolyLlama."""
-            try:
-                headers = {}
-                if API_KEY:
-                    headers["api-key"] = API_KEY
-                    
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        f"{OLLAMA_BASE_URL}/api/tags",
-                        headers=headers
-                    ) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            models = data.get("models", [])
-                            model_names = [m["name"] for m in models]
-                            return f"Available models: {', '.join(model_names)}"
-                        else:
-                            return f"Error listing models: {response.status}"
-            except Exception as e:
-                return f"Error: {str(e)}"
+        # Commented out hardcoded Ollama tools - we only use upstream MCP tools
+        # @self.mcp.tool()
+        # async def list_models() -> str:
+        #     """List all available models in PolyLlama."""
+        #     try:
+        #         headers = {}
+        #         if API_KEY:
+        #             headers["api-key"] = API_KEY
+        #             
+        #         async with aiohttp.ClientSession() as session:
+        #             async with session.get(
+        #                 f"{OLLAMA_BASE_URL}/api/tags",
+        #                 headers=headers
+        #             ) as response:
+        #                 if response.status == 200:
+        #                     data = await response.json()
+        #                     models = data.get("models", [])
+        #                     model_names = [m["name"] for m in models]
+        #                     return f"Available models: {', '.join(model_names)}"
+        #                 else:
+        #                     return f"Error listing models: {response.status}"
+        #     except Exception as e:
+        #         return f"Error: {str(e)}"
         
-        @self.mcp.tool()
-        async def generate_completion(
-            model: str,
-            prompt: str,
-            system: Optional[str] = None,
-            temperature: float = 0.7
-        ) -> str:
-            """Generate a completion using a PolyLlama model."""
-            try:
-                headers = {"Content-Type": "application/json"}
-                if API_KEY:
-                    headers["api-key"] = API_KEY
-                
-                payload = {
-                    "model": model,
-                    "prompt": prompt,
-                    "temperature": temperature,
-                    "stream": False
-                }
-                
-                if system:
-                    payload["system"] = system
-                
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{OLLAMA_BASE_URL}/api/generate",
-                        headers=headers,
-                        json=payload
-                    ) as response:
-                        if response.status == 200:
-                            data = await response.json()
-                            return data.get("response", "")
-                        else:
-                            return f"Error generating completion: {response.status}"
-            except Exception as e:
-                return f"Error: {str(e)}"
+        # @self.mcp.tool()
+        # async def generate_completion(
+        #     model: str,
+        #     prompt: str,
+        #     system: Optional[str] = None,
+        #     temperature: float = 0.7
+        # ) -> str:
+        #     """Generate a completion using a PolyLlama model."""
+        #     try:
+        #         headers = {"Content-Type": "application/json"}
+        #         if API_KEY:
+        #             headers["api-key"] = API_KEY
+        #         
+        #         payload = {
+        #             "model": model,
+        #             "prompt": prompt,
+        #             "temperature": temperature,
+        #             "stream": False
+        #         }
+        #         
+        #         if system:
+        #             payload["system"] = system
+        #         
+        #         async with aiohttp.ClientSession() as session:
+        #             async with session.post(
+        #                 f"{OLLAMA_BASE_URL}/api/generate",
+        #                 headers=headers,
+        #                 json=payload
+        #             ) as response:
+        #                 if response.status == 200:
+        #                     data = await response.json()
+        #                     return data.get("response", "")
+        #                 else:
+        #                     return f"Error generating completion: {response.status}"
+        #     except Exception as e:
+        #         return f"Error: {str(e)}"
         
-        @self.mcp.tool()
-        async def get_model_info(model: str) -> Dict[str, Any]:
-            """Get detailed information about a specific model."""
-            try:
-                headers = {}
-                if API_KEY:
-                    headers["api-key"] = API_KEY
-                
-                async with aiohttp.ClientSession() as session:
-                    async with session.post(
-                        f"{OLLAMA_BASE_URL}/api/show",
-                        headers=headers,
-                        json={"name": model}
-                    ) as response:
-                        if response.status == 200:
-                            return await response.json()
-                        else:
-                            return {"error": f"Model not found: {response.status}"}
-            except Exception as e:
-                return {"error": str(e)}
+        # @self.mcp.tool()
+        # async def get_model_info(model: str) -> Dict[str, Any]:
+        #     """Get detailed information about a specific model."""
+        #     try:
+        #         headers = {}
+        #         if API_KEY:
+        #             headers["api-key"] = API_KEY
+        #         
+        #         async with aiohttp.ClientSession() as session:
+        #             async with session.post(
+        #                 f"{OLLAMA_BASE_URL}/api/show",
+        #                 headers=headers,
+        #                 json={"name": model}
+        #             ) as response:
+        #                 if response.status == 200:
+        #                     return await response.json()
+        #                 else:
+        #                     return {"error": f"Model not found: {response.status}"}
+        #     except Exception as e:
+        #         return {"error": str(e)}
         
         # Register aggregated tools from upstream MCP servers
-        for tool_name, tool_info in self.mcp_bridge.get_all_tools().items():
-            # Create a dynamic tool handler for each upstream tool
-            async def create_tool_handler(name, info):
+        tools = self.mcp_bridge.get_all_tools()
+        logger.info(f"Registering {len(tools)} tools from upstream MCP servers")
+        
+        # Debug: print tool names
+        if tools:
+            logger.info(f"Tools to register: {list(tools.keys())[:5]}...")  # Show first 5
+        
+        for tool_name, tool_info in tools.items():
+            # Create a closure to capture the tool name
+            def make_tool_handler(captured_name, captured_info):
                 async def handler(**kwargs):
                     """Dynamic handler for upstream MCP tool."""
                     try:
-                        result = await self.mcp_bridge.call_tool(name, kwargs)
+                        result = await self.mcp_bridge.call_tool(captured_name, kwargs)
                         return result
                     except Exception as e:
-                        return f"Error calling {name}: {str(e)}"
+                        return f"Error calling {captured_name}: {str(e)}"
+                
+                # Set the function name and docstring
+                handler.__name__ = captured_name
+                handler.__doc__ = captured_info.get('description', f'Tool from {captured_info.get("server", "unknown")}')
                 return handler
             
-            # Register the tool with FastMCP
-            # Note: This is a simplified version - in production you'd want to 
-            # properly handle the input schema
-            tool_handler = create_tool_handler(tool_name, tool_info)
-            self.mcp.tool(name=tool_name, description=tool_info['description'])(tool_handler)
+            # Create and register the tool handler
+            tool_handler = make_tool_handler(tool_name, tool_info)
+            self.mcp.tool(name=tool_name, description=tool_info.get('description', ''))(tool_handler)
         
         # Log registration complete
         logger.info(f"Tool registration complete")
@@ -289,7 +303,9 @@ Available capabilities:
         await self.initialize_upstream_servers()
         
         # Set up tools
+        logger.info("About to call setup_tools()")
         self.setup_tools()
+        logger.info("Finished setup_tools()")
         
         logger.info(f"Starting MCP server with transport: {transport}")
         logger.info(f"Server: {self.name} on {self.host}:{self.port}")
@@ -303,7 +319,9 @@ Available capabilities:
             
             # Display available endpoints
             print(f"\n📡 Available Endpoints:")
-            print(f"   📊 Main MCP: http://{self.host}:{self.port}/mcp")
+            print(f"   📊 Main MCP: http://{self.host}:{self.port}/mcp (Streamable HTTP)")
+            print(f"   📡 SSE: http://{self.host}:{self.port}/sse (Server-Sent Events)")
+            print(f"   💬 Messages: http://{self.host}:{self.port}/messages/ (SSE Messages)")
             print(f"   🔍 Health: http://{self.host}:{self.port}/health")
             print(f"   📈 Status: http://{self.host}:{self.port}/status")
             print(f"   ℹ️  Info: http://{self.host}:{self.port}/info")
@@ -321,11 +339,11 @@ Available capabilities:
             
             print(f"\n✨ PolyLlama MCP Server ready for connections!")
             print(f"💡 Key Features:")
-            print(f"   • Single /mcp endpoint for all operations")
-            print(f"   • Automatic transport negotiation (SSE/HTTP)")
+            print(f"   • Dual transport support: /mcp (HTTP) and /sse (SSE)")
+            print(f"   • Single server instance for both protocols")
             print(f"   • Beautiful initialization logging")
             print(f"   • Tool aggregation from upstream MCP servers")
-            print(f"   • FastMCP-based architecture\n")
+            print(f"   • FastMCP-based architecture with patch enhancement\n")
             
             await self.mcp.run_streamable_http_async()
         elif transport == "streamable-http":

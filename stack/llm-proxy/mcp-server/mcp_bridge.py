@@ -48,6 +48,92 @@ class MCPBridge:
                 
         except Exception as e:
             logger.error(f"Error loading MCP config: {e}")
+    
+    def _get_simulated_tools(self, server_name: str) -> Dict[str, Dict[str, Any]]:
+        """Get simulated tools for a server (temporary until real MCP integration)."""
+        tools = {}
+        
+        if server_name == 'github':
+            tools = {
+                'search_repositories': {'description': 'Search GitHub repositories'},
+                'get_file_contents': {'description': 'Get file contents from a repository'},
+                'create_issue': {'description': 'Create a new issue'},
+                'create_pull_request': {'description': 'Create a new pull request'},
+                'list_issues': {'description': 'List issues in a repository'},
+                'search_code': {'description': 'Search for code across repositories'},
+                'get_pull_request': {'description': 'Get details of a pull request'},
+                'list_commits': {'description': 'List commits in a repository'},
+                'create_branch': {'description': 'Create a new branch'},
+                'fork_repository': {'description': 'Fork a repository'},
+                'update_issue': {'description': 'Update an existing issue'},
+                'add_issue_comment': {'description': 'Add a comment to an issue'},
+                'merge_pull_request': {'description': 'Merge a pull request'},
+                'get_issue': {'description': 'Get details of an issue'},
+                'create_repository': {'description': 'Create a new repository'}
+            }
+        elif server_name == 'personal-ai':
+            tools = {
+                'search_notes': {'description': 'Search through personal notes'},
+                'create_note': {'description': 'Create a new note'},
+                'update_note': {'description': 'Update an existing note'},
+                'get_calendar': {'description': 'Get calendar events'},
+                'create_event': {'description': 'Create a calendar event'},
+                'get_tasks': {'description': 'Get task list'},
+                'create_task': {'description': 'Create a new task'},
+                'complete_task': {'description': 'Mark a task as complete'}
+            }
+        elif server_name == 'context7':
+            tools = {
+                'resolve_library_id': {'description': 'Resolve a package name to a Context7 library ID'},
+                'get_library_docs': {'description': 'Get documentation for a library'}
+            }
+        elif server_name == 'sequential-thinking':
+            tools = {
+                'sequentialthinking': {'description': 'Sequential thinking and problem-solving'}
+            }
+        elif server_name == 'browsermcp':
+            tools = {
+                'browser_navigate': {'description': 'Navigate to a URL'},
+                'browser_snapshot': {'description': 'Take a snapshot of the current page'},
+                'browser_click': {'description': 'Click on an element'},
+                'browser_type': {'description': 'Type text into an element'},
+                'browser_wait': {'description': 'Wait for a specified time'}
+            }
+        elif server_name == 'hubspot':
+            tools = {
+                'list_contacts': {'description': 'List HubSpot contacts'},
+                'get_contact': {'description': 'Get a specific contact'},
+                'create_contact': {'description': 'Create a new contact'},
+                'update_contact': {'description': 'Update an existing contact'},
+                'search_contacts': {'description': 'Search for contacts'}
+            }
+        elif server_name == 'azureDevOps':
+            tools = {
+                'list_projects': {'description': 'List Azure DevOps projects'},
+                'get_project': {'description': 'Get project details'},
+                'list_work_items': {'description': 'List work items'},
+                'create_work_item': {'description': 'Create a new work item'},
+                'update_work_item': {'description': 'Update an existing work item'}
+            }
+        elif server_name == 'firecrawl':
+            tools = {
+                'crawl_url': {'description': 'Crawl a URL and extract content'},
+                'search_web': {'description': 'Search the web'},
+                'extract_data': {'description': 'Extract structured data from a page'},
+                'take_screenshot': {'description': 'Take a screenshot of a webpage'},
+                'get_sitemap': {'description': 'Get the sitemap of a website'}
+            }
+        else:
+            # Default tools for unknown servers
+            tools = {
+                'default_tool_1': {'description': f'Tool 1 from {server_name}'},
+                'default_tool_2': {'description': f'Tool 2 from {server_name}'},
+                'default_tool_3': {'description': f'Tool 3 from {server_name}'},
+                'default_tool_4': {'description': f'Tool 4 from {server_name}'},
+                'default_tool_5': {'description': f'Tool 5 from {server_name}'}
+            }
+        
+        return tools
             
     async def connect_server(self, server_name: str, config: MCPServerConfig) -> dict:
         """Connect to a single MCP server and return connection info."""
@@ -68,17 +154,20 @@ class MCPBridge:
             if config.command in ["npx", "node", "python", "python3", "uv"]:
                 # Simulate successful connection
                 server_info['status'] = 'connected'
-                # Simulate some tools being available
-                if server_name == 'github':
-                    server_info['tool_count'] = 15
-                elif server_name == 'personal-ai':
-                    server_info['tool_count'] = 8
-                elif server_name == 'context7':
-                    server_info['tool_count'] = 2
-                elif server_name == 'sequential-thinking':
-                    server_info['tool_count'] = 1
-                else:
-                    server_info['tool_count'] = 5
+                
+                # Get simulated tools and add them to aggregated collection
+                tools = self._get_simulated_tools(server_name)
+                server_info['tool_count'] = len(tools)
+                
+                # Add tools to aggregated collection with server prefix
+                for tool_name, tool_info in tools.items():
+                    # Prefix tool name with server name to avoid conflicts
+                    prefixed_name = f"{server_name}__{tool_name}"
+                    self.aggregated_tools[prefixed_name] = {
+                        'server': server_name,
+                        'original_name': tool_name,
+                        **tool_info
+                    }
                 
                 logger.info(f"✅ Successfully connected to MCP server: {server_name} with {server_info['tool_count']} tools")
             else:

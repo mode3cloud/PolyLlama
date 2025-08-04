@@ -10,7 +10,8 @@ from typing import Any, Dict, List, Optional
 from dataclasses import dataclass
 
 import aiohttp
-from fastmcp import FastMCP, Client
+from fastmcp import FastMCP
+from fastmcp.client import Client
 from fastmcp.client.transports import StdioTransport
 
 logger = logging.getLogger(__name__)
@@ -31,9 +32,8 @@ class MCPBridge:
     
     def __init__(self):
         self.servers = {}
-        self.clients = {}
         self.proxies = {}
-        self.aggregated_tools = {}
+        self.server_tools = {}  # Store tool info for each server
         
     async def load_config(self, config_path: str) -> None:
         """Load MCP server configurations from file."""
@@ -76,12 +76,12 @@ class MCPBridge:
             logger.info(f"   Command: {config.command}")
             logger.info(f"   Args: {config.args}")
             
-            # Create client based on server type
+            # Create proxy based on server type
             if config.url:
                 # HTTP-based server (like personal-ai using mcp-remote)
                 logger.info(f"   📡 HTTP endpoint: {config.url}")
-                # For HTTP servers, we use the URL directly
-                client = Client(config.url)
+                # For HTTP servers, create proxy from URL
+                proxy = FastMCP.as_proxy(config.url, name=f"{server_name}_proxy")
             else:
                 # STDIO-based server
                 # Merge environment variables
@@ -93,23 +93,40 @@ class MCPBridge:
                     args=config.args,
                     env=env
                 )
-                client = Client(transport)
+                # Create proxy from transport
+                proxy = FastMCP.as_proxy(transport, name=f"{server_name}_proxy")
             
-            # Store the client
-            self.clients[server_name] = client
+            # Store the proxy
+            self.proxies[server_name] = proxy
             
-            # Connect and test the client
-            async with client:
+            # Test connection by creating a client temporarily
+            if config.url:
+                test_client = Client(config.url)
+            else:
+                test_transport = StdioTransport(
+                    command=config.command,
+                    args=config.args,
+                    env=env if 'env' in locals() else None
+                )
+                test_client = Client(test_transport)
+            
+            async with test_client:
                 # Try to list tools to verify connection
                 try:
-                    tools = await client.list_tools()
+                    tools = await test_client.list_tools()
                     tool_count = len(tools)
                     server_info['tool_count'] = tool_count
                     server_info['status'] = 'connected'
                     
-                    # Create a proxy for this server
-                    proxy = FastMCP.as_proxy(client, name=f"{server_name}_proxy")
-                    self.proxies[server_name] = proxy
+                    # Store tool information for later use
+                    self.server_tools[server_name] = []
+                    for tool in tools:
+                        tool_info = {
+                            'name': tool.name,
+                            'description': tool.description,
+                            'input_schema': getattr(tool, 'inputSchema', {})
+                        }
+                        self.server_tools[server_name].append(tool_info)
                     
                     logger.info(f"✅ Successfully connected to MCP server: {server_name} with {tool_count} tools")
                     
@@ -137,58 +154,64 @@ class MCPBridge:
         logger.info(f"Initialized {len(self.servers)} MCP servers")
         return servers_info
         
-    async def get_aggregated_tools(self) -> Dict[str, Dict[str, Any]]:
-        """Get all tools from connected servers with server prefixes."""
+        
+    def get_proxies(self) -> Dict[str, Any]:
+        """Get all proxy servers."""
+        return self.proxies
+    
+    async def get_aggregated_tools(self) -> Dict[str, dict]:
+        """Get all tools from all connected servers with prefixed names."""
+        logger.info("Starting get_aggregated_tools")
         aggregated_tools = {}
         
-        for server_name, client in self.clients.items():
-            try:
-                async with client:
-                    tools = await client.list_tools()
-                    
-                    # Add tools with server prefix
-                    for tool in tools:
-                        # Use double underscore as separator
-                        prefixed_name = f"{server_name}__{tool.name}"
-                        aggregated_tools[prefixed_name] = {
-                            'name': prefixed_name,
-                            'description': tool.description,
-                            'inputSchema': tool.inputSchema,
-                            'server': server_name,
-                            'original_name': tool.name
-                        }
-                        
-            except Exception as e:
-                logger.error(f"Error getting tools from {server_name}: {e}")
+        # Use the stored tool information from initialization
+        for server_name, tools in self.server_tools.items():
+            logger.info(f"Processing {len(tools)} tools from {server_name}")
+            
+            for tool_info in tools:
+                prefixed_name = f"{server_name}__{tool_info['name']}"
+                aggregated_tools[prefixed_name] = {
+                    'name': tool_info['name'],
+                    'description': tool_info['description'],
+                    'server': server_name,
+                    'input_schema': tool_info['input_schema']
+                }
+                logger.debug(f"Added tool: {prefixed_name}")
                 
-        self.aggregated_tools = aggregated_tools
+        logger.info(f"Aggregated {len(aggregated_tools)} tools total")
         return aggregated_tools
-        
-    async def call_tool(self, tool_name: str, arguments: Dict[str, Any]) -> Any:
-        """Call a tool on the appropriate MCP server."""
-        if tool_name not in self.aggregated_tools:
-            raise ValueError(f"Unknown tool: {tool_name}")
+    
+    async def call_tool(self, prefixed_tool_name: str, arguments: dict) -> Any:
+        """Call a tool on the appropriate upstream server."""
+        # Extract server name and tool name
+        parts = prefixed_tool_name.split('__', 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid tool name format: {prefixed_tool_name}")
             
-        tool_info = self.aggregated_tools[tool_name]
-        server_name = tool_info['server']
-        original_name = tool_info['original_name']
+        server_name, tool_name = parts
         
-        if server_name not in self.clients:
-            raise RuntimeError(f"Server {server_name} is not connected")
+        if server_name not in self.servers:
+            raise ValueError(f"Unknown server: {server_name}")
             
-        client = self.clients[server_name]
-        
         try:
-            async with client:
-                result = await client.call_tool(original_name, arguments)
-                # Extract the content from the result
-                if hasattr(result, 'content'):
-                    return result.content
-                return result
-        except Exception as e:
-            logger.error(f"Error calling tool {tool_name}: {e}")
-            raise
+            # Create a client for this server
+            config = self.servers[server_name]
+            if config.url:
+                client = Client(config.url)
+            else:
+                env = {**os.environ, **config.env} if config.env else None
+                transport = StdioTransport(
+                    command=config.command,
+                    args=config.args,
+                    env=env
+                )
+                client = Client(transport)
             
-    def get_all_tools(self) -> Dict[str, Dict[str, Any]]:
-        """Get all aggregated tools."""
-        return self.aggregated_tools
+            async with client:
+                # Call the tool
+                result = await client.call_tool(tool_name, arguments)
+                return result
+                
+        except Exception as e:
+            logger.error(f"Error calling tool {tool_name} on server {server_name}: {e}")
+            raise

@@ -38,22 +38,6 @@ services:
               capabilities: [ gpu ]
               count: 1
 
-  agent-controller:
-    build:
-      context: ../../stack/agent-controller
-      dockerfile: Dockerfile
-    container_name: agent-controller
-    hostname: agent-controller
-    ports:
-      - "11436:11436"
-    environment:
-      - LLM_PROXY_URL=http://llm-proxy:11435
-      - REDIS_URL=redis://redis:6379
-      - LOG_LEVEL=INFO
-    depends_on:
-      - llm-proxy
-      - redis
-
   mcp-server:
     build:
       context: ../../stack/llm-proxy/mcp-server

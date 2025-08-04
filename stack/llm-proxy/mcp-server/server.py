@@ -12,15 +12,16 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 
 import aiohttp
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from mcp.server.models import InitializationOptions
 from mcp import types
+from starlette.applications import Starlette
+from starlette.routing import Route, Mount
+from starlette.responses import Response
+from starlette.requests import Request
+import uvicorn
 
 from mcp_bridge import MCPBridge
-from patched_fastmcp import patch_fastmcp_for_dual_transport
-
-# Apply the dual transport patch before creating any FastMCP instances
-patch_fastmcp_for_dual_transport()
 
 # Configure logging
 logging.basicConfig(
@@ -134,10 +135,13 @@ class PolyLlamaMCPServer:
         self.port = port
         self.servers_info = {}
         
+        # For dual mode, we'll create two FastMCP instances
+        self.mcp_http = None
+        self.mcp_sse = None
+        
+        # Default instance for single-transport mode
         self.mcp = FastMCP(
             name=name,
-            host=host,
-            port=port,
             instructions="""PolyLlama MCP Server
 
 This server provides access to PolyLlama's orchestration capabilities and aggregates tools from configured MCP servers.
@@ -148,10 +152,6 @@ Available capabilities:
 - Streamable HTTP and SSE transport support
 """
         )
-        
-        # Add custom routes after initialization if needed
-        # Note: FastMCP doesn't support custom routes directly, so SSE endpoints
-        # will be handled by the underlying transport
         
         # MCP Bridge for upstream servers
         self.mcp_bridge = MCPBridge()
@@ -177,60 +177,173 @@ Available capabilities:
         except Exception as e:
             logger.error(f"Error initializing upstream servers: {e}")
     
-    async def setup_tools(self):
-        """Set up the available tools."""
+    async def setup_proxies(self):
+        """Set up tools from upstream MCP servers."""
         
-        # Get aggregated tools from upstream MCP servers
-        tools = await self.mcp_bridge.get_aggregated_tools()
-        logger.info(f"Registering {len(tools)} tools from upstream MCP servers")
+        # Since mounting doesn't work with our current setup, let's aggregate tools differently
+        # We'll connect to servers and manually register their tools
         
-        # Debug: print tool names
-        if tools:
-            logger.info(f"Tools to register: {list(tools.keys())[:10]}...")  # Show first 10
+        logger.info("Setting up tools from upstream MCP servers")
         
-        for tool_name, tool_info in tools.items():
-            # Create a closure to capture the tool name
-            def make_tool_handler(captured_name, captured_info):
-                async def handler(**kwargs):
-                    """Dynamic handler for upstream MCP tool."""
-                    try:
-                        result = await self.mcp_bridge.call_tool(captured_name, kwargs)
-                        return result
-                    except Exception as e:
-                        return f"Error calling {captured_name}: {str(e)}"
+        # Get aggregated tools from the bridge
+        aggregated_tools = await self.mcp_bridge.get_aggregated_tools()
+        
+        if not aggregated_tools:
+            logger.warning("No tools available from upstream servers")
+            return
+            
+        logger.info(f"Registering {len(aggregated_tools)} tools from upstream servers")
+        
+        # Register each tool with the FastMCP server
+        for tool_name, tool_info in aggregated_tools.items():
+            try:
+                # Create tool function that calls the bridge
+                # Use a factory function to avoid closure issues
+                def create_tool_handler(tool_name_arg):
+                    async def tool_handler(arguments: dict = None):
+                        """Handler that forwards tool calls to the appropriate upstream server."""
+                        # FastMCP will pass arguments as a dict
+                        if arguments is None:
+                            arguments = {}
+                        return await self.mcp_bridge.call_tool(tool_name_arg, arguments)
+                    return tool_handler
                 
-                # Set the function name and docstring
-                handler.__name__ = captured_name
-                handler.__doc__ = captured_info.get('description', f'Tool from {captured_info.get("server", "unknown")}')
-                return handler
-            
-            # Create and register the tool handler
-            tool_handler = make_tool_handler(tool_name, tool_info)
-            
-            # Register with FastMCP
-            # FastMCP's @tool decorator doesn't support input_schema directly
-            # The schema is inferred from the function signature
-            self.mcp.tool(
-                name=tool_name,
-                description=tool_info.get('description', '')
-            )(tool_handler)
+                # Register the tool with FastMCP
+                # Note: We need to properly handle the tool schema
+                handler = create_tool_handler(tool_name)
+                self.mcp.tool(
+                    name=tool_name,
+                    description=tool_info.get('description', f'Tool from upstream MCP server')
+                )(handler)
+                
+                logger.info(f"✅ Registered tool: {tool_name}")
+            except Exception as e:
+                logger.error(f"❌ Failed to register tool {tool_name}: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
         
-        # Log registration complete
-        logger.info(f"Tool registration complete")
+        logger.info("Tool registration complete")
+    
+    async def create_dual_instances(self):
+        """Create separate FastMCP instances for HTTP and SSE transports."""
+        # Create HTTP instance
+        self.mcp_http = FastMCP(
+            name=f"{self.name}-http",
+            instructions=self.mcp._instructions
+        )
+        
+        # Create SSE instance
+        self.mcp_sse = FastMCP(
+            name=f"{self.name}-sse",
+            instructions=self.mcp._instructions
+        )
+        
+        # Register tools on both instances
+        aggregated_tools = await self.mcp_bridge.get_aggregated_tools()
+        
+        for tool_name, tool_info in aggregated_tools.items():
+            try:
+                # Create tool handler
+                def create_tool_handler(tool_name_arg):
+                    async def tool_handler(arguments: dict = None):
+                        if arguments is None:
+                            arguments = {}
+                        return await self.mcp_bridge.call_tool(tool_name_arg, arguments)
+                    return tool_handler
+                
+                handler = create_tool_handler(tool_name)
+                
+                # Register on both instances
+                self.mcp_http.tool(
+                    name=tool_name,
+                    description=tool_info.get('description', f'Tool from upstream MCP server')
+                )(handler)
+                
+                self.mcp_sse.tool(
+                    name=tool_name,
+                    description=tool_info.get('description', f'Tool from upstream MCP server')
+                )(handler)
+                
+            except Exception as e:
+                logger.error(f"Failed to register tool {tool_name} on dual instances: {e}")
+    
+    async def run_dual_transport(self):
+        """Run both HTTP and SSE transports using Starlette to route requests."""
+        # Create dual instances
+        await self.create_dual_instances()
+        
+        # Create apps using FastMCP's built-in methods
+        # For HTTP transport (handles /mcp endpoint)
+        http_app = self.mcp_http.create_mcp_asgi_app()
+        
+        # For SSE transport (handles /sse endpoint)
+        # We'll create a simple ASGI app that runs the SSE server
+        async def sse_handler(scope, receive, send):
+            """ASGI handler for SSE endpoint."""
+            if scope["type"] == "http" and scope["path"] == "/sse":
+                # Run SSE server in a background task
+                import asyncio
+                task = asyncio.create_task(
+                    self.mcp_sse.run_sse_async(
+                        host="0.0.0.0",
+                        port=3002,  # Different port for SSE
+                        path="/sse"
+                    )
+                )
+                # Send a redirect to the SSE server
+                await send({
+                    'type': 'http.response.start',
+                    'status': 302,
+                    'headers': [[b'location', b'http://localhost:3002/sse']],
+                })
+                await send({
+                    'type': 'http.response.body',
+                    'body': b'',
+                })
+            else:
+                await send({
+                    'type': 'http.response.start',
+                    'status': 404,
+                    'headers': [[b'content-type', b'text/plain']],
+                })
+                await send({
+                    'type': 'http.response.body',
+                    'body': b'Not Found',
+                })
+        
+        # Create routes
+        routes = [
+            Mount("/mcp", app=http_app),
+            Route("/sse", endpoint=sse_handler),
+            Route("/", endpoint=lambda r: Response("PolyLlama MCP Server - Use /mcp or /sse endpoints")),
+        ]
+        
+        # Create the main Starlette app
+        app = Starlette(routes=routes)
+        
+        # Run with uvicorn
+        config = uvicorn.Config(
+            app=app,
+            host=self.host,
+            port=self.port,
+            log_level="info"
+        )
+        server = uvicorn.Server(config)
+        await server.serve()
     
     # Note: FastMCP handles transport negotiation automatically at the /mcp endpoint
     # based on the Accept header. SSE clients should send Accept: text/event-stream
     # while regular HTTP clients should send Accept: application/json
     
-    async def run(self, transport: str = "sse"):
+    async def run(self, transport: str = "dual"):
         """Run the MCP server with the specified transport."""
         # Initialize upstream servers
         await self.initialize_upstream_servers()
         
-        # Set up tools
-        logger.info("About to call setup_tools()")
-        await self.setup_tools()
-        logger.info("Finished setup_tools()")
+        # Set up proxies
+        logger.info("About to call setup_proxies()")
+        await self.setup_proxies()
+        logger.info("Finished setup_proxies()")
         
         logger.info(f"Starting MCP server with transport: {transport}")
         logger.info(f"Server: {self.name} on {self.host}:{self.port}")
@@ -239,17 +352,13 @@ Available capabilities:
         if transport == "stdio":
             await self.mcp.run_stdio_async()
         elif transport == "sse":
-            # FastMCP will handle SSE transport properly - using streamable-http for SSE  
+            # Run with SSE transport at /sse path
             logger.info(f"🚀 Running MCP server with SSE transport on {self.host}:{self.port}")
             
             # Display available endpoints
             print(f"\n📡 Available Endpoints:")
-            print(f"   📊 Main MCP: http://{self.host}:{self.port}/mcp (Streamable HTTP)")
             print(f"   📡 SSE: http://{self.host}:{self.port}/sse (Server-Sent Events)")
-            print(f"   💬 Messages: http://{self.host}:{self.port}/messages/ (SSE Messages)")
-            print(f"   🔍 Health: http://{self.host}:{self.port}/health")
-            print(f"   📈 Status: http://{self.host}:{self.port}/status")
-            print(f"   ℹ️  Info: http://{self.host}:{self.port}/info")
+            print(f"   💬 Messages: http://{self.host}:{self.port}/messages (SSE Messages)")
             
             # Display available tools
             print(f"\n🛠️  Available Tools:")
@@ -262,18 +371,51 @@ Available capabilities:
             else:
                 print("   No tools available (MCP Bridge may be starting up)")
             
-            print(f"\n✨ PolyLlama MCP Server ready for connections!")
+            print(f"\n✨ PolyLlama MCP Server ready for SSE connections!")
             print(f"💡 Key Features:")
-            print(f"   • Dual transport support: /mcp (HTTP) and /sse (SSE)")
-            print(f"   • Single server instance for both protocols")
-            print(f"   • Beautiful initialization logging")
+            print(f"   • SSE transport support")
             print(f"   • Tool aggregation from upstream MCP servers")
-            print(f"   • FastMCP-based architecture with patch enhancement\n")
+            print(f"   • FastMCP 2.x native SSE\n")
             
-            await self.mcp.run_streamable_http_async()
+            # Run with SSE transport - providing the path parameter
+            await self.mcp.run_sse_async(
+                host=self.host, 
+                port=self.port,
+                path="/sse"
+            )
         elif transport == "streamable-http":
             logger.info(f"🚀 Running MCP server with Streamable HTTP transport on {self.host}:{self.port}")
-            await self.mcp.run_streamable_http_async()
+            await self.mcp.run_http_async(host=self.host, port=self.port)
+        elif transport == "dual":
+            # Run HTTP transport which supports both regular HTTP and SSE via Accept header
+            logger.info(f"🚀 Running MCP server with HTTP transport (supports both HTTP + SSE) on {self.host}:{self.port}")
+            
+            # Display available endpoints
+            print(f"\n📡 Available Endpoints:")
+            print(f"   🔌 MCP: http://{self.host}:{self.port}/mcp (HTTP + SSE via Accept header)")
+            print(f"      - HTTP: Accept: application/json")
+            print(f"      - SSE: Accept: text/event-stream")
+            
+            # Display available tools
+            print(f"\n🛠️  Available Tools:")
+            total_tools = sum(info['tool_count'] for info in self.servers_info.values() if info['status'] == 'connected')
+            if total_tools > 0:
+                for name, info in self.servers_info.items():
+                    if info['status'] == 'connected' and info['tool_count'] > 0:
+                        emoji = get_server_emoji(name)
+                        print(f"   {emoji} {name}: {info['tool_count']} tools")
+            else:
+                print("   No tools available (MCP Bridge may be starting up)")
+            
+            print(f"\n✨ PolyLlama MCP Server ready!")
+            print(f"💡 Key Features:")
+            print(f"   • HTTP endpoint at /mcp")
+            print(f"   • Automatic SSE support via Accept header")
+            print(f"   • Tool aggregation from upstream MCP servers")
+            print(f"   • FastMCP 2.x native transport\n")
+            
+            # Run HTTP server which handles both transports based on Accept header
+            await self.mcp.run_http_async(host=self.host, port=self.port)
         else:
             logger.error(f"Unsupported transport: {transport}")
 
@@ -286,9 +428,9 @@ def parse_arguments():
     
     parser.add_argument(
         "--transport",
-        choices=["streamable-http", "sse", "stdio"],
-        default="sse",
-        help="Transport to use for communication (default: sse)",
+        choices=["streamable-http", "sse", "stdio", "dual"],
+        default="dual",
+        help="Transport to use for communication (default: dual)",
     )
     
     parser.add_argument(

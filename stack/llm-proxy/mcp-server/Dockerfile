@@ -25,8 +25,8 @@ COPY . .
 # Expose port for SSE/HTTP transport
 EXPOSE 3001
 
-# Default to SSE transport for compatibility with n8n and MCP Inspector
-ENV MCP_TRANSPORT=sse
+# Default to dual transport for both HTTP and SSE support
+ENV MCP_TRANSPORT=dual
 
 # Run the server
-CMD ["sh", "-c", "python server.py --transport ${MCP_TRANSPORT:-sse}"]
+CMD ["sh", "-c", "python server.py --transport ${MCP_TRANSPORT:-dual}"]

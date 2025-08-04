@@ -12,7 +12,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.routing import Mount
 from starlette.middleware.cors import CORSMiddleware
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from mcp.server.sse import SseServerTransport
 from mcp.server import NotificationOptions
 

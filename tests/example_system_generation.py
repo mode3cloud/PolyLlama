@@ -170,7 +170,7 @@ def generated_compose_structure():
     assert "name: mode3ai_polyllama" in compose_content, "Missing project name"
 
     # Check for expected services
-    expected_services = ["openwebui:", "olah:", "polyllama1:", "polyllama2:", "router:"]
+    expected_services = ["olah:", "polyllama1:", "polyllama2:", "router:"]
 
     for service in expected_services:
         assert service in compose_content, f"Missing service: {service}"

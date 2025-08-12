@@ -1,15 +1,15 @@
 name: mode3ai_polyllama
 
 services:
-  openwebui:
-      build:
-        context: ../../stack/open-webui
-        dockerfile: Dockerfile
-      container_name: openwebui
-      ports:
-        - "8080:8080"
-      volumes:
-        - openwebui_data:/app/backend/data
+  # openwebui:
+  #     build:
+  #       context: ../../stack/open-webui
+  #       dockerfile: Dockerfile
+  #     container_name: openwebui
+  #     ports:
+  #       - "8080:8080"
+  #     volumes:
+  #       - openwebui_data:/app/backend/data
 
   olah:
     build:

@@ -22,6 +22,7 @@ dependencies = [
     "python-multipart==0.0.18",
     "neo4j==5.14.0",
     "mcp>=1.1.0",
+    "fastmcp>=2.0.0",
     # Agent controller dependencies
     "aiohttp>=3.9.1",
     "redis>=5.0.1",

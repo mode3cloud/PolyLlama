@@ -95,19 +95,7 @@ app.add_middleware(
 )
 
 
-# Health check endpoint
-@app.get("/health")
-async def health_check():
-    """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": "polyllama-mcp-server",
-        "mcp_connected": mcp_manager._initialized if mcp_manager else False,
-        "active_sessions": len(mcp_server.sessions) if mcp_server else 0,
-    }
-
-
-# Include MCP server router
+# Include MCP server router (includes all endpoints)
 app.include_router(mcp_server_router)
 
 

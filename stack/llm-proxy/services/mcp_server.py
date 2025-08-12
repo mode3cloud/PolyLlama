@@ -35,6 +35,7 @@ class MCPServer:
         """
         self.mcp_manager = mcp_manager
         self.sessions: Dict[str, Dict[str, Any]] = {}
+        self.sse_sessions: Dict[str, Dict[str, Any]] = {}  # For SSE transport
         self.protocol_version = "2025-06-18"
         self.server_info = {
             "name": "polyllama-mcp-aggregator",

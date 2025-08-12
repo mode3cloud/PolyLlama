@@ -33,7 +33,7 @@ export default function ChatInterface() {
   const abortControllerRef = useRef<AbortController | null>(null)
   const [copiedMessageId, setCopiedMessageId] = useState<number | null>(null)
   const selectedModelRef = useRef<string>('')
-  const [temperature, setTemperature] = useState(0.2)
+  const [temperature, setTemperature] = useState(0.8)
   const [audioEnabled, setAudioEnabled] = useState(false)
   const { playAudio, stopAudio, isPlaying: isAudioPlaying } = useAudioPlayer()
   const isStreamingRef = useRef(false)
@@ -60,25 +60,25 @@ export default function ChatInterface() {
   // Tool priority scoring (same as MCPStatus)
   const getToolPriority = (tool: any): number => {
     let score = 0
-    
+
     // Shorter names often indicate more common tools
     score += Math.max(0, 50 - tool.name.length)
-    
+
     // Prioritize certain keywords
     const highPriorityWords = ['search', 'get', 'list', 'read', 'fetch', 'query', 'find']
     const mediumPriorityWords = ['create', 'update', 'delete', 'write', 'execute', 'run']
-    
+
     const name = tool.name.toLowerCase()
     if (highPriorityWords.some(word => name.includes(word))) score += 20
     if (mediumPriorityWords.some(word => name.includes(word))) score += 10
-    
+
     return score
   }
 
   // Initialize tool selection with smart defaults when MCP status is available
   const initializeToolSelection = useCallback(async () => {
     if (hasInitializedToolSelection) return
-    
+
     try {
       const response = await fetchWithAuth('/ui/api/mcp/proxy-status?includeTools=true')
       if (response.ok) {
@@ -86,7 +86,7 @@ export default function ChatInterface() {
         if (data.servers && data.total_tools > 128) {
           // Auto-select first 128 tools using smart selection logic
           const allTools: Array<{ serverName: string; toolName: string; tool: any }> = []
-          
+
           Object.entries(data.servers).forEach(([serverName, serverData]: [string, any]) => {
             if (serverData.tools) {
               serverData.tools.forEach((tool: any) => {
@@ -94,17 +94,17 @@ export default function ChatInterface() {
               })
             }
           })
-          
+
           // Sort by priority (same logic as MCPStatus)
           allTools.sort((a, b) => {
             const aScore = getToolPriority(a.tool)
             const bScore = getToolPriority(b.tool)
             return bScore - aScore
           })
-          
+
           // Select top 128 tools
           const selectedTools = allTools.slice(0, 128)
-          
+
           const newSelection: ToolSelection = {}
           selectedTools.forEach(({ serverName, toolName }) => {
             if (!newSelection[serverName]) {
@@ -112,12 +112,12 @@ export default function ChatInterface() {
             }
             newSelection[serverName][toolName] = true
           })
-          
+
           // Validate the selection count
           const selectedCount = Object.values(newSelection).reduce((total, serverTools) => {
             return total + Object.values(serverTools).filter(Boolean).length
           }, 0)
-          
+
           console.log(`Initialized tool selection with ${selectedCount} tools (limit: 128)`)
           setToolSelection(newSelection)
         }
@@ -148,9 +148,9 @@ export default function ChatInterface() {
             if (Array.isArray(msg.content)) {
               const textContent = msg.content.find((item: { type: string; text?: string }) => item.type === 'text') as { text?: string } | undefined
               const imageContent = msg.content.filter((item: { type: string }) => item.type === 'image_url')
-              
+
               messageContent = textContent?.text || ''
-              
+
               // Convert image_url format to our ChatImage format
               if (imageContent.length > 0 && !images) {
                 images = imageContent.map((img: { image_url?: { url?: string; detail?: string } | string }) => {
@@ -194,7 +194,7 @@ export default function ChatInterface() {
             setPendingModelSelection(data.metadata.model)
           }
         }
-        
+
         // Load tool selection for this session if it exists
         try {
           const toolResponse = await fetchWithAuth(`${API_BASE_URL}/sessions/${sessionId}/tool-selection`)
@@ -213,7 +213,7 @@ export default function ChatInterface() {
           // Fall back to default tool selection
           await initializeToolSelection()
         }
-        
+
         // Mark that we've loaded a session with data
         setHasLoadedSession(true)
       }
@@ -228,21 +228,21 @@ export default function ChatInterface() {
   // Initialize session - fetch most recent session or create new one
   const initializeSession = useCallback(async () => {
     if (hasInitializedSession) return
-    
+
     try {
       setIsLoadingSession(true)
       const response = await fetchWithAuth(`${API_BASE_URL}/sessions`)
       if (response.ok) {
         const data = await response.json()
         const sessions = data.sessions || []
-        
+
         if (sessions.length > 0) {
           // Sort sessions by creation date (most recent first)
-          const sortedSessions = sessions.sort((a: any, b: any) => 
+          const sortedSessions = sessions.sort((a: any, b: any) =>
             new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
           )
           const mostRecentSession = sortedSessions[0]
-          
+
           // Load the most recent session
           setSessionId(mostRecentSession.id)
           await loadSession(mostRecentSession.id)
@@ -310,7 +310,7 @@ export default function ChatInterface() {
   // Save tool selection to session
   const saveToolSelection = useCallback(async (selection: ToolSelection) => {
     if (!sessionId) return
-    
+
     try {
       const response = await fetchWithAuth(`${API_BASE_URL}/sessions/${sessionId}/tool-selection`, {
         method: 'PUT',
@@ -319,13 +319,13 @@ export default function ChatInterface() {
         },
         body: JSON.stringify({ tool_selection: selection })
       })
-      
+
       if (response.ok) {
         console.log(`Saved tool selection for session ${sessionId}`)
       } else {
         const errorText = await response.text()
         console.warn(`Failed to save tool selection for session ${sessionId}:`, errorText)
-        
+
         // If it's a new session, the backend might not have created it yet
         // This is normal behavior and we can safely ignore it
         if (errorText.includes('Not Found')) {
@@ -344,7 +344,7 @@ export default function ChatInterface() {
       const timeoutId = setTimeout(() => {
         saveToolSelection(toolSelection)
       }, 500)
-      
+
       return () => clearTimeout(timeoutId)
     }
   }, [toolSelection, sessionId])
@@ -369,13 +369,13 @@ export default function ChatInterface() {
 
   // Set default model only for new sessions
   useEffect(() => {
-    if (models.length > 0 && 
-        !selectedModel && 
-        !pendingModelSelection && 
-        !hasLoadedSession &&
-        !isLoadingSessionData &&
-        hasInitializedSession &&
-        messages.length === 0) {
+    if (models.length > 0 &&
+      !selectedModel &&
+      !pendingModelSelection &&
+      !hasLoadedSession &&
+      !isLoadingSessionData &&
+      hasInitializedSession &&
+      messages.length === 0) {
       // Default to gpt-4o-mini if available, otherwise first Ollama model, otherwise first model
       const gpt4oMini = models.find((m: ChatModel) => m.id === 'openai/gpt-4o-mini')
       const ollamaModel = models.find((m: ChatModel) => m.provider === 'ollama')
@@ -394,23 +394,23 @@ export default function ChatInterface() {
     onChunk: (content: string) => {
       const timestamp = Date.now();
       debugLog(`[onChunk ${timestamp}] Called with: "${content}"`);
-      
+
       setMessages(prev => {
         // Check if we need a new assistant message after tool results
         const lastMessage = prev[prev.length - 1];
-        const needNewMessage = !lastMessage || 
-                             lastMessage.role === 'tool' || 
-                             lastMessage.role === 'user' ||
-                             (lastMessage.role === 'assistant' && lastMessage.tool_calls && lastMessage.tool_calls.length > 0);
-        
+        const needNewMessage = !lastMessage ||
+          lastMessage.role === 'tool' ||
+          lastMessage.role === 'user' ||
+          (lastMessage.role === 'assistant' && lastMessage.tool_calls && lastMessage.tool_calls.length > 0);
+
         if (needNewMessage) {
           // Create a new assistant message after tool results or if no assistant message exists
           const messageIndex = prev.length;
           lastMessageIndexRef.current = messageIndex;
           streamingContentRef.current[messageIndex] = content;
-          
+
           debugLog(`[onChunk ${timestamp}] NEW MESSAGE: content="${content}"`);
-          
+
           const newAssistantMessage: ChatMessage = {
             role: 'assistant',
             content: content,
@@ -422,15 +422,15 @@ export default function ChatInterface() {
           const updatedMessages = [...prev];
           const lastIdx = prev.length - 1;
           const currentContent = updatedMessages[lastIdx].content;
-          
+
           debugLog(`[onChunk ${timestamp}] UPDATE: currentContent="${currentContent}", adding="${content}"`);
-          
+
           // Simply append to the existing content
           updatedMessages[lastIdx] = {
             ...updatedMessages[lastIdx],
             content: currentContent + content
           };
-          
+
           debugLog(`[onChunk ${timestamp}] RESULT: "${updatedMessages[lastIdx].content}"`);
           return updatedMessages;
         }
@@ -466,10 +466,10 @@ export default function ChatInterface() {
         setMessages(prev => {
           // Check if we need to create a new assistant message
           const lastMessage = prev[prev.length - 1];
-          const needNewMessage = !lastMessage || 
-                               lastMessage.role !== 'assistant' ||
-                               (lastMessage.tool_calls && lastMessage.tool_calls.length > 0);
-          
+          const needNewMessage = !lastMessage ||
+            lastMessage.role !== 'assistant' ||
+            (lastMessage.tool_calls && lastMessage.tool_calls.length > 0);
+
           if (needNewMessage) {
             // Create new assistant message for tool preparation
             const toolStreamMessage: ChatMessage = {
@@ -483,7 +483,7 @@ export default function ChatInterface() {
             const updatedMessages = [...prev];
             const lastIdx = prev.length - 1;
             const toolInfo = `🔧 Preparing to call tool: **${toolCall.name}**...\n`;
-            
+
             if (updatedMessages[lastIdx].content && !updatedMessages[lastIdx].content.includes(toolInfo)) {
               updatedMessages[lastIdx] = {
                 ...updatedMessages[lastIdx],
@@ -508,7 +508,7 @@ export default function ChatInterface() {
         if (lastMessage && lastMessage.role === 'assistant') {
           const updatedMessages = [...prev];
           const lastIdx = prev.length - 1;
-          
+
           // Add or append to tool_calls array
           const newToolCall = {
             id: toolCall.id,
@@ -518,7 +518,7 @@ export default function ChatInterface() {
               arguments: JSON.stringify(toolCall.arguments)
             }
           };
-          
+
           if (updatedMessages[lastIdx].tool_calls) {
             // Append to existing tool_calls
             updatedMessages[lastIdx] = {
@@ -551,7 +551,7 @@ export default function ChatInterface() {
           // Not JSON or parsing failed, use as-is
         }
       }
-      
+
       // Add a tool result message
       const toolResultMessage: ChatMessage = {
         role: 'tool',
@@ -561,7 +561,7 @@ export default function ChatInterface() {
         timestamp: new Date().toISOString()
       }
       setMessages(prev => [...prev, toolResultMessage])
-      
+
       // The onChunk handler will create a new assistant message when needed
     },
     onToolError: (name: string, error: string, toolCallId?: string) => {
@@ -579,16 +579,16 @@ export default function ChatInterface() {
 
   const sendMessage = async (images?: ChatImage[]) => {
     if ((!input.trim() && !images?.length) || isLoading || !selectedModel || isStreamingRef.current) return
-    
+
     // Abort any existing request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
-    
+
     // Generate a unique stream ID for this request
     const streamId = `${sessionId}_${Date.now()}_${Math.random()}`;
     currentStreamIdRef.current = streamId;
-    
+
     // Set streaming flag
     isStreamingRef.current = true;
 
@@ -616,15 +616,15 @@ export default function ChatInterface() {
     }
 
     // Don't create assistant message upfront - let the streaming handlers create it
-    
+
     // Clear streaming content ref for new stream
     streamingContentRef.current = {};
-    
+
     // Get shared handlers
     const sharedHandlers = createStreamHandlers();
 
     try {
-      
+
       if (audioEnabled) {
         // Use audio streaming with shared handlers
         await streamChatWithAudio({
@@ -732,15 +732,15 @@ export default function ChatInterface() {
     }
 
     // Don't create assistant message upfront - let the streaming handlers create it
-    
+
     // Clear streaming content ref for new stream
     streamingContentRef.current = {};
-    
+
     // Get shared handlers
     const sharedHandlers = createStreamHandlers();
 
     try {
-      
+
       if (audioEnabled) {
         // Use audio streaming
         await streamChatWithAudio({
@@ -842,7 +842,7 @@ export default function ChatInterface() {
         <div className="flex-1 overflow-y-auto p-4">
           <div className="max-w-4xl mx-auto space-y-4 transition-opacity duration-200">
             {/* MCP Status */}
-            <MCPStatus 
+            <MCPStatus
               toolSelection={toolSelection}
               onToolSelectionChange={setToolSelection}
               maxTools={128}

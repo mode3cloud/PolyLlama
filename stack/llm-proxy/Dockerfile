@@ -32,12 +32,15 @@ ENV PATH="/root/.local/bin:$PATH"
 # Copy application code
 COPY stack/llm-proxy/ .
 
-# Expose port
-EXPOSE 11435
+# Make startup script executable
+RUN chmod +x start_services.sh
 
-# Health check
+# Expose ports
+EXPOSE 11435 3001
+
+# Health check (check both services)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:11435/health || exit 1
+    CMD curl -f http://localhost:11435/health && curl -f http://localhost:3001/health || exit 1
 
-# Run the application
-CMD [".venv/bin/python", "main.py"]
+# Run both services
+CMD ["./start_services.sh"]

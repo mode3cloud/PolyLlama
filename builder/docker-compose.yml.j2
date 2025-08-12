@@ -38,24 +38,6 @@ services:
               capabilities: [ gpu ]
               count: 1
 
-  mcp-server:
-    build:
-      context: ../../stack/llm-proxy/mcp-server
-      dockerfile: Dockerfile
-    container_name: mcp-server
-    hostname: mcp-server
-    ports:
-      - "3001:3001"
-    env_file:
-      - ../../.env
-    volumes:
-      - ../../mcp-config.json:/app/mcp-config.json:ro
-    environment:
-      - MCP_SERVER_PORT=3001
-      - OLLAMA_BASE_URL=http://router:11434
-    depends_on:
-      - router
-
   redis:
     image: redis:7-alpine
     container_name: redis
@@ -73,6 +55,7 @@ services:
     hostname: llm-proxy
     ports:
       - "11435:11435"
+      - "3001:3001"
     env_file:
       - ../../.env
     environment:
@@ -80,7 +63,9 @@ services:
       - LLM_PROXY_HOST=0.0.0.0
       - LLM_PROXY_PORT=11435
       - KOKORO_API_BASE=http://kokoro-tts:8880
-      - MCP_SERVER_URL=http://mcp-server:3001
+      - MCP_CONFIG_PATH=/app/mcp-config.json
+      - MCP_SERVER_PORT=3001
+      - USE_MCP_PROXY=true
     volumes:
       - ../../mcp-config.json:/app/mcp-config.json:ro
     depends_on:

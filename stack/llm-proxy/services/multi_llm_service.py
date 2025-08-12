@@ -29,8 +29,51 @@ import litellm
 from litellm.types.utils import ModelResponse  # noqa: F401 # pylint: disable=W0611
 from litellm.litellm_core_utils.streaming_handler import CustomStreamWrapper
 import httpx
+import uuid
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_custom_tool_calls(content: str) -> Optional[List[Dict[str, Any]]]:
+    """
+    Parse custom tool call format like: [TOOL_CALLS][{...}]
+    
+    Returns None if no tool calls found, or list of parsed tool calls.
+    """
+    # Pattern to match [TOOL_CALLS][...] format
+    pattern = r'\[TOOL_CALLS\]\[(.*?)\]'
+    matches = re.findall(pattern, content, re.DOTALL)
+    
+    if not matches:
+        return None
+    
+    tool_calls = []
+    for match in matches:
+        try:
+            # Try to parse the JSON content
+            tool_data = json.loads(match)
+            
+            # Handle both single tool call and array of tool calls
+            if isinstance(tool_data, list):
+                for tool in tool_data:
+                    if isinstance(tool, dict) and "name" in tool:
+                        tool_calls.append({
+                            "id": f"call_{uuid.uuid4().hex[:8]}",
+                            "name": tool["name"],
+                            "arguments": tool.get("arguments", {})
+                        })
+            elif isinstance(tool_data, dict) and "name" in tool_data:
+                tool_calls.append({
+                    "id": f"call_{uuid.uuid4().hex[:8]}",
+                    "name": tool_data["name"],
+                    "arguments": tool_data.get("arguments", {})
+                })
+                
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse custom tool call JSON: {e}")
+            continue
+    
+    return tool_calls if tool_calls else None
 
 
 # Type definitions
@@ -617,6 +660,50 @@ class MultiLLMService:
                             content = delta.content
                             logger.debug("Content chunk: %s", repr(content))
                             assistant_buffer.append(content)
+                            
+                            # Check if accumulated content contains custom tool calls
+                            current_buffer = "".join(assistant_buffer)
+                            custom_tool_calls = _parse_custom_tool_calls(current_buffer)
+                            
+                            if custom_tool_calls and tool_manager:
+                                logger.info(f"Detected custom tool calls in content: {custom_tool_calls}")
+                                
+                                # Process each custom tool call
+                                for tool_call in custom_tool_calls:
+                                    tool_id = tool_call["id"]
+                                    tool_name = tool_call["name"]
+                                    tool_args = tool_call["arguments"]
+                                    
+                                    # Add to tool buffers as if it came from proper tool_calls
+                                    tool_buffers[tool_id] = {"name": tool_name, "args": json.dumps(tool_args)}
+                                    active_tool_ids.add(tool_id)
+                                    last_tool_id = tool_id
+                                    
+                                    logger.info(f"Added custom tool call to buffer: {tool_name} with args: {tool_args}")
+                                    
+                                    # Emit tool call streaming event
+                                    yield {
+                                        "type": "tool_call_streaming", 
+                                        "tool_call": {
+                                            "id": tool_id,
+                                            "name": tool_name,
+                                            "status": "started"
+                                        }
+                                    }
+                                
+                                # Remove tool call patterns from content for clean display
+                                clean_content = re.sub(r'\[TOOL_CALLS\]\[.*?\]', '', current_buffer, flags=re.DOTALL)
+                                
+                                # If there's remaining clean content after tool calls, yield it
+                                if clean_content.strip():
+                                    yield {"type": "content", "content": clean_content}
+                                
+                                # Update assistant buffer with clean content
+                                assistant_buffer = [clean_content] if clean_content.strip() else []
+                                
+                                # Skip yielding the original content since we processed tool calls
+                                continue
+                            
                             yield {"type": "content", "content": content}
                         else:
                             logger.debug("No content in delta")
@@ -685,8 +772,11 @@ class MultiLLMService:
                         hasattr(chunk, "choices")
                         and chunk.choices
                         and chunk.choices[0].finish_reason in ("tool_calls", "stop")
+                        and (active_tool_ids or chunk.choices[0].finish_reason == "tool_calls")
                     ):
                         logger.info("Finish reason: %s", chunk.choices[0].finish_reason)
+                        if active_tool_ids:
+                            logger.info(f"Processing {len(active_tool_ids)} tool calls: {list(active_tool_ids)}")
 
                         # Check if there are any active tool calls to process
                         tool_calls_processed = False
@@ -1047,7 +1137,7 @@ class MultiLLMService:
         return models
 
     async def check_ollama_vision_support(self, model_id: str) -> bool:
-        """Check if an Ollama model supports vision by calling /api/show."""
+        """Check if an Ollama model supports vision by calling /api/polyllama/model-details."""
         if not model_id.startswith("ollama/"):
             return False
 
@@ -1073,8 +1163,8 @@ class MultiLLMService:
 
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.post(
-                    "http://router:11434/api/show",
-                    json={"name": model_name},
+                    "http://router:11434/api/polyllama/model-details",
+                    json={"model": model_name},
                     headers=headers,
                 )
 
@@ -1126,7 +1216,7 @@ class MultiLLMService:
             return result
 
     async def check_ollama_tools_support(self, model_id: str) -> bool:
-        """Check if an Ollama model supports tools/function calling by calling /api/show."""
+        """Check if an Ollama model supports tools/function calling by calling /api/polyllama/model-details."""
         if not model_id.startswith("ollama/"):
             return False
 
@@ -1152,8 +1242,8 @@ class MultiLLMService:
 
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.post(
-                    "http://router:11434/api/show",
-                    json={"name": model_name},
+                    "http://router:11434/api/polyllama/model-details",
+                    json={"model": model_name},
                     headers=headers,
                 )
 

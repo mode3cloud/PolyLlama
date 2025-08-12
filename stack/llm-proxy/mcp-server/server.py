@@ -206,8 +206,11 @@ Available capabilities:
                     return tool_handler
                 
                 # Register the tool with FastMCP
-                # Note: We need to properly handle the tool schema
+                # Note: FastMCP infers schema from function annotations, but since we're using
+                # a generic handler, the schema won't be automatically detected.
+                # The type conversion happens in mcp_bridge.call_tool() instead.
                 handler = create_tool_handler(tool_name)
+                
                 self.mcp.tool(
                     name=tool_name,
                     description=tool_info.get('description', f'Tool from upstream MCP server')

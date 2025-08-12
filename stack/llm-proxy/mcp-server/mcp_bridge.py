@@ -181,6 +181,54 @@ class MCPBridge:
         logger.info(f"Aggregated {len(aggregated_tools)} tools total")
         return aggregated_tools
     
+    def convert_argument_types(self, arguments: dict, schema: dict) -> dict:
+        """Convert argument types based on the tool's input schema."""
+        if not schema or 'properties' not in schema:
+            return arguments
+            
+        converted_args = {}
+        properties = schema.get('properties', {})
+        
+        for key, value in arguments.items():
+            if key in properties:
+                prop_schema = properties[key]
+                prop_type = prop_schema.get('type')
+                
+                # Convert based on the expected type
+                if prop_type == 'number' or prop_type == 'integer':
+                    # Convert string to number
+                    if isinstance(value, str):
+                        try:
+                            if prop_type == 'integer':
+                                converted_args[key] = int(value)
+                            else:
+                                converted_args[key] = float(value)
+                        except (ValueError, TypeError):
+                            logger.warning(f"Could not convert {key}={value} to {prop_type}")
+                            converted_args[key] = value
+                    else:
+                        converted_args[key] = value
+                elif prop_type == 'boolean':
+                    # Convert string to boolean
+                    if isinstance(value, str):
+                        converted_args[key] = value.lower() in ('true', '1', 'yes')
+                    else:
+                        converted_args[key] = value
+                elif prop_type == 'array':
+                    # Ensure it's a list
+                    if not isinstance(value, list):
+                        converted_args[key] = [value] if value is not None else []
+                    else:
+                        converted_args[key] = value
+                else:
+                    # Keep as is for string, object, null, etc.
+                    converted_args[key] = value
+            else:
+                # Keep arguments not in schema as is
+                converted_args[key] = value
+                
+        return converted_args
+    
     async def call_tool(self, prefixed_tool_name: str, arguments: dict) -> Any:
         """Call a tool on the appropriate upstream server."""
         # Extract server name and tool name
@@ -194,6 +242,20 @@ class MCPBridge:
             raise ValueError(f"Unknown server: {server_name}")
             
         try:
+            # Get the tool's schema to convert argument types
+            tool_schema = None
+            for tool_info in self.server_tools.get(server_name, []):
+                if tool_info['name'] == tool_name:
+                    tool_schema = tool_info.get('input_schema', {})
+                    break
+            
+            # Convert argument types based on schema
+            if tool_schema:
+                logger.info(f"Tool {tool_name} - Original arguments: {arguments}")
+                logger.info(f"Tool {tool_name} - Schema properties: {tool_schema.get('properties', {})}")
+                arguments = self.convert_argument_types(arguments, tool_schema)
+                logger.info(f"Tool {tool_name} - Converted arguments: {arguments}")
+            
             # Create a client for this server
             config = self.servers[server_name]
             if config.url:

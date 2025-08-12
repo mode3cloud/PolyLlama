@@ -1160,43 +1160,48 @@ function _M.parse_ollama_search_html(html)
     -- This is a simplified parser that looks for common patterns in ollama.com's HTML structure
     
     -- Look for model links and information
-    -- Pattern: /library/modelname or /username/modelname followed by model info
-    local model_pattern = 'href="(/[^"]+)"[^>]*>.-<h3[^>]*>([^<]+)</h3>'
+    -- Updated pattern for current ollama.com HTML structure
+    -- Pattern: <a href="/library/modelname" class="group w-full">...<h2>...<span>modelname</span></h2><p>description</p>
+    local model_pattern = '<a href="(/library/[^"]+)"[^>]*>.-<h2[^>]*>.-<span[^>]*>([^<]+)</span>.-</h2>.-<p[^>]*>([^<]*)</p>'
     
-    for url, name in string.gmatch(html, model_pattern) do
-        if url and name and (string.match(url, "^/library/") or string.match(url, "^/[%w%-_]+/[%w%-_]+$")) then
+    for url, name, description in string.gmatch(html, model_pattern) do
+        if url and name then
             -- Extract model name from URL
             local model_name = string.match(url, "/([^/]+)$")
             if model_name then
+                -- Clean up HTML entities in description
+                description = description or ""
+                description = description:gsub("&#39;", "'")
+                description = description:gsub("&quot;", '"')
+                description = description:gsub("&amp;", "&")
+                description = description:gsub("&lt;", "<")
+                description = description:gsub("&gt;", ">")
+                description = description:gsub("^%s*(.-)%s*$", "%1") -- trim whitespace
+                
                 -- Look for additional info around this model
                 local model_info = {
                     name = model_name,
                     title = name:gsub("^%s*(.-)%s*$", "%1"), -- trim whitespace
                     url = "https://ollama.com" .. url,
-                    description = "",
-                    downloads = 0,
+                    description = description,
+                    downloads = "Unknown",
                     tags = {},
                     size = "Unknown"
                 }
                 
-                -- Try to extract description, downloads, and tags from surrounding HTML
-                -- This is a best-effort extraction based on common HTML patterns
+                -- Try to extract more info from surrounding HTML
                 local start_pos = string.find(html, url, 1, true)
                 if start_pos then
-                    -- Look for description in the next 1000 characters
-                    local context = string.sub(html, start_pos, start_pos + 1000)
+                    -- Look for stats in the next 2000 characters
+                    local context = string.sub(html, start_pos, math.min(start_pos + 2000, #html))
                     
-                    -- Extract description
-                    local desc = string.match(context, '<p[^>]*>([^<]+)</p>') or 
-                                string.match(context, 'description[^>]*>([^<]+)<') or ""
-                    model_info.description = desc:gsub("^%s*(.-)%s*$", "%1")
-                    
-                    -- Extract download count
-                    local downloads = string.match(context, '(%d+[%w%.]*) downloads') or 
-                                    string.match(context, '(%d+) pulls') or "0"
+                    -- Extract download count if available
+                    local downloads = string.match(context, '(%d+[%w%.]*) pulls') or 
+                                    string.match(context, '(%d+[KMB]?) downloads') or
+                                    string.match(context, 'Pulls.-(%d+[%w%.]*)') or "Unknown"
                     model_info.downloads = downloads
                     
-                    -- Extract model size
+                    -- Extract model size if available
                     local size = string.match(context, '(%d+[%w%.]*[GM]B)') or "Unknown"
                     model_info.size = size
                 end
@@ -1223,21 +1228,33 @@ function _M.parse_ollama_search_html(html)
         end
     end
     
-    -- Fallback: if no models found, try a simpler pattern
+    -- Fallback: if no models found, try looking for user-contributed models
     if #models == 0 then
-        -- Look for any model references in the HTML
-        for model_ref in string.gmatch(html, '"([%w%-_]+/[%w%-_]+)"') do
-            if not string.match(model_ref, "^https?://") then -- exclude URLs
-                local model_name = string.match(model_ref, "/([^/]+)$") or model_ref
-                table.insert(models, {
-                    name = model_name,
-                    title = model_name,
-                    url = "https://ollama.com/" .. model_ref,
-                    description = "Model from ollama.com",
-                    downloads = "Unknown",
-                    tags = {{ name = "latest", size = "Unknown" }},
-                    size = "Unknown"
-                })
+        -- Try pattern for user models: /username/modelname
+        local user_model_pattern = '<a href="(/[^/]+/[^"]+)"[^>]*>.-<h2[^>]*>.-<span[^>]*>([^<]+)</span>'
+        
+        for url, name in string.gmatch(html, user_model_pattern) do
+            -- Exclude non-model paths like /search, /library, /models, etc.
+            if url and name and not string.match(url, "^/library") and 
+               not string.match(url, "^/search") and 
+               not string.match(url, "^/models") and
+               not string.match(url, "%.png") and
+               not string.match(url, "%.jpg") and
+               not string.match(url, "%.svg") and
+               string.match(url, "^/[%w%-_]+/[%w%-_%.]+$") then
+                
+                local model_name = string.match(url, "/([^/]+)$")
+                if model_name and not string.match(model_name, "%.png") then
+                    table.insert(models, {
+                        name = model_name,
+                        title = name:gsub("^%s*(.-)%s*$", "%1"),
+                        url = "https://ollama.com" .. url,
+                        description = "Model from ollama.com",
+                        downloads = "Unknown",
+                        tags = {{ name = "latest", size = "Unknown" }},
+                        size = "Unknown"
+                    })
+                end
             end
         end
     end

@@ -457,3 +457,5 @@ The `mcp-config.json` file contains user-specific MCP server configurations incl
 - **Modify mcp-config.json without explicit user permission** - contains personal configurations
 
 
+
+- Always restart poly llama with ./polyllama.sh --dev Any other method including docker restarts will be invalid.

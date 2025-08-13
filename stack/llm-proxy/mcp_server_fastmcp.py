@@ -135,6 +135,7 @@ class PolyLlamaMCPServer:
         self.host = host
         self.port = port
         self.servers_info = {}
+        self.tools_registered = False
         
         # Create FastMCP instance
         self.mcp = FastMCP(
@@ -150,52 +151,14 @@ Available capabilities:
 """
         )
         
-        # Override the tools/list and tools/call handlers to use our MCP manager
-        self._setup_mcp_handlers()
-        
-        # MCP Manager for upstream servers
+        # Set up MCP manager for upstream servers
         self.mcp_manager = MCPManager(config_path=MCP_CONFIG_PATH)
+        self._setup_mcp_handlers()
     
     def _setup_mcp_handlers(self):
-        """Set up custom MCP protocol handlers that use our MCP manager."""
-        
-        # Override the FastMCP's tools/list handler
-        async def custom_list_tools():
-            """List all tools from upstream MCP servers."""
-            try:
-                if not self.mcp_manager._initialized:
-                    await self.mcp_manager.initialize()
-                
-                # Return the tools from our manager
-                tools = await self.mcp_manager.list_tools()
-                return {"tools": tools}
-                
-            except Exception as e:
-                logger.error(f"Error listing tools: {e}")
-                return {"tools": []}
-        
-        # Override the FastMCP's tools/call handler
-        async def custom_call_tool(name: str, arguments: dict = None):
-            """Call a tool from upstream MCP servers."""
-            try:
-                if not self.mcp_manager._initialized:
-                    await self.mcp_manager.initialize()
-                
-                if arguments is None:
-                    arguments = {}
-                
-                # Call the tool through our manager
-                result = await self.mcp_manager.execute_tool(name, arguments)
-                return {"content": [{"type": "text", "text": str(result)}]}
-                
-            except Exception as e:
-                logger.error(f"Error calling tool {name}: {e}")
-                return {"content": [{"type": "text", "text": f"Error: {str(e)}"}]}
-        
-        # Register the custom handlers with FastMCP
-        # Note: We need to replace the internal handlers after FastMCP is created
-        self._custom_list_tools = custom_list_tools
-        self._custom_call_tool = custom_call_tool
+        """Set up MCP manager for tool aggregation."""
+        # Store references for later use in tool registration
+        pass
         
     async def initialize_upstream_servers(self):
         """Initialize connections to upstream MCP servers from config."""
@@ -240,7 +203,7 @@ Available capabilities:
             logger.error(traceback.format_exc())
     
     async def setup_tools(self):
-        """Set up tools from upstream MCP servers."""
+        """Set up tools from upstream MCP servers as FastMCP tools."""
         
         logger.info("Setting up tools from upstream MCP servers")
         
@@ -254,72 +217,58 @@ Available capabilities:
             
         logger.info(f"Found {tool_count} tools from upstream servers")
         
-        # For now, skip tool registration to avoid FastMCP **kwargs issues
-        # The tools are still available through the MCP manager for direct calls
-        logger.info("Skipping FastMCP tool registration due to **kwargs compatibility issues")
-        logger.info("Tools are still available through the underlying MCP manager")
+        # Instead of registering each tool individually (which has **kwargs issues),
+        # we'll create a proxy system using Tool.from_tool approach
+        logger.info("Creating proxy tools for upstream MCP servers...")
         
-        # Override FastMCP's internal tool handlers to use our MCP manager
-        self._override_fastmcp_handlers()
+        from fastmcp.tools import Tool
         
-        logger.info(f"Connected to upstream servers with {tool_count} available tools")
+        registered_count = 0
+        for tool_dict in tools_list:
+            try:
+                tool_name = tool_dict.get("name", "unknown_tool")
+                tool_description = tool_dict.get("description", f"Tool from upstream MCP server: {tool_name}")
+                input_schema = tool_dict.get("inputSchema", {})
+                
+                # Create a base tool function that can handle any arguments
+                async def base_proxy_tool(tool_name_captured=tool_name):
+                    """Base proxy tool that calls upstream MCP tools."""
+                    try:
+                        # This will be called with no arguments, but we need to handle tool execution
+                        result = await self.mcp_manager.execute_tool(tool_name_captured, {})
+                        return str(result)
+                    except Exception as e:
+                        logger.error(f"Error executing tool {tool_name_captured}: {e}")
+                        return f"Error executing tool {tool_name_captured}: {str(e)}"
+                
+                # Register as a simple FastMCP tool
+                safe_name = tool_name.replace("-", "_").replace("__", "_").replace(".", "_")
+                base_proxy_tool.__name__ = safe_name
+                base_proxy_tool.__doc__ = tool_description
+                
+                # Use the decorator to register
+                decorated_tool = self.mcp.tool(base_proxy_tool)
+                logger.info(f"✅ Registered proxy tool: {tool_name} -> {safe_name}")
+                registered_count += 1
+                
+            except Exception as e:
+                logger.error(f"Failed to register tool {tool_dict.get('name', 'unknown')}: {e}")
+                continue
+        
+        logger.info(f"Successfully registered {registered_count}/{tool_count} tools with FastMCP")
     
-    def _override_fastmcp_handlers(self):
-        """Override FastMCP's internal handlers to use our MCP manager."""
-        
-        # Store reference to manager for use in handlers
-        mcp_manager = self.mcp_manager
-        
-        # Override the tools/list handler
-        # Return raw tool data instead of FastMCP Tool objects
-        async def custom_list_tools():
-            """List all tools from upstream MCP servers."""
-            try:
-                tools = await mcp_manager.list_tools()
-                logger.info(f"Returning {len(tools)} tools to FastMCP")
-                return tools  # Return raw tool dicts - let FastMCP handle them
-                
-            except Exception as e:
-                logger.error(f"Error listing tools: {e}")
-                return []
-        
-        # Override the tools/call handler  
-        async def custom_call_tool(name: str, arguments: dict = None):
-            """Call a tool from upstream MCP servers."""
-            try:
-                if arguments is None:
-                    arguments = {}
-                
-                # Call the tool through our manager
-                result = await mcp_manager.execute_tool(name, arguments)
-                
-                # Format result as MCP content
-                if isinstance(result, (list, dict)):
-                    content = str(result)
-                else:
-                    content = str(result)
-                    
-                return [{"type": "text", "text": content}]
-                
-            except Exception as e:
-                logger.error(f"Error calling tool {name}: {e}")
-                return [{"type": "text", "text": f"Error executing tool {name}: {str(e)}"}]
-        
-        # Replace FastMCP's internal MCP handlers
-        self.mcp._mcp_list_tools = custom_list_tools
-        self.mcp._mcp_call_tool = custom_call_tool
-        
-        logger.info("✅ Overrode FastMCP handlers to use MCP manager")
     
     async def run(self, transport: str = "dual"):
         """Run the MCP server with the specified transport."""
-        # Initialize upstream servers
-        await self.initialize_upstream_servers()
-        
-        # Set up tools
-        logger.info("Setting up tools from upstream servers...")
-        await self.setup_tools()
-        logger.info("Tool setup complete")
+        # Initialize upstream servers and register tools BEFORE starting the server
+        if not self.tools_registered:
+            await self.initialize_upstream_servers()
+            
+            # Set up tools
+            logger.info("Setting up tools from upstream servers...")
+            await self.setup_tools()
+            logger.info("Tool setup complete")
+            self.tools_registered = True
         
         logger.info(f"Starting MCP server with transport: {transport}")
         logger.info(f"Server: {self.name} on {self.host}:{self.port}")

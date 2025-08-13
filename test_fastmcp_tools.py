@@ -57,6 +57,21 @@ async def test_fastmcp_with_tools():
             print("   ❌ Initialize failed")
             return
         
+        # Step 1.5: Send initialized notification (required by MCP protocol)
+        await client.post(
+            "http://localhost:3001/mcp",
+            json={
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {}
+            },
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+                "MCP-Session-ID": session_id
+            }
+        )
+        
         # Step 2: List tools
         print("\n2. Listing tools...")
         response = await client.post(

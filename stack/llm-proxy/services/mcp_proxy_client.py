@@ -6,6 +6,7 @@ Used by the main LLM proxy service to avoid STDIO conflicts.
 """
 
 import asyncio
+import json
 import logging
 import httpx
 from typing import Any, Dict, List, Optional
@@ -35,41 +36,64 @@ class MCPProxyClient:
         
         for attempt in range(max_retries):
             try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    # Create a session
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    # Send request and get SSE response
                     response = await client.post(
                         f"{self.mcp_server_url}/mcp",
-                        json={},
-                        headers={"Content-Type": "application/json"}
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        self.session_id = data.get("sessionId")
-                        
-                        # Initialize the session
-                        init_response = await client.post(
-                            f"{self.mcp_server_url}/mcp",
-                            json={
-                                "jsonrpc": "2.0",
-                                "method": "initialize",
-                                "params": {
-                                    "protocolVersion": "2025-06-18",
-                                    "capabilities": {},
-                                    "clientInfo": {
-                                        "name": "llm-proxy-client",
-                                        "version": "1.0.0"
-                                    }
-                                },
-                                "id": 1
+                        json={
+                            "jsonrpc": "2.0",
+                            "method": "initialize",
+                            "params": {
+                                "protocolVersion": "2025-03-26",
+                                "capabilities": {},
+                                "clientInfo": {
+                                    "name": "llm-proxy-client",
+                                    "version": "1.0.0"
+                                }
                             },
-                            headers={
-                                "Content-Type": "application/json",
-                                "X-Session-Id": self.session_id
-                            }
-                        )
+                            "id": 1
+                        },
+                        headers={
+                            "Content-Type": "application/json",
+                            "Accept": "application/json, text/event-stream"
+                        }
+                    )
+                    
+                    if response.status_code == 200:
+                        # httpx automatically buffers the entire response for SSE
+                        # The content is available in response.content
+                        full_response = response.content.decode('utf-8')
                         
-                        if init_response.status_code == 200:
-                            # List tools
+                        # Always log for debugging MCP issues  
+                        logger.info(f"MCP init response length: {len(full_response)}, starts with: {repr(full_response[:100])}")
+                        if not full_response:
+                            logger.error("Response was empty even after reading stream!")
+                        
+                        # Parse SSE response
+                        data = {}
+                        if "event: message" in full_response:
+                            # Extract JSON from SSE data format  
+                            # Handle both \r\n and \n line endings
+                            lines = full_response.replace('\r\n', '\n').split('\n')
+                            for line in lines:
+                                if line.startswith("data: "):
+                                    json_str = line.replace("data: ", "").strip()
+                                    if json_str:
+                                        data = json.loads(json_str)
+                                        break
+                        elif full_response and full_response.strip():
+                            # Try direct JSON parsing
+                            data = json.loads(full_response.strip())
+                        
+                        if not data:
+                            logger.error(f"No data parsed from response: {repr(full_response[:200])}")
+                        
+                        # Check if initialization was successful
+                        if "result" in data:
+                            # Extract session ID from response headers
+                            self.session_id = response.headers.get("x-session-id") or response.headers.get("mcp-session-id")
+                                
+                                # List tools
                             tools_response = await client.post(
                                 f"{self.mcp_server_url}/mcp",
                                 json={
@@ -80,12 +104,32 @@ class MCPProxyClient:
                                 },
                                 headers={
                                     "Content-Type": "application/json",
+                                    "Accept": "application/json, text/event-stream",
                                     "X-Session-Id": self.session_id
                                 }
                             )
-                            
+                                
                             if tools_response.status_code == 200:
-                                result = tools_response.json()
+                                # Parse tools response - handle SSE
+                                tools_text = tools_response.content.decode('utf-8')
+                                
+                                logger.info(f"MCP tools response length: {len(tools_text)}")
+                                
+                                result = {}
+                                if "event: message" in tools_text:
+                                    # Extract JSON from SSE data format
+                                    # Handle both \r\n and \n line endings
+                                    lines = tools_text.replace('\r\n', '\n').split('\n')
+                                    for line in lines:
+                                        if line.startswith("data: "):
+                                            tools_json_str = line.replace("data: ", "").strip()
+                                            if tools_json_str:
+                                                result = json.loads(tools_json_str)
+                                                break
+                                elif tools_text and tools_text.strip():
+                                    # Try direct JSON parsing
+                                    result = json.loads(tools_text.strip())
+                                
                                 mcp_tools = result.get("result", {}).get("tools", [])
                                 
                                 # Convert MCP format to internal format
@@ -110,7 +154,7 @@ class MCPProxyClient:
                             else:
                                 logger.error(f"Failed to list tools: {tools_response.status_code}")
                         else:
-                            logger.error(f"Failed to initialize session: {init_response.status_code}")
+                            logger.error(f"Failed to initialize: no result in response")
                     else:
                         logger.error(f"Failed to create session: {response.status_code}")
                         
@@ -153,12 +197,27 @@ class MCPProxyClient:
                     },
                     headers={
                         "Content-Type": "application/json",
+                        "Accept": "application/json, text/event-stream",
                         "X-Session-Id": self.session_id
                     }
                 )
                 
                 if response.status_code == 200:
-                    result = response.json()
+                    # Parse SSE response for tool execution
+                    response_text = response.text
+                    
+                    if "event: message" in response_text:
+                        # Extract JSON from SSE data format
+                        lines = response_text.split('\n')
+                        for line in lines:
+                            if line.startswith("data: "):
+                                json_str = line.replace("data: ", "").strip()
+                                if json_str:
+                                    result = json.loads(json_str)
+                                    break
+                    else:
+                        # Try direct JSON parsing
+                        result = json.loads(response_text) if response_text else {}
                     if "result" in result:
                         content = result["result"].get("content", [])
                         # Extract text from content array

@@ -189,7 +189,14 @@ class MultiLLMService:
             if not os.getenv("OPENAI_API_KEY")
             else "openai/gpt-4o"
         )
-        self.model = model or os.getenv("DEFAULT_LLM_MODEL_NAME", default_model)
+        model = model or os.getenv("DEFAULT_LLM_MODEL_NAME", default_model)
+        
+        # If model doesn't have a provider prefix (no '/'), default to ollama
+        if "/" not in model:
+            model = f"ollama/{model}"
+            logger.info("No provider specified for initial model, defaulting to ollama: %s", model)
+        
+        self.model = model
         self.timeout = timeout
         self.semaphore = asyncio.Semaphore(max_concurrent)
 
@@ -215,6 +222,11 @@ class MultiLLMService:
 
     def set_model(self, model: str) -> None:
         """Update the current model."""
+        # If model doesn't have a provider prefix (no '/'), default to ollama
+        if "/" not in model:
+            model = f"ollama/{model}"
+            logger.info("No provider specified, defaulting to ollama: %s", model)
+        
         logger.info("Setting model to: %s", model)
         self.model = model
         self._prepare_env()

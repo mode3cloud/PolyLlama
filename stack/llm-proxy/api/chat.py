@@ -147,6 +147,7 @@ def _convert_messages_to_dict(
 def _setup_model(request: ChatCompletionRequest, llm_service):
     """Set up the model from request or use default."""
     if request.model:
+        # The set_model method will handle adding ollama/ prefix if needed
         llm_service.set_model(request.model)
     else:
         logger.warning("No model specified in request, using default model")
@@ -324,7 +325,8 @@ async def chat_completion(request: ChatCompletionRequest, req: Request):
         logger.debug(f"Request has {len(request.messages)} messages")
 
         # Check if model supports vision
-        model_name = request.model or llm_service.model
+        # Use the llm_service.model which has the provider prefix added if needed
+        model_name = llm_service.model
         supports_vision = await _check_vision_support(model_name, llm_service)
 
         logger.info(f"Model {model_name} supports vision: {supports_vision}")
@@ -454,7 +456,8 @@ async def chat_completion_audio(request: ChatCompletionRequest, req: Request):
         )
 
         # Check if model supports vision
-        model_name = request.model or llm_service.model
+        # Use the llm_service.model which has the provider prefix added if needed
+        model_name = llm_service.model
         supports_vision = await _check_vision_support(model_name, llm_service)
 
         # Convert pydantic messages to dict format

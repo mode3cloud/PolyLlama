@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
 
   try {
     // Get sessions from LLM proxy
-    const response = await fetch('http://llm-proxy:11435/api/sessions', {
+    const response = await fetch('http://router:11434/api/sessions', {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -61,7 +61,7 @@ export async function DELETE(request: NextRequest) {
     }
 
     // Delete session via LLM proxy
-    const response = await fetch(`http://llm-proxy:11435/api/sessions/${sessionId}`, {
+    const response = await fetch(`http://router:11434/api/sessions/${sessionId}`, {
       method: 'DELETE',
       headers: {
         'Content-Type': 'application/json',

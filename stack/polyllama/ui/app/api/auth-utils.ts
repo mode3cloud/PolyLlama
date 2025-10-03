@@ -7,6 +7,17 @@ interface AuthUser {
 }
 
 export function verifyAuth(request: NextRequest): { valid: boolean; user?: AuthUser } {
+  // Development mode bypass
+  if (process.env.SKIP_AUTH === 'true') {
+    return {
+      valid: true,
+      user: {
+        email: 'dev@mode3.ai',
+        name: 'Developer'
+      }
+    }
+  }
+
   const token = request.cookies.get('auth_token_server')?.value
 
   if (!token) {

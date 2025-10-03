@@ -85,7 +85,7 @@ Be helpful and use tools when appropriate to provide comprehensive assistance.`
     }
 
     // Proxy to LLM proxy service with tool support
-    const response = await fetch('http://llm-proxy:11435/api/chat/completions', {
+    const response = await fetch('http://router:11434/v1/chat/completions', {
       method: 'POST',
       headers,
       body: JSON.stringify(llmRequest),

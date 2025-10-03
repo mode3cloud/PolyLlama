@@ -21,7 +21,8 @@ export async function proxyToLLM(
     }
   }
   
-  const url = `http://llm-proxy:11435${endpoint}`
+  // Use the unified router instead of llm-proxy
+  const url = `http://router:11434${endpoint}`
   
   const headers: Record<string, string> = {
     'Accept': 'application/json',

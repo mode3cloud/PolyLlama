@@ -80,6 +80,9 @@ async def _check_vision_support(model_name: str, llm_service) -> bool:
     # For Ollama models, use our capability check
     if model_name.startswith("ollama/"):
         supports_vision = await llm_service.check_ollama_vision_support(model_name)
+    # For LM Studio models, use our capability check
+    elif model_name.startswith("lmstudio/"):
+        supports_vision = await llm_service.check_lmstudio_vision_support(model_name)
     else:
         try:
             supports_vision = litellm.supports_vision(model_name)  # type: ignore

@@ -1,8 +1,8 @@
 # Define shared memory zones for Lua modules to cache mappings
 lua_shared_dict model_mappings 10m;
 
-# Add Lua module path for model_router
-lua_package_path "/usr/local/openresty/lualib/?.lua;;";
+# Add Lua module path for model_router and provider_router
+lua_package_path "/usr/local/openresty/lualib/?.lua;/etc/nginx/?.lua;/etc/nginx/lua/?.lua;;";
 
 # Create a shared dictionary to store environment variables
 lua_shared_dict env_vars 1m;
@@ -443,109 +443,377 @@ server {
         }
     }
 
-    # OpenAI-compatible models endpoint
-    location /v1/models {
-        access_by_lua_block {
-            check_api_auth()
-        }
-        proxy_pass http://polyllama_backend/v1/models;
-        include /etc/nginx/proxy_params.conf;
-        
-        # Add header to indicate which instance served this request
-        header_filter_by_lua_block {
-            ngx.header["X-Served-By"] = "load_balancer"
+    # =====================================================
+    # Session Management Endpoints
+    # =====================================================
+
+    # Get all sessions
+    location = /api/sessions {
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local session_manager = require "session_manager"
+
+            -- Only allow GET method
+            if ngx.req.get_method() ~= "GET" then
+                ngx.status = 405
+                ngx.say(cjson.encode({error = "Method not allowed"}))
+                return
+            end
+
+            local sessions, err = session_manager.get_all_sessions()
+            if not sessions then
+                ngx.status = 500
+                ngx.say(cjson.encode({error = "Failed to get sessions: " .. (err or "unknown error")}))
+                return
+            end
+
+            ngx.say(cjson.encode(sessions))
         }
     }
 
-    # OpenAI-compatible chat completions endpoint
-    location = /v1/chat/completions {
-        set $target_instance "";
-        
-        # First access and buffer the request body
-        rewrite_by_lua_block {
-            check_api_auth()
-            -- Force reading the request body
-            ngx.req.read_body()
-            
-            local model_router = require "model_router"
+    # Session CRUD operations
+    location ~ ^/api/sessions/([^/]+)$ {
+        set $session_id $1;
+
+        content_by_lua_block {
             local cjson = require "cjson"
-            
-            -- Extract model name from request using the model_router function
-            -- This ensures consistent model name extraction and handles prefixes
-            local model_name = model_router.extract_model_name()
-            
-            if model_name then
-                -- Check if model is running on any instance
-                local running_instance = model_router.is_model_running_on_any_instance(model_name)
-                if running_instance then
-                    ngx.log(ngx.INFO, "Model " .. model_name .. " is already running on " .. running_instance)
-                    model_router.set_model_mapping(model_name, running_instance, true)
-                    ngx.var.target_instance = running_instance
-                    ngx.ctx.target_instance = running_instance
-                else
-                    -- Model is not running, need to assign it to the least loaded instance
-                    ngx.log(ngx.INFO, "Model " .. model_name .. " is not running on any instance")
-                    local instance = model_router.get_instance_for_model(model_name)
-                    
-                    -- If no mapping exists, create one
-                    if not instance then
-                        ngx.log(ngx.INFO, "No mapping found for model: " .. model_name .. ". Will route to least loaded instance.")
-                        instance = model_router.assign_model_to_least_loaded_instance(model_name)
-                        
-                        -- Acquire a loading lock if necessary
-                        local lock_acquired, existing_loader = model_router.lock_model_loading(model_name, instance)
-                        
-                        if not lock_acquired and existing_loader then
-                            -- Model is being loaded by another instance, use that one
-                            ngx.log(ngx.INFO, "Model " .. model_name .. " is being loaded by " .. existing_loader)
-                            instance = existing_loader
-                        end
-                    end
-                    
-                    if instance then
-                        ngx.var.target_instance = instance
-                        ngx.ctx.target_instance = instance
-                        ngx.log(ngx.INFO, "Assigned model " .. model_name .. " to instance " .. instance)
-                    else
-                        ngx.log(ngx.ERR, "Failed to assign instance for model: " .. model_name)
+            local session_manager = require "session_manager"
+            local method = ngx.req.get_method()
+
+            if method == "GET" then
+                -- Get specific session
+                local session, err = session_manager.get_session(ngx.var.session_id)
+                if not session then
+                    ngx.status = 404
+                    ngx.say(cjson.encode({error = "Session not found: " .. (err or "unknown error")}))
+                    return
+                end
+
+                ngx.say(cjson.encode(session))
+
+            elseif method == "PUT" or method == "POST" then
+                -- Update session
+                ngx.req.read_body()
+                local body = ngx.req.get_body_data()
+                local data = {}
+
+                if body then
+                    local success, parsed = pcall(cjson.decode, body)
+                    if success then
+                        data = parsed
                     end
                 end
+
+                local session, err = session_manager.update_session(ngx.var.session_id, data)
+                if not session then
+                    ngx.status = 500
+                    ngx.say(cjson.encode({error = "Failed to update session: " .. (err or "unknown error")}))
+                    return
+                end
+
+                ngx.say(cjson.encode(session))
+
+            elseif method == "DELETE" then
+                -- Delete session
+                local success, err = session_manager.delete_session(ngx.var.session_id)
+                if not success then
+                    ngx.status = 500
+                    ngx.say(cjson.encode({error = "Failed to delete session: " .. (err or "unknown error")}))
+                    return
+                end
+
+                ngx.status = 204
+                ngx.exit(204)
+
             else
-                ngx.log(ngx.WARN, "Could not extract model name from request")
+                ngx.status = 405
+                ngx.say(cjson.encode({error = "Method not allowed"}))
             end
         }
-        
+    }
+
+    # Tool selection for sessions
+    location ~ ^/api/sessions/([^/]+)/tools$ {
+        set $session_id $1;
+
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local session_manager = require "session_manager"
+            local method = ngx.req.get_method()
+
+            if method == "GET" then
+                -- Get tool selection
+                local tools, err = session_manager.get_tool_selection(ngx.var.session_id)
+                if not tools then
+                    ngx.status = 500
+                    ngx.say(cjson.encode({error = "Failed to get tool selection: " .. (err or "unknown error")}))
+                    return
+                end
+
+                ngx.say(cjson.encode(tools))
+
+            elseif method == "PUT" or method == "POST" then
+                -- Update tool selection
+                ngx.req.read_body()
+                local body = ngx.req.get_body_data()
+                local selected_tools = {}
+
+                if body then
+                    local success, parsed = pcall(cjson.decode, body)
+                    if success and parsed.selected_tools then
+                        selected_tools = parsed.selected_tools
+                    end
+                end
+
+                local result, err = session_manager.update_tool_selection(ngx.var.session_id, selected_tools)
+                if not result then
+                    ngx.status = 500
+                    ngx.say(cjson.encode({error = "Failed to update tool selection: " .. (err or "unknown error")}))
+                    return
+                end
+
+                ngx.say(cjson.encode(result))
+
+            else
+                ngx.status = 405
+                ngx.say(cjson.encode({error = "Method not allowed"}))
+            end
+        }
+    }
+
+    # =====================================================
+    # MCP Tool Integration Endpoints
+    # =====================================================
+
+    # MCP status endpoint
+    location = /api/mcp/status {
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local mcp_manager = require "mcp_manager"
+
+            local status = mcp_manager.get_status()
+            ngx.say(cjson.encode(status))
+        }
+    }
+
+    # MCP tools discovery
+    location = /api/mcp/tools {
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local mcp_manager = require "mcp_manager"
+
+            local tools = mcp_manager.get_tools()
+            ngx.say(cjson.encode(tools))
+        }
+    }
+
+    # MCP formatted tools (OpenAI-compatible)
+    location = /api/mcp/tools/formatted {
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local mcp_manager = require "mcp_manager"
+
+            local tools = mcp_manager.get_formatted_tools()
+            ngx.say(cjson.encode(tools))
+        }
+    }
+
+    # MCP tool execution
+    location = /api/mcp/execute {
+        content_by_lua_block {
+            local cjson = require "cjson"
+            local mcp_manager = require "mcp_manager"
+
+            ngx.req.read_body()
+            local body = ngx.req.get_body_data()
+
+            if not body then
+                ngx.status = 400
+                ngx.say(cjson.encode({error = "Missing request body"}))
+                return
+            end
+
+            local success, data = pcall(cjson.decode, body)
+            if not success then
+                ngx.status = 400
+                ngx.say(cjson.encode({error = "Invalid JSON"}))
+                return
+            end
+
+            if not data.tool_name then
+                ngx.status = 400
+                ngx.say(cjson.encode({error = "Missing tool_name"}))
+                return
+            end
+
+            local result = mcp_manager.execute_tool(data.tool_name, data.arguments)
+
+            if not result.success then
+                ngx.status = 500
+            end
+
+            ngx.say(cjson.encode(result))
+        }
+    }
+
+    # =====================================================
+    # SSE (Server-Sent Events) Endpoint for MCP
+    # =====================================================
+    
+    # SSE endpoint for real-time MCP communication
+    location = /sse {
+        # Check API authentication
         access_by_lua_block {
-            -- Make sure target_instance persists between phases
-            if ngx.ctx.target_instance and ngx.ctx.target_instance ~= "" then
+            check_api_auth()
+        }
+
+        # Enable SSE streaming
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Cache-Control "no-cache";
+        proxy_set_header X-Accel-Buffering "no";
+
+        # Proxy to MCP Bridge SSE endpoint
+        proxy_pass http://mcp-bridge:3001/sse;
+        
+        # SSE-specific headers
+        proxy_set_header Accept "text/event-stream";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $host;
+        
+        # Disable buffering for real-time streaming
+        proxy_buffering off;
+        proxy_cache off;
+        
+        # Long timeout for persistent SSE connections
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
+        
+        # Log SSE connections
+        access_log /var/log/nginx/sse_access.log;
+        error_log /var/log/nginx/sse_error.log info;
+    }
+    
+    # MCP protocol endpoint for streamable HTTP transport
+    location = /mcp {
+        # Check API authentication
+        access_by_lua_block {
+            check_api_auth()
+        }
+        
+        # Enable streaming for MCP protocol
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Cache-Control "no-cache";
+        proxy_set_header X-Accel-Buffering "no";
+        
+        # Proxy to MCP Bridge
+        proxy_pass http://mcp-bridge:3001/mcp;
+        
+        # MCP protocol headers
+        proxy_set_header Accept "application/json, text/event-stream";
+        proxy_set_header Content-Type "application/json";
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Host $host;
+        
+        # Disable buffering for streaming
+        proxy_buffering off;
+        proxy_cache off;
+        
+        # Timeout settings for long-running operations
+        proxy_read_timeout 600s;
+        proxy_send_timeout 600s;
+        proxy_connect_timeout 30s;
+    }
+
+    # OpenAI-compatible models endpoint
+
+    # Unified OpenAI-compatible chat completions endpoint for all providers
+    location = /v1/chat/completions {
+        set $target_instance "";
+        set $provider "";
+        set $api_base "";
+        set $api_key "";
+        set $model_name "";
+
+        # Route request based on provider
+        rewrite_by_lua_block {
+            check_api_auth()
+            local provider_router = require "provider_router"
+            provider_router.route_request()
+        }
+
+        # Persist variables between phases
+        access_by_lua_block {
+            if ngx.var.provider == "ollama" and ngx.ctx.target_instance then
                 ngx.var.target_instance = ngx.ctx.target_instance
             end
         }
-        
-        # Determine the proxy_pass URL in the content phase
+
+        # Route to appropriate backend
         content_by_lua_block {
-            -- Use the specific target instance
-            local target = ngx.var.target_instance
-            ngx.log(ngx.INFO, "OpenAI endpoint - target_instance: " .. (target or "nil"))
-            
-            if target and target ~= "" then
-                -- Use internal location to proxy
-                return ngx.exec("@proxy_v1_to_target")
+            local provider = ngx.var.provider
+
+            if provider == "ollama" then
+                local target = ngx.var.target_instance
+                if target and target ~= "" then
+                    return ngx.exec("@proxy_v1_to_ollama")
+                else
+                    ngx.status = 503
+                    ngx.say('{"error": "No Ollama instance available"}')
+                    return ngx.exit(503)
+                end
             else
-                ngx.log(ngx.ERR, "No target instance available, returning error")
-                ngx.status = 500
-                ngx.say("Error: Unable to determine target instance for model")
-                return ngx.exit(500)
+                -- Route to external provider
+                return ngx.exec("@proxy_to_provider")
             end
         }
     }
 
-    # Internal location for proxying v1 requests
-    location @proxy_v1_to_target {
+    # Unified models endpoint - lists models from all providers
+    location = /v1/models {
+        default_type application/json;
+
+        content_by_lua_block {
+            check_api_auth()
+            local cjson = require "cjson"
+            local provider_router = require "provider_router"
+
+            -- Get models from all providers
+            local all_models = provider_router.get_all_models()
+
+            -- Format response in OpenAI-compatible format
+            local response = {
+                object = "list",
+                data = {}
+            }
+
+            if all_models and all_models.models then
+                for _, model in ipairs(all_models.models) do
+                    table.insert(response.data, {
+                        id = model.id or model.name,
+                        object = "model",
+                        owned_by = model.provider or "unknown",
+                        created = os.time(),
+                        permission = {}
+                    })
+                end
+            end
+
+            ngx.say(cjson.encode(response))
+        }
+    }
+
+    # Internal location for proxying v1 requests to Ollama
+    location @proxy_v1_to_ollama {
         internal;
         proxy_pass http://$target_instance:11434/v1/chat/completions;
         include /etc/nginx/proxy_params.conf;
-        
+
         # Add header to indicate which instance served this request
         header_filter_by_lua_block {
             if ngx.var.target_instance and ngx.var.target_instance ~= "" then
@@ -553,19 +821,81 @@ server {
             end
         }
     }
-    
-    # Catch-all for other OpenAI-compatible endpoints
+
+    # Internal location for proxying to external providers
+    location @proxy_to_provider {
+        internal;
+
+        # Set authorization header if API key is provided
+        set_by_lua_block $auth_header {
+            local api_key = ngx.var.api_key
+            if api_key and api_key ~= "" then
+                return "Bearer " .. api_key
+            end
+            return ""
+        }
+
+        # Set custom headers for specific providers
+        header_filter_by_lua_block {
+            ngx.header["X-Routed-Through"] = "polyllama-unified"
+            ngx.header["X-Provider"] = ngx.var.provider
+        }
+
+        # Add authorization and other headers
+        proxy_set_header Authorization $auth_header;
+        proxy_set_header Content-Type "application/json";
+
+        # Add provider-specific headers
+        set_by_lua_block $anthropic_version {
+            if ngx.var.provider == "anthropic" then
+                return "2023-06-01"
+            end
+            return ""
+        }
+
+        proxy_set_header anthropic-version $anthropic_version;
+
+        # Build the full URL dynamically
+        set_by_lua_block $provider_url {
+            local api_base = ngx.var.api_base
+            local uri = ngx.var.request_uri
+
+            -- For now, just append /chat/completions for OpenAI-compatible endpoints
+            -- In a full implementation, would handle different endpoint patterns
+            return api_base .. "/chat/completions"
+        }
+
+        proxy_pass $provider_url;
+
+        # Standard proxy parameters
+        proxy_http_version 1.1;
+        proxy_set_header Host $proxy_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Timeouts for external providers
+        proxy_connect_timeout 30s;
+        proxy_send_timeout 120s;
+        proxy_read_timeout 120s;
+
+        # Buffering
+        proxy_buffering off;
+        proxy_request_buffering off;
+    }
+
+    # Catch-all for other OpenAI-compatible v1 endpoints (fallback to Ollama)
     location ~ ^/v1/(.*)$ {
         set $v1_endpoint $1;
-        
+
         access_by_lua_block {
             check_api_auth()
         }
-        
+
         # For now, use simple load balancing for other v1 endpoints
         proxy_pass http://polyllama_backend/v1/$v1_endpoint;
         include /etc/nginx/proxy_params.conf;
-        
+
         # Add header to indicate which instance served this request
         header_filter_by_lua_block {
             ngx.header["X-Served-By"] = "load_balancer"
@@ -1426,6 +1756,55 @@ server {
             -- Return response body
             ngx.say(res.body)
         }
+    }
+
+    # Internal location for proxying to external providers
+    location @proxy_to_provider {
+        internal;
+
+        # Set up proxy based on provider type
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Add API key if configured
+        set_by_lua_block $auth_header {
+            local provider = ngx.var.provider
+            local api_key = ngx.var.api_key
+
+            if api_key and api_key ~= "" then
+                if provider == "anthropic" then
+                    return "x-api-key: " .. api_key
+                else
+                    return "Bearer " .. api_key
+                end
+            end
+            return ""
+        }
+
+        proxy_set_header Authorization $auth_header;
+
+        # Add provider-specific headers
+        header_filter_by_lua_block {
+            if ngx.ctx.extra_headers then
+                for k, v in pairs(ngx.ctx.extra_headers) do
+                    ngx.header[k] = v
+                end
+            end
+        }
+
+        # Proxy to the provider
+        proxy_pass $api_base$request_uri;
+        proxy_buffering off;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+
+        # Streaming support
+        proxy_set_header Accept "text/event-stream";
+        proxy_cache off;
+        proxy_read_timeout 86400s;
+        proxy_send_timeout 86400s;
     }
 
 }

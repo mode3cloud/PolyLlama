@@ -61,6 +61,9 @@ COPY --from=dev-deps /app/node_modules /app/node_modules
 # Copy nginx configs
 COPY proxy_params.conf /etc/nginx/proxy_params.conf
 COPY model_router.lua /etc/nginx/model_router.lua
+COPY provider_router.lua /etc/nginx/provider_router.lua
+COPY session_manager.lua /etc/nginx/session_manager.lua
+COPY mcp_manager.lua /etc/nginx/mcp_manager.lua
 
 # Copy supervisord config for development
 COPY supervisord-dev.conf /etc/supervisor/conf.d/supervisord.conf
@@ -94,6 +97,9 @@ RUN mkdir -p /app/public
 # Copy nginx configs
 COPY proxy_params.conf /etc/nginx/proxy_params.conf
 COPY model_router.lua /etc/nginx/model_router.lua
+COPY provider_router.lua /etc/nginx/provider_router.lua
+COPY session_manager.lua /etc/nginx/session_manager.lua
+COPY mcp_manager.lua /etc/nginx/mcp_manager.lua
 
 # Copy supervisord config for production
 COPY supervisord-prod.conf /etc/supervisor/conf.d/supervisord.conf

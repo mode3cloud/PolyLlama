@@ -70,7 +70,7 @@ Keep responses concise and professional.`
     }
 
     // Proxy to LLM proxy service
-    const response = await fetch('http://llm-proxy:11435/api/chat/completions', {
+    const response = await fetch('http://router:11434/v1/chat/completions', {
       method: 'POST',
       headers,
       body: JSON.stringify(llmRequest),

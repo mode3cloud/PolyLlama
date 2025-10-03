@@ -18,7 +18,7 @@ export async function GET(
     const { sessionId } = await params
 
     // Get session messages from LLM proxy
-    const response = await fetch(`http://llm-proxy:11435/api/sessions/${sessionId}`, {
+    const response = await fetch(`http://router:11434/api/sessions/${sessionId}`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -62,7 +62,7 @@ export async function PUT(
     const body = await request.json()
 
     // Update session messages in LLM proxy
-    const response = await fetch(`http://llm-proxy:11435/api/sessions/${sessionId}`, {
+    const response = await fetch(`http://router:11434/api/sessions/${sessionId}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',

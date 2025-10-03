@@ -190,11 +190,16 @@ class MultiLLMService:
             else "openai/gpt-4o"
         )
         model = model or os.getenv("DEFAULT_LLM_MODEL_NAME", default_model)
-        
+
         # If model doesn't have a provider prefix (no '/'), default to ollama
         if "/" not in model:
-            model = f"ollama/{model}"
-            logger.info("No provider specified for initial model, defaulting to ollama: %s", model)
+            # Check if LM Studio is available and use it as default if so
+            if os.getenv("LMSTUDIO_API_BASE"):
+                model = f"lmstudio/{model}"
+                logger.info("No provider specified, defaulting to lmstudio: %s", model)
+            else:
+                model = f"ollama/{model}"
+                logger.info("No provider specified for initial model, defaulting to ollama: %s", model)
         
         self.model = model
         self.timeout = timeout
@@ -222,11 +227,16 @@ class MultiLLMService:
 
     def set_model(self, model: str) -> None:
         """Update the current model."""
-        # If model doesn't have a provider prefix (no '/'), default to ollama
+        # If model doesn't have a provider prefix (no '/'), default to ollama or lmstudio
         if "/" not in model:
-            model = f"ollama/{model}"
-            logger.info("No provider specified, defaulting to ollama: %s", model)
-        
+            # Check if LM Studio is available and use it as default if so
+            if os.getenv("LMSTUDIO_API_BASE"):
+                model = f"lmstudio/{model}"
+                logger.info("No provider specified, defaulting to lmstudio: %s", model)
+            else:
+                model = f"ollama/{model}"
+                logger.info("No provider specified, defaulting to ollama: %s", model)
+
         logger.info("Setting model to: %s", model)
         self.model = model
         self._prepare_env()
@@ -466,7 +476,7 @@ class MultiLLMService:
                 )
 
                 # Prepare completion arguments
-                # Use OpenAI-compatible endpoint for Ollama models
+                # Use OpenAI-compatible endpoint for Ollama and LM Studio models
                 model_for_litellm = self.model
                 api_base = None
                 if self.model.startswith("ollama/"):
@@ -479,6 +489,20 @@ class MultiLLMService:
                         "Using Ollama OpenAI-compatible endpoint for model: %s -> %s",
                         self.model,
                         model_for_litellm,
+                    )
+                elif self.model.startswith("lmstudio/"):
+                    # Use LM Studio's OpenAI-compatible endpoint
+                    # Convert lmstudio/model to openai/model with custom base URL
+                    model_name = self.model[9:]  # Remove "lmstudio/" prefix
+                    model_for_litellm = f"openai/{model_name}"
+                    # Use host.docker.internal to access LM Studio on the host machine
+                    lmstudio_base = os.getenv("LMSTUDIO_API_BASE", "http://host.docker.internal:9090")
+                    api_base = f"{lmstudio_base}/v1"
+                    logger.info(
+                        "Using LM Studio OpenAI-compatible endpoint for model: %s -> %s at %s",
+                        self.model,
+                        model_for_litellm,
+                        api_base,
                     )
 
                 completion_kwargs = {
@@ -529,6 +553,14 @@ class MultiLLMService:
                     # Also add Authorization header as OpenAI expects
                     completion_kwargs["extra_headers"] = {
                         "Authorization": f"Bearer {polyllama_key}"
+                    }
+
+                # Add API key for LM Studio if configured
+                lmstudio_key = os.getenv("LMSTUDIO_API_KEY")
+                if self.model.startswith("lmstudio/") and lmstudio_key:
+                    completion_kwargs["api_key"] = lmstudio_key
+                    completion_kwargs["extra_headers"] = {
+                        "Authorization": f"Bearer {lmstudio_key}"
                     }
 
                 # Log the request details
@@ -973,6 +1005,46 @@ class MultiLLMService:
         """Get available models from all providers or a specific provider."""
         models = []
 
+        if provider == "lmstudio" or provider is None:
+            # Get LM Studio models if configured
+            lmstudio_base = os.getenv("LMSTUDIO_API_BASE")
+            if lmstudio_base:
+                try:
+                    headers = {}
+                    # Add API key if configured
+                    lmstudio_key = os.getenv("LMSTUDIO_API_KEY")
+                    if lmstudio_key:
+                        headers["Authorization"] = f"Bearer {lmstudio_key}"
+
+                    # LM Studio uses OpenAI-compatible endpoint
+                    api_url = f"{lmstudio_base}/v1/models"
+                    if not lmstudio_base.startswith("http"):
+                        api_url = f"http://{lmstudio_base}/v1/models"
+
+                    async with httpx.AsyncClient(timeout=5.0) as client:
+                        response = await client.get(api_url, headers=headers)
+                        if response.status_code == 200:
+                            data = response.json()
+                            for model in data.get("data", []):
+                                model_id = model.get("id", "")
+                                if model_id:
+                                    models.append(
+                                        {
+                                            "id": f"lmstudio/{model_id}",
+                                            "name": model_id,
+                                            "provider": "lmstudio",
+                                            "created": model.get("created"),
+                                            "owned_by": model.get("owned_by", "lmstudio"),
+                                        }
+                                    )
+                            logger.info(f"Found {len(models)} LM Studio models")
+                        else:
+                            logger.warning(
+                                f"Failed to get LM Studio models: {response.status_code}"
+                            )
+                except Exception as e:
+                    logger.warning(f"Failed to get LM Studio models: {e}")
+
         if provider == "ollama" or provider is None:
             # Get Ollama models from PolyLlama router
             try:
@@ -1227,6 +1299,49 @@ class MultiLLMService:
             self._ollama_capabilities_cache[cache_key] = (result, False, time.time())
             return result
 
+    async def check_lmstudio_vision_support(self, model_id: str) -> bool:
+        """Check if an LM Studio model supports vision."""
+        if not model_id.startswith("lmstudio/"):
+            return False
+
+        # Check common vision model patterns
+        model_lower = model_id.lower()
+        vision_patterns = [
+            "vision",
+            "llava",
+            "bakllava",
+            "minicpm-v",
+            "phi-3-vision",
+            "qwen-vl",
+            "cogvlm",
+            "moondream",
+            "bunny",
+        ]
+        return any(pattern in model_lower for pattern in vision_patterns)
+
+    async def check_lmstudio_tools_support(self, model_id: str) -> bool:
+        """Check if an LM Studio model supports tools/function calling."""
+        if not model_id.startswith("lmstudio/"):
+            return False
+
+        # LM Studio generally supports function calling for compatible models
+        # Check common patterns that support tools
+        model_lower = model_id.lower()
+        tools_patterns = [
+            "gpt",
+            "claude",
+            "mistral",
+            "mixtral",
+            "gemma",
+            "llama-3",
+            "llama3",
+            "qwen",
+            "deepseek",
+            "command",
+            "hermes",
+        ]
+        return any(pattern in model_lower for pattern in tools_patterns)
+
     async def check_ollama_tools_support(self, model_id: str) -> bool:
         """Check if an Ollama model supports tools/function calling by calling /api/polyllama/model-details."""
         if not model_id.startswith("ollama/"):
@@ -1403,10 +1518,20 @@ class MultiLLMService:
             # Also set OLLAMA_API_KEY as litellm might check for this
             os.environ["OLLAMA_API_KEY"] = polyllama_key
 
+        # Set LM Studio base URL if configured
+        lmstudio_base = os.getenv("LMSTUDIO_API_BASE")
+        if lmstudio_base:
+            os.environ["LMSTUDIO_API_BASE"] = lmstudio_base
+            # Also set API key if configured
+            lmstudio_key = os.getenv("LMSTUDIO_API_KEY")
+            if lmstudio_key:
+                os.environ["LMSTUDIO_API_KEY"] = lmstudio_key
+
         logger.info(
-            "Environment variables set - OLLAMA_API_BASE: %s, OLLAMA_API_KEY: %s",
+            "Environment variables set - OLLAMA_API_BASE: %s, OLLAMA_API_KEY: %s, LMSTUDIO_API_BASE: %s",
             os.environ.get("OLLAMA_API_BASE"),
             "***" if os.environ.get("OLLAMA_API_KEY") else "not set",
+            os.environ.get("LMSTUDIO_API_BASE", "not set"),
         )
 
     async def close(self):
@@ -1501,13 +1626,19 @@ class MultiLLMService:
                 # Call the original method
                 response = await orig_acompletion(*args, **kwargs)
 
-                # If streaming and using Ollama (now through OpenAI endpoint), wrap the response to filter None values
+                # If streaming and using Ollama or LM Studio (now through OpenAI endpoint), wrap the response to filter None values
                 model = kwargs.get("model", "")
                 is_ollama = model.startswith("ollama") or (
                     model.startswith("openai/")
                     and kwargs.get("api_base", "").endswith("/v1")
+                    and "11434" in kwargs.get("api_base", "")
                 )
-                if kwargs.get("stream", False) and is_ollama:
+                is_lmstudio = model.startswith("lmstudio") or (
+                    model.startswith("openai/")
+                    and kwargs.get("api_base", "")
+                    and ("host.docker.internal" in kwargs.get("api_base", "") or "9090" in kwargs.get("api_base", ""))
+                )
+                if kwargs.get("stream", False) and (is_ollama or is_lmstudio):
                     # Check if response is async iterable
                     if hasattr(response, "__aiter__"):
 

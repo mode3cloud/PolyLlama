@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '../../../../auth-utils'
 
-const LLM_PROXY_URL = process.env.LLM_PROXY_URL || 'http://llm-proxy:11435'
+const LLM_PROXY_URL = process.env.LLM_PROXY_URL || 'http://router:11434'
 
 export async function GET(
   request: NextRequest,

@@ -43,7 +43,7 @@ export function verifyToken(token: string): TokenPayload | null {
   if (!JWT_SECRET) {
     return null;
   }
-  
+
   try {
     return jwt.verify(token, JWT_SECRET) as TokenPayload;
   } catch {

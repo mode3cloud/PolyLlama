@@ -53,6 +53,11 @@ async def get_models(request: Request, provider: Optional[str] = None):
                 model_info.supports_vision = (
                     await llm_service.check_ollama_vision_support(model_info.id)
                 )
+            elif model_info.id.startswith("lmstudio/"):
+                # For LM Studio models, check using pattern matching
+                model_info.supports_vision = (
+                    await llm_service.check_lmstudio_vision_support(model_info.id)
+                )
             else:
                 try:
                     model_info.supports_vision = litellm.supports_vision(model_info.id)  # type: ignore
@@ -78,6 +83,11 @@ async def get_models(request: Request, provider: Optional[str] = None):
                 # For Ollama models, fetch capabilities from /api/show
                 model_info.supports_tools = (
                     await llm_service.check_ollama_tools_support(model_info.id)
+                )
+            elif model_info.id.startswith("lmstudio/"):
+                # For LM Studio models, check using pattern matching
+                model_info.supports_tools = (
+                    await llm_service.check_lmstudio_tools_support(model_info.id)
                 )
             else:
                 try:

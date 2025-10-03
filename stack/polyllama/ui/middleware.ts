@@ -16,6 +16,20 @@ export function middleware(request: NextRequest) {
     return NextResponse.next()
   }
 
+  // Development mode bypass - skip auth if SKIP_AUTH is set
+  if (process.env.SKIP_AUTH === 'true') {
+    // Add fake user info for development
+    const requestHeaders = new Headers(request.headers)
+    requestHeaders.set('x-user-email', 'dev@mode3.ai')
+    requestHeaders.set('x-user-name', 'Developer')
+
+    return NextResponse.next({
+      request: {
+        headers: requestHeaders
+      }
+    })
+  }
+
   // Check for auth token
   const token = request.cookies.get('auth_token_server')?.value
 

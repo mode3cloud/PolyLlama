@@ -21,7 +21,7 @@ export async function POST(request: NextRequest) {
     }
     
     // Proxy to LLM proxy service's audio endpoint
-    const response = await fetch('http://llm-proxy:11435/api/chat/completions_audio', {
+    const response = await fetch('http://router:11434/v1/chat/completions_audio', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

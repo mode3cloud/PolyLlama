@@ -40,7 +40,7 @@ export async function GET(request: NextRequest) {
 
   try {
     // Proxy to LLM proxy service
-    const response = await fetch('http://llm-proxy:11435/api/models', {
+    const response = await fetch('http://router:11434/v1/models', {
       headers: {
         'Accept': 'application/json',
       },

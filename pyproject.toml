@@ -19,7 +19,7 @@ dependencies = [
     "pydantic>=2.5.0",
     "litellm==1.61.15",
     "httpx>=0.27.0",
-    "python-multipart==0.0.18",
+    "python-multipart==0.0.22",
     "neo4j==5.14.0",
     "mcp>=1.1.0",
     "fastmcp>=2.0.0",

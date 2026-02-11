@@ -32,7 +32,7 @@ export async function POST(request: NextRequest) {
     
     // Add API key if configured
     if (process.env.POLYLLAMA_API_KEY) {
-      headers['Authorization'] = `Bearer ${process.env.POLYLLAMA_API_KEY}`
+      headers['api-key'] = process.env.POLYLLAMA_API_KEY
     }
     
     const response = await fetch(url, {

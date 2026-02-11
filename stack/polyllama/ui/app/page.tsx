@@ -88,7 +88,7 @@ export default function Home() {
 
       if (modelsRes.ok) {
         const data = await modelsRes.json()
-        const models = data.models || []
+        const models = Array.isArray(data.models) ? data.models : []
         models.sort((a: Model, b: Model) => a.name.localeCompare(b.name))
         setAvailableModels(models)
       }

@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     }
     
     if (process.env.POLYLLAMA_API_KEY && body.model?.startsWith('ollama/')) {
-      headers['Authorization'] = `Bearer ${process.env.POLYLLAMA_API_KEY}`
+      headers['api-key'] = process.env.POLYLLAMA_API_KEY
     }
     
     // Proxy to LLM proxy service

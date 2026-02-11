@@ -66,7 +66,7 @@ Keep responses concise and professional.`
     }
     
     if (process.env.POLYLLAMA_API_KEY && model.startsWith('ollama/')) {
-      headers['Authorization'] = `Bearer ${process.env.POLYLLAMA_API_KEY}`
+      headers['api-key'] = process.env.POLYLLAMA_API_KEY
     }
 
     // Proxy to LLM proxy service

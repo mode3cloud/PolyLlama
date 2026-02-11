@@ -40,10 +40,17 @@ export async function GET(request: NextRequest) {
 
   try {
     // Proxy to LLM proxy service
+    const headers: Record<string, string> = {
+      'Accept': 'application/json',
+    }
+
+    // Add API key if configured
+    if (process.env.POLYLLAMA_API_KEY) {
+      headers['api-key'] = process.env.POLYLLAMA_API_KEY
+    }
+
     const response = await fetch('http://router:11434/v1/models', {
-      headers: {
-        'Accept': 'application/json',
-      },
+      headers,
     })
 
     if (!response.ok) {

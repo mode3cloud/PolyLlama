@@ -29,7 +29,7 @@ export default function SessionSidebar({ currentSessionId, onSessionSelect, onNe
       const response = await fetchWithAuth('/ui/api/chat/sessions')
       if (response.ok) {
         const data = await response.json()
-        setSessions(data.sessions || [])
+        setSessions(Array.isArray(data.sessions) ? data.sessions : [])
       }
     } catch (error) {
       console.error('Failed to fetch sessions:', error)

@@ -19,10 +19,10 @@ export async function GET(request: NextRequest) {
     const headers: Record<string, string> = {
       'Accept': 'application/json',
     }
-    
+
     // Add API key if configured
     if (process.env.POLYLLAMA_API_KEY) {
-      headers['Authorization'] = `Bearer ${process.env.POLYLLAMA_API_KEY}`
+      headers['api-key'] = process.env.POLYLLAMA_API_KEY
     }
     
     const response = await fetch(url, {

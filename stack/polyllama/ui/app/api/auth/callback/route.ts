@@ -1,7 +1,58 @@
-import { ConfidentialClientApplication } from "@azure/msal-node";
+import { ConfidentialClientApplication, INetworkModule } from "@azure/msal-node";
 import { NextRequest, NextResponse } from "next/server";
 import { createTokenPair } from "../../../lib/auth/jwt";
 import { getRedirectUri } from "../../../lib/auth/config";
+
+// Custom network client for Next.js API routes
+class NextJsNetworkClient implements INetworkModule {
+  async sendGetRequestAsync<T>(
+    url: string,
+    options?: any
+  ): Promise<T> {
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: options?.headers || {},
+    });
+
+    const body = await response.json();
+
+    // Return NetworkResponse structure expected by MSAL
+    return {
+      headers: Object.fromEntries(response.headers.entries()),
+      body,
+      status: response.status,
+    } as T;
+  }
+
+  async sendPostRequestAsync<T>(
+    url: string,
+    options?: any
+  ): Promise<T> {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        ...options?.headers,
+      },
+      body: options?.body,
+    });
+
+    const body = await response.json();
+
+    console.log('OAuth token response:', {
+      status: response.status,
+      error: body.error,
+      error_description: body.error_description,
+    });
+
+    // Return NetworkResponse structure expected by MSAL
+    return {
+      headers: Object.fromEntries(response.headers.entries()),
+      body,
+      status: response.status,
+    } as T;
+  }
+}
 
 export async function GET(req: NextRequest) {
   if (
@@ -42,6 +93,16 @@ export async function GET(req: NextRequest) {
       authority: `https://login.microsoftonline.com/${process.env.AZURE_AD_TENANT_ID}`,
       clientSecret: process.env.AZURE_AD_CLIENT_SECRET,
     },
+    system: {
+      loggerOptions: {
+        loggerCallback(loglevel: any, message: any, containsPii: any) {
+          console.log("[MSAL]", message);
+        },
+        piiLoggingEnabled: false,
+        logLevel: 3, // Verbose
+      },
+      networkClient: new NextJsNetworkClient(),
+    },
   };
 
   const pca = new ConfidentialClientApplication(msalConfig);
@@ -50,6 +111,12 @@ export async function GET(req: NextRequest) {
     scopes: ["user.read", "mail.read", "mail.readwrite", "mail.send"],
     redirectUri: getRedirectUri(baseDomain),
   };
+
+  console.log("Token request config:", {
+    authority: msalConfig.auth.authority,
+    redirectUri: tokenRequest.redirectUri,
+    scopes: tokenRequest.scopes,
+  });
 
   try {
     const response = await pca.acquireTokenByCode(tokenRequest);

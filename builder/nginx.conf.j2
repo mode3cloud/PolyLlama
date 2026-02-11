@@ -42,6 +42,43 @@ init_by_lua_block {
         env_vars:set("WEBHOOK_PROXY_API_KEY", webhook_api_key)
         ngx.log(ngx.INFO, "Webhook API key configured")
     end
+
+    -- Store external provider API keys for unified router
+    local openai_key = os.getenv("OPENAI_API_KEY")
+    if openai_key and openai_key ~= "" then
+        env_vars:set("OPENAI_API_KEY", openai_key)
+        ngx.log(ngx.INFO, "OpenAI API key configured")
+    end
+
+    local anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    if anthropic_key and anthropic_key ~= "" then
+        env_vars:set("ANTHROPIC_API_KEY", anthropic_key)
+        ngx.log(ngx.INFO, "Anthropic API key configured")
+    end
+
+    local google_key = os.getenv("GOOGLE_API_KEY")
+    if google_key and google_key ~= "" then
+        env_vars:set("GOOGLE_API_KEY", google_key)
+        ngx.log(ngx.INFO, "Google API key configured")
+    end
+
+    local groq_key = os.getenv("GROQ_API_KEY")
+    if groq_key and groq_key ~= "" then
+        env_vars:set("GROQ_API_KEY", groq_key)
+        ngx.log(ngx.INFO, "Groq API key configured")
+    end
+
+    local lmstudio_base = os.getenv("LMSTUDIO_API_BASE")
+    if lmstudio_base and lmstudio_base ~= "" then
+        env_vars:set("LMSTUDIO_API_BASE", lmstudio_base)
+        ngx.log(ngx.INFO, "LM Studio API base configured")
+    end
+
+    local lmstudio_key = os.getenv("LMSTUDIO_API_KEY")
+    if lmstudio_key and lmstudio_key ~= "" then
+        env_vars:set("LMSTUDIO_API_KEY", lmstudio_key)
+        ngx.log(ngx.INFO, "LM Studio API key configured")
+    end
 }
 
 # Start background timer in each worker to refresh model mappings
@@ -273,7 +310,8 @@ server {
     }
 
     # Proxy to Next.js app for UI - preserve the /ui path
-    location /ui {
+    # Use ^~ to ensure this takes precedence over /api/* locations
+    location ^~ /ui {
         proxy_pass http://127.0.0.1:3000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;

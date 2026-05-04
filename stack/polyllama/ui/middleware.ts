@@ -20,7 +20,7 @@ export function middleware(request: NextRequest) {
   if (process.env.SKIP_AUTH === 'true') {
     // Add fake user info for development
     const requestHeaders = new Headers(request.headers)
-    requestHeaders.set('x-user-email', 'dev@mode3.ai')
+    requestHeaders.set('x-user-email', 'dev@example.com')
     requestHeaders.set('x-user-name', 'Developer')
 
     return NextResponse.next({

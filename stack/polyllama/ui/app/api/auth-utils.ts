@@ -12,7 +12,7 @@ export function verifyAuth(request: NextRequest): { valid: boolean; user?: AuthU
     return {
       valid: true,
       user: {
-        email: 'dev@mode3.ai',
+        email: 'dev@example.com',
         name: 'Developer'
       }
     }

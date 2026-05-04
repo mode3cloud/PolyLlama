@@ -1,5 +1,38 @@
 # 🦙 PolyLlama
 
+> ## 📦 Archived — January 2026
+>
+> **PolyLlama is no longer actively maintained.** When this project started in mid-2025, orchestrating multi-GPU local LLM inference was painful: Ollama's multi-instance story was bare-bones, MCP was barely emerging, and getting a unified gateway across local + cloud providers meant gluing together half a dozen tools. PolyLlama solved that for me, and at peak it gave me near-frictionless personal access to a steady stream of bleeding-edge open-source models running at real scale on consumer-grade hardware (a homelab built around 3× RTX 4090s and an RTX 6000 Ada).
+>
+> Since then, the ecosystem has caught up — and overtaken:
+>
+> - **Ollama** has been heavily investing in cloud-served and hosted-model integration through their own tooling, blurring the line between local and remote inference and absorbing much of what a custom gateway used to be needed for.
+> - **MCP** has gone from experimental to broadly adopted, with mature server registries, transport standardization, and reference implementations across most major LLM clients.
+> - **Multi-GPU orchestration tooling** (vLLM, llama.cpp's RPC mode, LiteLLM, OpenRouter, Ollama's own scheduling improvements) has matured to the point where dynamic compose generation feels heavy compared to what's now off-the-shelf.
+>
+> The result: most of the friction PolyLlama solved is now solved better, by tools with more eyes on them and longer roadmaps. So I'm happily archiving this as **mission accomplished** — it absolutely succeeded at what I built it for.
+>
+> ### What I built, and what it taught me
+>
+> Across the lifetime of this project I learned (and now genuinely understand) a stack of things I'd previously only consumed as black boxes:
+>
+> - **MCP from the wire up** — implementing both client and server, with SSE *and* Streamable HTTP transports, JSON-RPC session management, tool discovery, and the proxy patterns needed to bridge between transports
+> - **Lua-based request routing inside OpenResty** — provider routing, model-to-instance mapping, session affinity, all running as a sidecar to the actual LLM backends
+> - **Dynamic Docker Compose generation from runtime hardware detection** via Jinja2 templates — `nvidia-smi` → GPU groups → per-instance compose services, generated fresh on every launch
+> - **GPU scheduling decisions** in practice, not just in theory: PCI bus ordering, `CUDA_VISIBLE_DEVICES` partitioning, mixed-tier GPU groups, CPU/GPU spillover routing
+> - **Real auth on a homelab service** — Azure AD via MSAL, JWT pair issuance, Next.js middleware gating, and the boring-but-essential dev-mode bypass patterns
+> - **Build-vs-buy intuition** for the LLM stack at a level I couldn't have gotten by just reading blog posts
+>
+> Most of all, I learned how fast this space moves. A project that solves a real problem in June can be obsolete by January, and that's not failure — that's the ecosystem working exactly as it should.
+>
+> The code stays public for anyone who wants to learn from the patterns. Issues and PRs are closed; the project is read-only from here on.
+>
+> > *"The beautiful thing about learning is that nobody can take it away from you."* — B.B. King
+>
+> — Omar McIver, January 2026
+
+---
+
 [![CI](https://github.com/mode3cloud/polyllama/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/mode3cloud/polyllama/actions/workflows/ci.yml)
 [![Coverage Report](https://img.shields.io/badge/coverage-report-brightgreen)](https://mode3cloud.github.io/PolyLlama/)
 
